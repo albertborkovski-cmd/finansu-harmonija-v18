@@ -1,0 +1,880 @@
+@import url("https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* The application provides its own password visibility control. Microsoft
+ * Edge also injects a native reveal button into password inputs, which would
+ * otherwise display a second eye beside the system icon. */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+  display: none;
+}
+
+/* Document and invoice previews keep the same information hierarchy as the
+ * editable copy form, but values read as document text rather than disabled
+ * form controls. */
+.document-view-plain .document-value-control,
+.document-view-plain div:has(> input[aria-label="GL account"]),
+.document-view-plain input[aria-label="GL account"] {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  color: #10233a !important;
+  cursor: default !important;
+  opacity: 1 !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  -webkit-text-fill-color: #10233a !important;
+}
+
+.document-view-plain .document-value-control > span,
+.document-view-plain input[aria-label="GL account"] {
+  color: #10233a !important;
+  -webkit-text-fill-color: #10233a !important;
+}
+
+.document-view-plain div:has(> input[aria-label="GL account"]) {
+  border-width: 0 !important;
+}
+
+.document-view-plain input[type="date"]::-webkit-calendar-picker-indicator {
+  display: none;
+}
+
+.document-view-plain textarea.document-value-control {
+  resize: none !important;
+}
+
+/*
+ * System-wide fallback for semantic HTML tables.
+ * Div-based OCR tables use the shared ResizeHandle component; native tables
+ * get the same browser drag behaviour so every data column can be widened or
+ * narrowed without changing the table's content.
+ */
+table th {
+  min-width: 60px;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  resize: horizontal;
+  position: relative;
+  vertical-align: top;
+  white-space: normal !important;
+  border-right: 0 !important;
+}
+
+/* Native tables that cannot render the React ResizeHandle still use the same
+ * single, subtle separator instead of browser-dependent or doubled borders. */
+table th:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  right: 0;
+  height: 18px;
+  width: 1px;
+  border-radius: 999px;
+  background: #d3e1ec;
+  pointer-events: none;
+}
+
+/*
+ * Unified data-table header typography.
+ *
+ * ResizeHandle and ColumnSortButton are the shared contracts used by every
+ * system table. Styling their direct header container here keeps every column
+ * title identical to the approved Automation processes / Name header and also
+ * makes the rule apply automatically to tables added in the future.
+ */
+table th,
+:where(div, span):has(> [data-column-resize-handle="true"]),
+:where(div, span):has(> button[data-button-family="column-sort"]) {
+  align-items: flex-start !important;
+  justify-content: flex-start !important;
+  column-gap: 6px !important;
+  color: #10233a !important;
+  font-family: "Montserrat", sans-serif !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  line-height: 18px !important;
+}
+
+:where(div, span):has(> [data-column-resize-handle="true"]) {
+  align-self: flex-start !important;
+  box-sizing: border-box !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  /* Match the approved Companies table: keep a clear air gap between the
+  * divider and the next column title without moving row data out of line. */
+  padding-right: 16px !important;
+  /* Keep the label and its sort/filter controls inside the resized column.
+   * A narrow column may wrap its title to two lines, but it must never paint
+   * through the neighbouring header. */
+  overflow: hidden !important;
+  border-left-width: 0 !important;
+  border-right-width: 0 !important;
+}
+
+/*
+ * Some legacy tables wrap the resizable header in one extra flex item while
+ * keeping the header row at 20 px. Align that wrapper to the row start so a
+ * two-line label is not vertically centred outside the clipped scroll area.
+ */
+:where(div, span):has(
+  > :where(div, span):has(> [data-column-resize-handle="true"])
+) {
+  align-self: flex-start !important;
+  min-height: 36px !important;
+  overflow: visible !important;
+}
+
+/*
+ * Legacy table headers use Tailwind's h-5 on the entire heading row. The row
+ * itself therefore stayed 20 px tall even after a wrapped label became 36 px,
+ * and the horizontal scroll viewport clipped the first line. Keep this rule
+ * marker-driven so it applies only to resizable table headers.
+ */
+.h-5:has([data-column-resize-handle="true"]) {
+  height: auto !important;
+  min-height: 36px !important;
+  align-items: flex-start !important;
+}
+
+/* The remaining legacy resizable tables use h-6/min-h-6 for their header.
+ * Give them the same 36 px system footprint as the shared OCR tables. */
+:where(.h-6, .min-h-6):has([data-column-resize-handle="true"]) {
+  box-sizing: border-box !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  max-height: 36px !important;
+}
+
+/*
+ * Stable table anchor.
+ *
+ * Every primary data grid starts its header and selection control from the
+ * same 12 px inset.  Screens may render a selector inside the first column or
+ * in its own small cell, but this contract keeps the selector at the same X/Y
+ * coordinate while navigating between menus.  Header names can change; their
+ * baseline and the table's leading edge do not.
+ */
+.system-table-header-row {
+  box-sizing: border-box !important;
+  min-height: 36px !important;
+  padding-left: 12px !important;
+  align-items: flex-start !important;
+  font-family: "Montserrat", sans-serif !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  line-height: 18px !important;
+  color: #10233a !important;
+}
+
+/* Grid tables already reserve a dedicated 42 px selection column. Adding the
+ * general 12 px table inset to the grid itself offsets every header from its
+ * row. Keep the inset inside the selection/data cells instead. */
+.system-table-header-row.grid {
+  padding-left: 0 !important;
+}
+
+.system-table-header-row > .system-table-select-cell {
+  box-sizing: border-box !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+/* Grid tables do not inherit the header row's 12 px leading inset. Their
+ * dedicated selector cell therefore needs the same inset as every data row;
+ * otherwise the header checkbox sits 12 px to the left of row checkboxes. */
+.system-table-header-row.grid > .system-table-select-cell {
+  padding-left: 12px !important;
+  padding-right: 12px !important;
+}
+
+.system-table-header-row button[role="checkbox"],
+.system-table-header-row
+  button[aria-pressed][class*="h-[18px]"][class*="w-[18px]"] {
+  align-self: flex-start !important;
+}
+
+.system-table-header-row :where(div, span):has(> button[role="checkbox"]),
+.system-table-header-row
+  :where(div, span):has(
+    > button[aria-pressed][class*="h-[18px]"][class*="w-[18px]"]
+  ) {
+  column-gap: 10px !important;
+}
+
+/* Selection controls in every table header align to the same top line as the
+ * first column label instead of being vertically centred 9 px lower.  The
+ * marker is intentionally placed on the selector cell (rather than matching
+ * every checkbox) so filter and form checkboxes keep their normal centring. */
+[data-table-header-select="true"] {
+  box-sizing: border-box !important;
+  align-self: flex-start !important;
+  align-items: flex-start !important;
+}
+
+/* The selector and every sibling header cell share one top baseline even on
+ * older screens whose header row used centre alignment or a taller cell. */
+:where(div, section):has(> [data-table-header-select="true"]) {
+  min-height: 36px !important;
+  align-items: flex-start !important;
+}
+
+:where(div, section):has(> [data-table-header-select="true"])
+  > :where(div, span) {
+  align-items: flex-start !important;
+}
+
+[data-table-header-select="true"]
+  :where(
+    button[role="checkbox"],
+    button[aria-label^="Select all"],
+    input[type="checkbox"]
+  ) {
+  align-self: flex-start !important;
+  margin-top: 0 !important;
+}
+
+.system-table-select-cell {
+  box-sizing: border-box !important;
+}
+
+:where(div, span):has(> [data-column-resize-handle="true"])
+  > :where(span, div):not([data-column-resize-handle]),
+:where(div, span):has(> button[data-button-family="column-sort"])
+  > :where(span, div) {
+  color: #10233a !important;
+  font-family: inherit !important;
+  font-size: inherit !important;
+  font-weight: inherit !important;
+  line-height: inherit !important;
+}
+
+:where(div, span):has(> [data-column-resize-handle="true"])
+  > span:not(:has(button)),
+:where(div, span):has(> button[data-button-family="column-sort"])
+  > span:not(:has(button)) {
+  flex: 0 1 auto !important;
+  min-width: 0 !important;
+  max-width: calc(100% - 20px) !important;
+  display: -webkit-box !important;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden !important;
+  overflow-wrap: anywhere !important;
+  word-break: normal !important;
+  text-overflow: clip !important;
+  white-space: normal !important;
+}
+
+button[data-button-family="column-sort"] {
+  align-self: flex-start !important;
+  flex: 0 0 14px !important;
+  margin-top: 1px !important;
+}
+
+/* Filters share the same protected footprint as the sorting control. When a
+ * title wraps, the icon stays within that column instead of overlapping the
+ * following title or resize separator. */
+:where(div, span):has(> [data-column-resize-handle="true"])
+  > button:not([role="checkbox"]):not([data-column-resize-handle]) {
+  align-self: flex-start !important;
+  flex-shrink: 0 !important;
+  max-width: 20px !important;
+  margin-top: 0 !important;
+}
+
+/*
+ * Unified table-selection control.
+ *
+ * Both the header selector and every row selector use the same geometry and
+ * baseline. Older screens mixed 4/6 px corners and start/center alignment,
+ * which made the checkbox jump when navigating between tables.
+ */
+:where(
+  button[role="checkbox"],
+  button[aria-pressed][class*="h-[18px]"][class*="w-[18px]"],
+  button[class*="h-[18px]"][class*="w-[18px]"][class*="rounded"]
+) {
+  box-sizing: border-box !important;
+  width: 18px !important;
+  min-width: 18px !important;
+  max-width: 18px !important;
+  height: 18px !important;
+  min-height: 18px !important;
+  max-height: 18px !important;
+  flex: 0 0 18px !important;
+  align-self: center !important;
+  justify-content: center !important;
+  padding: 0 !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  border-radius: 4px !important;
+}
+
+:where(div, span):has(
+  > :where(
+    button[role="checkbox"],
+    button[aria-pressed][class*="h-[18px]"][class*="w-[18px]"],
+    button[class*="h-[18px]"][class*="w-[18px]"][class*="rounded"]
+  )
+) {
+  align-items: center !important;
+  column-gap: 10px !important;
+}
+
+:where(
+    button[role="checkbox"],
+    button[aria-pressed][class*="h-[18px]"][class*="w-[18px]"],
+    button[class*="h-[18px]"][class*="w-[18px]"][class*="rounded"]
+  )
+  > svg {
+  width: 10px !important;
+  height: 8px !important;
+  flex: 0 0 auto !important;
+  stroke-width: 1.5 !important;
+}
+
+/* Native table checkboxes follow the same footprint where legacy screens
+ * still use an input instead of the shared button component. */
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  box-sizing: border-box;
+  width: 18px;
+  min-width: 18px;
+  max-width: 18px;
+  height: 18px;
+  min-height: 18px;
+  max-height: 18px;
+  flex: 0 0 18px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid #a1b6c6;
+  border-radius: 4px;
+  background: #ffffff;
+  accent-color: #007ea7;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+input[type="checkbox"]:checked,
+input[type="checkbox"]:indeterminate {
+  border-color: #007ea7;
+  background-color: #007ea7;
+}
+
+input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 5px;
+  height: 9px;
+  border: solid #ffffff;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+
+input[type="checkbox"]:indeterminate::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 7px;
+  width: 8px;
+  height: 2px;
+  border-radius: 999px;
+  background: #ffffff;
+}
+
+input[type="checkbox"]:focus-visible {
+  outline: 2px solid rgba(0, 126, 167, 0.28);
+  outline-offset: 2px;
+}
+
+input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  border-color: #d3e1ec;
+  background-color: #f5f5f5;
+  opacity: 0.7;
+}
+
+/* Stable page-heading contract. Every shared screen title and its actions use
+ * one fixed row, preventing the content below from moving while navigating. */
+.system-page-header {
+  box-sizing: border-box !important;
+  height: 46px !important;
+  min-height: 46px !important;
+  max-height: 46px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  align-items: center !important;
+  flex-wrap: nowrap !important;
+}
+
+.system-page-header > :first-child {
+  min-height: 46px !important;
+  align-items: center !important;
+}
+
+.system-page-header h1 {
+  margin: 0 !important;
+  font-family: "Montserrat", sans-serif !important;
+  font-size: 36px !important;
+  font-weight: 600 !important;
+  line-height: 46px !important;
+  color: #10233a !important;
+}
+
+/* Search, Add filter and table actions always occupy one 28 px row so the
+ * table cannot move vertically while navigating between menus. */
+.system-table-toolbar {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  height: 28px !important;
+  min-height: 28px !important;
+  max-height: 28px !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  overflow: visible !important;
+}
+
+.system-table-toolbar .ocr-search-field {
+  width: 260px !important;
+  min-width: 100px !important;
+  max-width: 260px !important;
+  flex: 1 1 260px !important;
+}
+
+button[data-button-family="page-action"],
+button[data-button-family="header-create"] {
+  box-sizing: border-box !important;
+  min-width: 0 !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 0 12px !important;
+  border-radius: 6px !important;
+  font-family: "Montserrat", sans-serif !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  line-height: 20px !important;
+}
+
+/* System table toolbars keep the same compact icons and 16 px spacing on
+ * every menu, regardless of how many actions the current page exposes. */
+:where(div, span):has(> button[data-button-family="column-settings"]) {
+  min-height: 28px !important;
+  align-items: center !important;
+  column-gap: 16px !important;
+}
+
+:where(
+  button[data-button-family="bulk-delete"],
+  button[data-button-family="column-settings"],
+  button[data-button-family="import-data"],
+  button[data-button-family="refresh-all"],
+  button[data-button-family="export"]
+) {
+  box-sizing: border-box !important;
+  width: 16px !important;
+  min-width: 16px !important;
+  max-width: 16px !important;
+  height: 16px !important;
+  min-height: 16px !important;
+  max-height: 16px !important;
+  flex: 0 0 16px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+:where(
+  button[data-button-family="bulk-delete"],
+  button[data-button-family="column-settings"],
+  button[data-button-family="import-data"],
+  button[data-button-family="refresh-all"],
+  button[data-button-family="export"]
+) > svg {
+  width: 16px !important;
+  height: 16px !important;
+  flex: 0 0 16px !important;
+  stroke-width: 1.8 !important;
+}
+
+/*
+ * Unified icon-button sizing.
+ *
+ * Row actions (security access, export, stop/redo, open and delete) share the
+ * same 28 px container and 16 px Lucide glyph.  Several older screens passed
+ * a different `size` prop to the icon even though the surrounding button was
+ * identical; the shared contract below keeps current and future h-7/w-7 row
+ * actions visually consistent without changing what each action does.
+ */
+button.h-7.w-7 {
+  box-sizing: border-box !important;
+  display: flex !important;
+  width: 28px !important;
+  height: 28px !important;
+  flex: 0 0 28px !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-width: 1px !important;
+  border-radius: 4px !important;
+}
+
+button.h-7.w-7 :where(svg) {
+  width: 16px !important;
+  height: 16px !important;
+  flex: 0 0 16px !important;
+  stroke-width: 1.8 !important;
+}
+
+/* Table toolbar icons use the compact 16 px system size. */
+button.h-4.w-4 :where(svg) {
+  width: 16px !important;
+  height: 16px !important;
+  flex: 0 0 16px !important;
+  stroke-width: 1.8 !important;
+}
+
+/* Keep compact row actions aligned with the same spacing in every table. */
+:where(div, span):has(> button.h-7.w-7) {
+  column-gap: 4px !important;
+  align-items: center !important;
+}
+
+/*
+ * Row actions are independent from resizable data columns. Keep their group
+ * anchored at the table edge when users make any data column narrower or
+ * wider. The direct-child selector avoids affecting dialogs and bulk tools.
+ */
+:where(div, span):has(> button[data-button-family="row-delete"]) {
+  margin-left: auto !important;
+  flex-shrink: 0 !important;
+  justify-content: flex-end !important;
+}
+
+/*
+ * A data-row surface always covers both the visible table viewport and the
+ * complete horizontally scrollable content. This prevents hover/selection
+ * colour from ending before the row-action icons when columns are narrow.
+ */
+.system-table-row,
+.group:has(button[data-button-family="row-delete"]) {
+  width: max-content !important;
+  min-width: 100% !important;
+  background-clip: border-box !important;
+}
+
+.system-table-row {
+  box-sizing: border-box !important;
+  min-height: 40px !important;
+  font-family: "Montserrat", sans-serif !important;
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  line-height: 18px !important;
+  color: #10233a;
+}
+
+/* One typeface across every screen and every native control. Components that
+ * previously requested a browser default, sans or monospace face now inherit
+ * the same system typography without changing their size, weight or layout. */
+html,
+body,
+body * {
+  font-family: "Montserrat", sans-serif !important;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.profile-activity-scrollbar {
+  scrollbar-color: #AFC3D2 #F7FAFC;
+  scrollbar-width: thin;
+}
+
+.profile-activity-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.profile-activity-scrollbar::-webkit-scrollbar-track {
+  background: #F7FAFC;
+}
+
+.profile-activity-scrollbar::-webkit-scrollbar-thumb {
+  background: #AFC3D2;
+  border: 2px solid #F7FAFC;
+  border-radius: 999px;
+}
+
+.profile-activity-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #8FA9BC;
+}
+
+/*
+ * Fixed table footer safety area.
+ *
+ * The shared horizontal scrollbar sits 104 px above the viewport bottom and
+ * pagination sits below it. Long tables must never remain visible through
+ * that footer area. The pseudo-element creates one opaque surface behind both
+ * controls, while the matching main-area padding lets the final row scroll
+ * completely above the footer instead of being covered by it.
+ */
+.shared-table-scrollbar--fixed::before {
+  content: "";
+  position: fixed;
+  z-index: 0;
+  bottom: 0;
+  left: var(--table-footer-backdrop-left);
+  width: var(--table-footer-backdrop-width);
+  height: 148px;
+  background: #ffffff;
+  pointer-events: none;
+}
+
+.shared-table-scrollbar--fixed > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Uploaded documents can extend behind the fixed table footer. Keep that
+ * safety area opaque to pointer input so hidden rows cannot be activated
+ * through the scrollbar and pagination zone. */
+.uploaded-documents-scrollbar.shared-table-scrollbar--fixed::before {
+  pointer-events: auto;
+}
+
+[data-app-main]:has(.shared-table-scrollbar--fixed) {
+  padding-bottom: 148px;
+}
+
+.unified-table-pagination {
+  isolation: isolate;
+  background: #ffffff;
+}
+
+/* One navigation rhythm for every detail page: a fixed back control to the
+   left of the title and the same breadcrumb typography below the header. */
+.system-page-header-leading > button {
+  display: flex !important;
+  width: 36px !important;
+  height: 36px !important;
+  flex: 0 0 36px !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 0 !important;
+  border-radius: 6px !important;
+  color: #7288a3 !important;
+}
+
+.system-page-header-leading > button:hover {
+  background: #f0f7fa !important;
+  color: #007ea7 !important;
+}
+
+nav[aria-label="Breadcrumb"] {
+  min-height: 18px;
+  align-items: center;
+  gap: 8px;
+  font-family: Montserrat, sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+/* Dashboard columns follow the available application content width rather
+ * than the browser viewport. This keeps Chrome and the embedded browser on
+ * the same layout even when their sidebars occupy different widths. */
+.dashboard-view {
+  container-type: inline-size;
+}
+
+@container (min-width: 520px) {
+  .dashboard-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (min-width: 860px) {
+  .dashboard-summary-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .dashboard-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/*
+ * Empty administration tables may have a content width wider than the visible
+ * menu because of optional columns. Centre the empty state in the scrollport,
+ * not in that complete off-screen column width.
+ */
+.min-h-0.flex-1.overflow-x-auto.scrollbar-hide {
+  container-type: inline-size;
+}
+
+.min-h-0.flex-1.overflow-x-auto.scrollbar-hide
+  .flex.min-h-\[220px\].flex-col.items-center.justify-center {
+  position: sticky;
+  left: 0;
+  width: 100cqw !important;
+  max-width: 100cqw !important;
+}
+
+/*
+ * OCR toolbar export contract (u:export).
+ * Any icon-only Export action uses the same upward arrow, including future
+ * screens that follow the shared title/aria-label convention.
+ */
+button[title="Export"] > svg,
+button[aria-label="Export"] > svg,
+button:not([role="checkbox"])[aria-label^="Export "] > svg {
+  display: none;
+}
+
+button[title="Export"]::before,
+button[aria-label="Export"]::before,
+button:not([role="checkbox"])[aria-label^="Export "]::before {
+  content: "";
+  display: block;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  background-color: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8.707 1.293a1 1 0 0 0-1.414 0l-3 3a1 1 0 1 0 1.414 1.414L7 4.414V10a1 1 0 1 0 2 0V4.414l1.293 1.293a1 1 0 0 0 1.414-1.414l-3-3ZM3 8a1 1 0 0 0-1 1v4a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V10a1 1 0 1 0-2 0v4H4V10a1 1 0 0 0-1-1Z'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8.707 1.293a1 1 0 0 0-1.414 0l-3 3a1 1 0 1 0 1.414 1.414L7 4.414V10a1 1 0 1 0 2 0V4.414l1.293 1.293a1 1 0 0 0 1.414-1.414l-3-3ZM3 8a1 1 0 0 0-1 1v4a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V10a1 1 0 1 0-2 0v4H4V10a1 1 0 0 0-1-1Z'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+
+/* System-wide button active/press states */
+
+/* Menu/action icons stay grey until activated; while their menu is open they are blue. */
+button[data-button-family][aria-expanded="true"]:not(:disabled) {
+  color: #007ea7 !important;
+}
+
+/* REFRESH ALL confirms the reload by blinking record text only. */
+@keyframes refresh-all-record-text-flash {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  35% {
+    opacity: 0.18;
+  }
+  68% {
+    opacity: 1;
+  }
+}
+
+.refresh-all-record-text {
+  animation: refresh-all-record-text-flash 420ms ease-out;
+}
+
+/* All enabled buttons: subtle scale-down on press */
+button:not(:disabled):active {
+  transform: scale(0.97);
+  transition:
+    transform 0ms,
+    background-color 0ms,
+    border-color 0ms,
+    filter 0ms;
+}
+
+/* Shared system actions follow the Sale invoice / Mark as exported pattern. */
+button[data-system-action="true"]:not(:disabled) {
+  background-color: #ffffff !important;
+  border: 2px solid #d3e1ec !important;
+  color: #7288a3 !important;
+}
+
+button[data-system-action="true"]:not(:disabled) * {
+  color: inherit !important;
+}
+
+button[data-system-action="true"]:not(:disabled):hover {
+  border-color: #a1b6c6 !important;
+}
+
+button[data-system-action="true"]:not(:disabled):active {
+  background-color: #007ea7 !important;
+  border-color: #007ea7 !important;
+  color: #ffffff !important;
+  filter: none;
+  transform: scale(0.97);
+}
+
+/* Stateful controls (selected tabs, pages and switches) keep their selected blue. */
+button:not([data-system-action="true"]):not(
+    :disabled
+  )[class*="bg-[#007EA7]"]:active,
+button:not([data-system-action="true"]):not(
+    :disabled
+  )[class*="bg-main-blue"]:active {
+  filter: brightness(0.82);
+  transform: scale(0.97);
+}
+
+/* Orange action buttons — darken on press */
+button:not(:disabled)[class*="bg-main-orange"]:active {
+  filter: brightness(0.82);
+  transform: scale(0.97);
+}
+
+/* Secondary / outline buttons — turn blue on press */
+button:not(:disabled)[class*="border-[#D3E1EC]"]:active {
+  background-color: #007ea7 !important;
+  border-color: #007ea7 !important;
+  transform: scale(0.97);
+  filter: none;
+}
+button:not(:disabled)[class*="border-[#D3E1EC]"]:active span {
+  color: white !important;
+}
+
+/* Filter chip buttons (bg-[#E5EDF9]) — turn blue on press */
+button:not(:disabled)[class*="bg-[#E5EDF9]"]:active,
+div[class*="bg-[#E5EDF9]"]:active {
+  background-color: #007ea7 !important;
+  filter: none;
+}
+button:not(:disabled)[class*="bg-[#E5EDF9]"]:active span,
+div[class*="bg-[#E5EDF9]"]:active span {
+  color: white !important;
+}
+
+/*
+ * Unified framed record actions.
+ * Every compact 28 × 28 px row button uses the same thin frame, including
+ * shared STOP, REFRESH, DELETE, SECURITY ACCESS, EDIT and export actions.
+ */
+button.h-7.w-7.border,
+button.h-7.w-7.border-2 {
+  border-width: 1px !important;
+}
+
+/*
+ * Node-management row actions remain neutral while the row or the individual
+ * icon is hovered. Blue is reserved for the actual pressed/active feedback.
+ */
+[data-row-actions="node-management"] button:not(:disabled):not(:active) {
+  color: #7288a3 !important;
+  border-color: #d3e1ec !important;
+  background-color: #ffffff !important;
+}
+@layer components {
+  .system-report-input {
+    @apply h-[42px] w-full rounded-lg border border-[#D3E1EC] bg-white px-[14px] font-montserrat text-[14px] font-medium text-[#10233A] outline-none transition-colors placeholder:text-[#A1B6C6] focus:border-[#007EA7];
+  }
+}
