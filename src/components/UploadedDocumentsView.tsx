@@ -9,6 +9,7 @@ import HorizontalTableScrollbar from './HorizontalTableScrollbar';
 import OcrSearchField from './OcrSearchField';
 import TablePagination from './TablePagination';
 import SearchableSelect from './SearchableSelect';
+import { CancelButton, SaveButton } from './ScopedActionButtons';
 import { ResizeHandle, useColumnResize } from './useColumnResize';
 import { supabase, type Company, type DbDocument } from '../lib/supabase';
 import { loadOcrDocumentSource } from '../lib/ocrDocumentSource';
@@ -27,7 +28,7 @@ export type { UploadedDocumentsGroup } from '../lib/uploadedDocuments';
 type StatusGroup = UploadedDocumentsGroup;
 type UploadedFilterKey = 'uploaded' | 'organization' | 'status' | 'sourceType' | 'sourceValue';
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 20;
 
 type UploadedColumnKey = 'document' | 'organization' | 'status' | 'uploaded';
 
@@ -92,11 +93,11 @@ function sourceValue(document: DbDocument) {
   return document.created_by || document.source || 'Unknown source';
 }
 
-function AssignmentField({ label, value, grey = false }: { label: string; value?: string; grey?: boolean }) {
+function AssignmentField({ label, value }: { label: string; value?: string }) {
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <span className="font-montserrat text-[14px] font-semibold leading-5 text-[#10233A]">{label}</span>
-      <div className={`flex h-8 min-w-0 items-center rounded-md border border-[#D3E1EC] px-2 py-[6px] font-montserrat text-[14px] font-medium leading-5 ${grey ? 'bg-[#F7F7F7] text-[#828588]' : 'bg-white text-[#10233A]'}`}>
+      <div className="flex h-[42px] min-w-0 items-center rounded-lg border border-[#D3E1EC] bg-[#F7F7F7] px-[14px] font-montserrat text-[14px] font-medium leading-5 text-[#828588]">
         <span className="truncate" title={value || undefined}>{value || '—'}</span>
       </div>
     </div>
@@ -119,7 +120,7 @@ export default function UploadedDocumentsView({
   onOpenDocument,
   initialGroup = 'All',
 }: {
-  onOpenDocument: (document: DbDocument) => void | Promise<void>;
+  onOpenDocument: (document: DbDocument, mode?: 'view' | 'edit' | 'original-view') => void | Promise<void>;
   initialGroup?: UploadedDocumentsGroup;
 }) {
   const [documents, setDocuments] = useState<DbDocument[]>([]);
@@ -544,8 +545,8 @@ export default function UploadedDocumentsView({
                   <h1 className="truncate font-montserrat text-[18px] font-semibold leading-[26px] text-[#10233A]">Assign organization · {selectedDocument.file_case || selectedDocument.number || selectedDocument.id}</h1>
                 </div>
                 <div className="flex flex-shrink-0 items-center gap-2">
-                  <button type="button" onClick={returnToUploadedDocuments} className="flex h-8 items-center rounded-md border-2 border-[#D3E1EC] bg-white px-3 font-montserrat text-[14px] font-semibold text-[#7288A3]">Cancel</button>
-                  <button type="button" disabled={!selectedOrganization} onClick={() => void assignOrganization()} className="flex h-8 items-center rounded-md bg-[#007EA7] px-4 font-montserrat text-[14px] font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#D3E1EC] disabled:text-[#7288A3]">Assign organization</button>
+                  <CancelButton onClick={returnToUploadedDocuments} className="!h-8 !min-h-8 !rounded-md !px-3 !text-[14px] !leading-5" />
+                  <SaveButton disabled={!selectedOrganization} onClick={() => void assignOrganization()} className="!h-8 !min-h-8 !rounded-md !px-3 !text-[14px] !leading-5">Assign organization</SaveButton>
                 </div>
               </header>
 
@@ -562,15 +563,16 @@ export default function UploadedDocumentsView({
                       placeholder="Select organization"
                       options={organizations.map((organization) => ({
                         value: organization.id,
-                        label: [organization.name, organization.company_code].filter(Boolean).join(' · '),
+                        label: organization.name,
+                        description: `Company code: ${organization.company_code || '—'}`,
                       }))}
-                      className="h-8 rounded-md border border-[#D3E1EC] bg-white px-2 pr-8 font-montserrat text-[14px] font-medium leading-5 text-[#10233A]"
-                      menuClassName="min-w-[300px]"
+                      selectionIndicator="checkbox"
+                      menuClassName="!right-auto w-[360px] max-w-[calc(100vw-48px)]"
                       emptyMessage="No organizations found."
                     />
                   </div>
-                  <AssignmentField label={isPurchase ? 'Seller (LT)' : 'Buyer (LT)'} value={counterpartyName} grey />
-                  <AssignmentField label="Counterparty code" value={counterpartyCode} grey />
+                  <AssignmentField label={isPurchase ? 'Seller (LT)' : 'Buyer (LT)'} value={counterpartyName} />
+                  <AssignmentField label="Counterparty code" value={counterpartyCode} />
                   <AssignmentField label="Accountable person" value={selectedDocument.accountable_responsible} />
                 </div>
 
@@ -582,7 +584,7 @@ export default function UploadedDocumentsView({
                   [['VAT', selectedDocument.vat || '—'], ['Currency', selectedDocument.currency || '—']],
                 ].map((fieldGroup, groupIndex) => (
                   <div key={groupIndex} className="contents">
-                    {fieldGroup.map(([label, value]) => <AssignmentField key={label} label={label} value={value} grey={['Amount', 'Total Amount', 'VAT'].includes(label)} />)}
+                    {fieldGroup.map(([label, value]) => <AssignmentField key={label} label={label} value={value} />)}
                   </div>
                 ))}
 
@@ -610,7 +612,7 @@ export default function UploadedDocumentsView({
                     <div key={line.id} className={`flex flex-row items-center gap-[2px] rounded-lg p-[5px] ${lineIndex % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
                       <div className="flex w-[18px] flex-shrink-0 items-center justify-center font-montserrat text-[12px] font-medium text-[#A1B6C6]">{lineIndex + 1}</div>
                       <div className="w-6 flex-shrink-0" />
-                      {[[line.unit,110],[line.qty,80],[line.price,90],[line.subtotal,90],[line.vat,80],[line.vatPct,70],[line.total,110],[line.productGroup,130],[line.department,100],[line.object,90],[line.series,80],[line.center,90],[line.expense,110],[line.vatClass,110]].map(([value, width], index) => <div key={`${line.id}-${index}`} className={`flex h-[26px] flex-shrink-0 items-center rounded border border-[#D3E1EC] px-2 font-montserrat text-[12px] font-medium leading-[18px] ${index === 6 ? 'bg-[#F7F7F7] text-[#828588]' : 'bg-white text-[#10233A]'}`} style={{ width: Number(width) }}><span className="truncate" title={String(value || '')}>{String(value || '—')}</span></div>)}
+                      {[[line.unit,110],[line.qty,80],[line.price,90],[line.subtotal,90],[line.vat,80],[line.vatPct,70],[line.total,110],[line.productGroup,130],[line.department,100],[line.object,90],[line.series,80],[line.center,90],[line.expense,110],[line.vatClass,110]].map(([value, width], index) => <div key={`${line.id}-${index}`} className={`flex h-[26px] flex-shrink-0 items-center rounded border border-[#D3E1EC] px-2 font-montserrat text-[12px] font-medium leading-[18px] bg-[#F7F7F7] text-[#828588]`} style={{ width: Number(width) }}><span className="truncate" title={String(value || '')}>{String(value || '—')}</span></div>)}
                     </div>
                   ))}
                 </div>
@@ -949,7 +951,7 @@ export default function UploadedDocumentsView({
                           type="button"
                           onClick={(event) => {
                             event.stopPropagation();
-                            void onOpenDocument(duplicateOriginal);
+                            void onOpenDocument(duplicateOriginal, 'original-view');
                           }}
                           className="block text-left font-montserrat text-[11px] font-normal leading-[14px] text-[#007EA7] hover:underline"
                         >
@@ -1106,7 +1108,7 @@ export default function UploadedDocumentsView({
                     <dt className="font-montserrat text-[11px] font-semibold text-[#7288A3]">{label}</dt>
                     <dd className="mt-1 whitespace-normal font-montserrat text-[13px] font-medium leading-5 text-[#10233A]">
                       {label === 'Reason' && originalForDuplicate ? (
-                        <button type="button" onClick={() => void onOpenDocument(originalForDuplicate)} className="text-[#007EA7] hover:underline">View original</button>
+                        <button type="button" onClick={() => void onOpenDocument(originalForDuplicate, 'original-view')} className="text-[#007EA7] hover:underline">View original</button>
                       ) : value}
                     </dd>
                   </div>

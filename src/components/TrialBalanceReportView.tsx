@@ -1,3 +1,4 @@
+import TablePagination from "./TablePagination";
 import { useMemo, useRef, useState } from "react";
 import { ChevronDown, Download, X } from "lucide-react";
 import { jsPDF } from "jspdf";
@@ -394,6 +395,7 @@ export default function TrialBalanceReportView({
   companyLogo?: string;
   onBack: () => void;
 }) {
+  const [tablePage, setTablePage] = useState(1);
   const [query, setQuery] = useState("");
   const [from, setFrom] = useState("2026-06-01");
   const [to, setTo] = useState("2026-06-30");
@@ -683,7 +685,7 @@ export default function TrialBalanceReportView({
           </div>
 
           <div className="flex flex-col gap-0.5">
-            {sortedRows.map((item, index) => (
+            {sortedRows.slice((Math.min(tablePage, Math.max(1, Math.ceil(sortedRows.length / 20))) - 1) * 20, Math.min(tablePage, Math.max(1, Math.ceil(sortedRows.length / 20))) * 20).map((item, index) => (
               <div
                 key={`${item.code}-${item.name}`}
                 className={`flex min-h-10 items-center rounded-lg font-montserrat text-[12px] font-normal text-[#10233A] transition-colors hover:bg-[#E7F4F9] ${index % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"}`}
@@ -738,6 +740,7 @@ export default function TrialBalanceReportView({
         </div>
       </div>
       <HorizontalTableScrollbar scrollRef={tableRef} />
+      <TablePagination currentPage={tablePage} totalPages={Math.max(1, Math.ceil(sortedRows.length / 20))} itemCount={sortedRows.length} itemsPerPage={20} onPageChange={setTablePage} />
 
       {showColumns && (
         <ColumnSettingsPanel

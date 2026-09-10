@@ -1,6 +1,8 @@
 # Finansų harmonija V14
 
-Aktyvi tobulinimo versija, sukurta iš užfiksuotos V13 kopijos (`fa07b75`, žyma `v13`). Tolesni pakeitimai atliekami tik šiame V14 kataloge.
+Užfiksuota testavimo versija (žyma `v14`). Tolesni pakeitimai atliekami tik V15 kataloge. V14 nebekeičiama.
+
+Testavimas: https://albertborkovski-cmd.github.io/finansu-harmonija-v14/
 
 ## Paleidimas
 

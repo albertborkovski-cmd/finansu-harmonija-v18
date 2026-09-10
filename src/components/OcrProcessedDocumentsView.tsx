@@ -436,7 +436,7 @@ export function ProcessedDocumentsTable({
     filteredRows,
     (row, key) => row[key],
   );
-  const pageSize = showAll ? Math.max(1, sortedRows.length) : 4;
+  const pageSize = showAll ? Math.max(1, sortedRows.length) : 20;
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
   const safePage = Math.min(page, totalPages);
   const displayedRows = showAll

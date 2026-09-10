@@ -143,7 +143,7 @@ export default function CompanyClientsView({ company }: { company: Company }) {
   const [draft, setDraft] = useState(EMPTY_CLIENT);
   const [deleteClient, setDeleteClient] = useState<ClientRow | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(4);
+  const [itemsPerPage, setItemsPerPage] = useState(20);
   const [refreshing, setRefreshing] = useState(false);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);

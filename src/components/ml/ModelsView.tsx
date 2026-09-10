@@ -192,6 +192,7 @@ function CreateModelModal({ onClose, onCreate }: { onClose: () => void; onCreate
 }
 
 function TrainModelCatalogModal({ models, onClose, onSelect }: { models: ModelRecord[]; onClose: () => void; onSelect: (modelId: string) => void }) {
+  const [currentPage, setCurrentPage] = useState(1);
   const [query, setQuery] = useState('');
   const filteredModels = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -225,7 +226,7 @@ function TrainModelCatalogModal({ models, onClose, onSelect }: { models: ModelRe
             <span />
           </div>
           <div className="flex flex-col">
-            {sortedModels.map((model, index) => (
+            {sortedModels.slice((Math.min(currentPage, Math.max(1, Math.ceil(sortedModels.length / 20))) - 1) * 20, Math.min(currentPage, Math.max(1, Math.ceil(sortedModels.length / 20))) * 20).map((model, index) => (
               <div key={model.id} className={`grid min-h-[48px] grid-cols-[minmax(220px,1fr)_minmax(320px,1.8fr)_44px] items-center gap-6 rounded-lg px-4 font-montserrat text-[14px] font-medium leading-5 text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
                 <span className="truncate">{model.name}</span>
                 <span className="truncate">{model.description}</span>
@@ -237,7 +238,7 @@ function TrainModelCatalogModal({ models, onClose, onSelect }: { models: ModelRe
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[#E5EDF9] pt-5">
-          <TablePagination currentPage={1} totalPages={1} itemCount={filteredModels.length} onPageChange={() => undefined} />
+          <TablePagination currentPage={currentPage} totalPages={Math.max(1, Math.ceil(filteredModels.length / 20))} itemCount={filteredModels.length} onPageChange={setCurrentPage} />
         </div>
       </div>
     </div>
@@ -847,7 +848,7 @@ export default function ModelsView() {
                 <div className="system-table-header-row mb-4 grid h-5 items-center font-montserrat text-[12px] font-medium leading-[18px] text-[#10233A]" style={{ gridTemplateColumns: versionGrid }}>
                   {visibleVersionColumns.map((column, index) => <div data-table-header-select={column.key === 'version' ? "true" : undefined} key={column.key} className={`flex h-5 min-w-0 items-center gap-[6px] px-3 ${index > 0 ? 'border-l border-[#D3E1EC]' : ''}`}>{column.key === 'version' && <Checkbox checked={allVersionsSelected} label="Select all model versions" onChange={() => setSelectedVersions(allVersionsSelected ? new Set() : new Set(visibleVersions.map((version) => version.version)))} />}<span className="truncate">{column.label}</span></div>)}<div />
                 </div>
-                {visibleVersions.map((version, index) => (
+                {visibleVersions.slice((Math.min(currentPage, Math.max(1, Math.ceil(visibleVersions.length / 20))) - 1) * 20, Math.min(currentPage, Math.max(1, Math.ceil(visibleVersions.length / 20))) * 20).map((version, index) => (
                   <div key={version.version} className={`grid h-9 items-center rounded-lg font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} hover:bg-[#E7F4F9]`} style={{ gridTemplateColumns: versionGrid }}>
                     {visibleVersionColumns.map(column => <div key={column.key} className="flex min-w-0 items-center gap-[6px] overflow-hidden px-3"><span className="flex min-w-0 items-center gap-[6px] truncate">{column.key === 'version' && <Checkbox checked={selectedVersions.has(version.version)} label={`Select version ${version.version}`} onChange={() => setSelectedVersions((current) => { const next = new Set(current); if (next.has(version.version)) next.delete(version.version); else next.add(version.version); return next; })} />}{column.key === 'status' && <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${version.status === 'Archived' ? 'bg-[#A1B6C6]' : 'bg-[#0ED8A8]'}`} />}{String(version[column.key as keyof typeof version] ?? '—')}</span></div>)}
                     <span className="flex h-9 items-center justify-end gap-1 pr-1">
@@ -865,7 +866,7 @@ export default function ModelsView() {
             <HorizontalTableScrollbar />
 
             <div className="flex flex-wrap items-center justify-between gap-4 pt-4">
-              <TablePagination currentPage={1} totalPages={5} itemCount={visibleVersions.length} onPageChange={() => undefined} />
+              <TablePagination currentPage={currentPage} totalPages={Math.max(1, Math.ceil(visibleVersions.length / 20))} itemCount={visibleVersions.length} onPageChange={setCurrentPage} />
             </div>
           </div>
         </div>
@@ -916,7 +917,7 @@ export default function ModelsView() {
                 )})}
                 <div aria-hidden="true" />
               </div>
-              {sortedModels.length ? sortedModels.map((model, index) => (
+              {sortedModels.length ? sortedModels.slice((Math.min(currentPage, Math.max(1, Math.ceil(sortedModels.length / 20))) - 1) * 20, Math.min(currentPage, Math.max(1, Math.ceil(sortedModels.length / 20))) * 20).map((model, index) => (
                 <div key={model.id} onClick={() => setDetailModel(model)} className={`system-table-row group grid h-9 cursor-pointer items-center rounded-lg font-montserrat text-[12px] leading-[18px] text-[#10233A] transition-colors hover:bg-[#E7F4F9] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`} style={{ gridTemplateColumns: tableGrid }}>
                   {visibleColumns.map((column) => <div key={column.key} className="min-w-0 overflow-hidden px-3">{modelCell(model, column.key)}</div>)}
                   <div className="table-row-actions flex h-9 items-center justify-end gap-1 pr-1"><button type="button" aria-label={`Open ${model.name} resources`} onClick={(event) => { event.stopPropagation(); setDetailModel(model); setVersionQuery(''); setSelectedVersions(new Set()); setLogVersion(null); }} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] transition-colors hover:border-[#007EA7] hover:text-[#007EA7]"><UsersRound size={16} strokeWidth={1.8} /></button><button type="button" data-button-family="row-delete" aria-label={`Delete ${model.name}`} onClick={(event) => { event.stopPropagation(); deleteModels(new Set([model.id])); }} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] hover:border-[#D64545] hover:text-[#D64545]"><Trash2 size={16} /></button></div>

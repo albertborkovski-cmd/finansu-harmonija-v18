@@ -21,7 +21,8 @@ import ColumnSettingsPanel, { type ColConfig } from "./ColumnSettingsPanel";
 import { ColumnSettingsButton } from "./ScopedActionButtons";
 import { ResizeHandle, useColumnResize } from "./useColumnResize";
 import ColumnSortButton, { useMultiColumnSort } from "./ColumnSortButton";
-import { supabase } from "../lib/supabase";
+import { supabase, type Company } from "../lib/supabase";
+import { organizationInternalUsers, loadOrganizationUserIds } from '../lib/linkedSettingsData';
 import {
   createFullAccess,
   createFullMenuAccess,
@@ -87,7 +88,7 @@ const INTERNAL_USER_COLUMNS: ColConfig[] = [
 ];
 
 const PERMISSIONS = ["CREATE", "READ", "UPDATE", "DELETE", "ACTION"];
-const DIRECTORY_ROWS_PER_PAGE = 14;
+const DIRECTORY_ROWS_PER_PAGE = 20;
 const INVITATION_TEMPLATES = [
   {
     id: "standard",
@@ -1610,11 +1611,13 @@ export default function SettingsIdentityManagementView({
   section,
   createOnOpen = false,
   onCreateOpened,
+  organizationScope,
 }: {
   audience: Audience;
   section: Section;
   createOnOpen?: boolean;
   onCreateOpened?: () => void;
+  organizationScope?: Company;
 }) {
   const key = storageKey(audience, section);
   const defaults =
@@ -1773,12 +1776,14 @@ export default function SettingsIdentityManagementView({
   }, [activeFilterKeys, audience, filterValues, rowsWithRelationships]);
   const filtered = useMemo(() => {
     const value = query.trim().toLowerCase();
+    const organizationUserIds = organizationScope ? new Set(audience === 'Internal users' ? organizationInternalUsers(organizationScope).map(user => user.id) : loadOrganizationUserIds(organizationScope.id, 'External users')) : null;
+    const scopedRows = organizationUserIds ? columnFilteredRows.filter(row => organizationUserIds.has(row.id)) : columnFilteredRows;
     return value
-      ? columnFilteredRows.filter((row) =>
+      ? scopedRows.filter((row) =>
           Object.values(row).join(" ").toLowerCase().includes(value),
         )
-      : columnFilteredRows;
-  }, [columnFilteredRows, query]);
+      : scopedRows;
+  }, [columnFilteredRows, query, organizationScope, audience]);
   const visibleColumns = columns.filter((column) => column.visible);
   const { sortedRows, changeSort, directionFor } = useMultiColumnSort(
     filtered,

@@ -193,7 +193,7 @@ export default function LogsTab({
           </div>
 
           <div className="mt-3 flex flex-col">
-            {sortedRows.map((run, rowIndex) => (
+            {sortedRows.slice((Math.min(currentPage, Math.max(1, Math.ceil(sortedRows.length / 20))) - 1) * 20, Math.min(currentPage, Math.max(1, Math.ceil(sortedRows.length / 20))) * 20).map((run, rowIndex) => (
               <div key={run.id} className={`grid h-9 w-full items-center rounded-lg ${rowIndex % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} transition-colors hover:bg-[#E7F4F9]`} style={{ gridTemplateColumns }}>
                 <div className="flex h-9 items-center px-3">
                   <Checkbox checked={selectedRows.has(run.id)} onChange={() => toggleRow(run.id)} label={`Select run ${run.id}`} />

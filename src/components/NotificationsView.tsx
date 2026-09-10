@@ -82,7 +82,6 @@ export default function NotificationsView({ initialTab = "notifications", initia
     [reminderRows, query, additionalFilters],
   );
   const [currentPage, setCurrentPage] = useState(1);
-  const totalPages = 5;
 
   const [panelMode, setPanelMode] = useState<PanelMode>(null);
   const [editId, setEditId] = useState<string | null>(null);
@@ -415,6 +414,7 @@ export default function NotificationsView({ initialTab = "notifications", initia
           <div className="overflow-x-auto scrollbar-hide">
             {activeTab === "notifications" ? (
               <NotificationsTable
+                page={currentPage}
                 rows={filteredNotificationRows}
                 onViewDetails={openEditNotification}
                 onDelete={(row) =>
@@ -427,6 +427,7 @@ export default function NotificationsView({ initialTab = "notifications", initia
               />
             ) : (
               <RemindersTable
+                page={currentPage}
                 rows={filteredReminderRows}
                 onViewDetails={openEditReminder}
                 onDelete={(row) =>
@@ -446,11 +447,11 @@ export default function NotificationsView({ initialTab = "notifications", initia
           <div className="mt-6 flex flex-row items-center justify-between pt-4">
             <TablePagination
               currentPage={currentPage}
-              totalPages={totalPages}
+              totalPages={Math.max(1, Math.ceil((activeTab === 'notifications' ? filteredNotificationRows.length : filteredReminderRows.length) / 20))}
               itemCount={
                 activeTab === "notifications"
-                  ? notificationRows.length
-                  : reminderRows.length
+                  ? filteredNotificationRows.length
+                  : filteredReminderRows.length
               }
               onPageChange={setCurrentPage}
             />
@@ -772,6 +773,7 @@ export default function NotificationsView({ initialTab = "notifications", initia
 }
 
 function NotificationsTable({
+  page,
   rows,
   onViewDetails,
   onDelete,
@@ -779,6 +781,7 @@ function NotificationsTable({
   startResize,
 }: {
   rows: NotificationRow[];
+  page: number;
   onViewDetails: (row: NotificationRow) => void;
   onDelete: (row: NotificationRow) => void;
   columns: ColConfig[];
@@ -826,7 +829,7 @@ function NotificationsTable({
 
       {/* Rows */}
       <div className="flex flex-col">
-        {sortedRows.map((row, rowIndex) => (
+        {sortedRows.slice((Math.min(page, Math.max(1, Math.ceil(sortedRows.length / 20))) - 1) * 20, Math.min(page, Math.max(1, Math.ceil(sortedRows.length / 20))) * 20).map((row, rowIndex) => (
           <div
             key={row.id}
             className={`flex h-9 flex-row items-center rounded-lg ${
@@ -884,6 +887,7 @@ function NotificationsTable({
 }
 
 function RemindersTable({
+  page,
   rows,
   onViewDetails,
   onDelete,
@@ -891,6 +895,7 @@ function RemindersTable({
   startResize,
 }: {
   rows: ReminderRow[];
+  page: number;
   onViewDetails: (row: ReminderRow) => void;
   onDelete: (row: ReminderRow) => void;
   columns: ColConfig[];
@@ -937,7 +942,7 @@ function RemindersTable({
 
       {/* Rows */}
       <div className="flex flex-col">
-        {sortedRows.map((row, rowIndex) => (
+        {sortedRows.slice((Math.min(page, Math.max(1, Math.ceil(sortedRows.length / 20))) - 1) * 20, Math.min(page, Math.max(1, Math.ceil(sortedRows.length / 20))) * 20).map((row, rowIndex) => (
           <div
             key={row.id}
             className={`flex h-9 flex-row items-center rounded-lg ${

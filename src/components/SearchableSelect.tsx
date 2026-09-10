@@ -4,6 +4,7 @@ import { Check, ChevronDown } from "lucide-react";
 export type SearchableSelectOption = {
   value: string;
   label: string;
+  description?: string;
   disabled?: boolean;
 };
 
@@ -17,6 +18,7 @@ type SearchableSelectProps = {
   className?: string;
   menuClassName?: string;
   emptyMessage?: string;
+  selectionIndicator?: 'check' | 'checkbox';
 };
 
 const normalizeOptions = (
@@ -40,6 +42,7 @@ export default function SearchableSelect({
   className = "h-[42px] rounded-lg border border-[#D3E1EC] bg-white px-[14px] pr-9 font-montserrat text-[14px] font-medium text-[#10233A]",
   menuClassName = "",
   emptyMessage = "No options found",
+  selectionIndicator = 'check',
 }: SearchableSelectProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -56,6 +59,7 @@ export default function SearchableSelect({
     return normalizedOptions.filter(
       (option) =>
         option.label.toLocaleLowerCase().includes(normalizedQuery) ||
+        option.description?.toLocaleLowerCase().includes(normalizedQuery) ||
         option.value.toLocaleLowerCase().includes(normalizedQuery),
     );
   }, [normalizedOptions, query]);
@@ -169,8 +173,14 @@ export default function SearchableSelect({
                   onClick={() => choose(option)}
                   className={`flex min-h-9 w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left font-montserrat text-[13px] font-medium text-[#10233A] disabled:cursor-not-allowed disabled:opacity-50 ${activeIndex === index ? "bg-[#F2F7FC]" : "hover:bg-[#F8FDFF]"}`}
                 >
-                  <span className="min-w-0 truncate">{option.label}</span>
-                  {selected ? <Check size={14} className="flex-shrink-0 text-[#007EA7]" /> : null}
+                  {selectionIndicator === 'checkbox' && <span aria-hidden="true" className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded border ${selected ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>
+                    {selected && <Check size={13} strokeWidth={3} className="text-white" />}
+                  </span>}
+                  <span className={`min-w-0 ${option.description ? 'flex flex-1 flex-col gap-1' : `truncate ${selectionIndicator === 'checkbox' ? 'flex-1' : ''}`}`}>
+                    <span className={option.description ? 'whitespace-normal break-words text-[14px] leading-5' : ''}>{option.label}</span>
+                    {option.description && <span className="whitespace-normal break-words text-[12px] font-normal leading-[18px] text-[#7288A3]">{option.description}</span>}
+                  </span>
+                  {selectionIndicator === 'check' && selected ? <Check size={14} className="flex-shrink-0 text-[#007EA7]" /> : null}
                 </button>
               );
             })

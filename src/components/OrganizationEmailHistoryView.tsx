@@ -1,3 +1,4 @@
+import TablePagination from "./TablePagination";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ExternalLink, Eye, MailCheck, RotateCcw, Send, X } from "lucide-react";
 import ColumnSettingsPanel, { type ColConfig } from "./ColumnSettingsPanel";
@@ -47,6 +48,7 @@ function historyCellValue(entry: OrganizationEmailHistoryEntry, key: HistoryColu
 }
 
 export default function OrganizationEmailHistoryView({ organizationId, organizationName }: Props) {
+  const [tablePage, setTablePage] = useState(1);
   const [history, setHistory] = useState<OrganizationEmailHistoryEntry[]>(() =>
     loadOrganizationEmailHistoryForOrganization(organizationId, organizationName),
   );
@@ -119,7 +121,7 @@ export default function OrganizationEmailHistoryView({ organizationId, organizat
               <div style={{ width: ACTIONS_WIDTH }} className="flex-shrink-0" />
             </div>
 
-            {sortedRows.map((entry, index) => (
+            {sortedRows.slice((Math.min(tablePage, Math.max(1, Math.ceil(sortedRows.length / 20))) - 1) * 20, Math.min(tablePage, Math.max(1, Math.ceil(sortedRows.length / 20))) * 20).map((entry, index) => (
               <div key={entry.id} className={`flex min-h-12 items-center font-montserrat text-[12px] font-medium text-[#10233A] transition-colors hover:bg-[#E7F4F9] ${index % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"}`}>
                 {visibleColumns.map((column) => {
                   const key = column.key as HistoryColumnKey;
@@ -158,6 +160,7 @@ export default function OrganizationEmailHistoryView({ organizationId, organizat
       </div>
 
       <HorizontalTableScrollbar scrollRef={tableScrollRef} fixed={false} />
+      <TablePagination currentPage={tablePage} totalPages={Math.max(1, Math.ceil(sortedRows.length / 20))} itemCount={sortedRows.length} itemsPerPage={20} onPageChange={setTablePage} />
 
       {showColumns ? (
         <ColumnSettingsPanel columns={columns} defaultColumns={HISTORY_COLUMNS} onSave={(next) => { setColumns(next); setShowColumns(false); }} onClose={() => setShowColumns(false)} />

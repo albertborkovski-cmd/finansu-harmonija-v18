@@ -4,6 +4,7 @@ import { loadOrganizationReferenceValues } from '../OrganizationReferenceValuesV
 import { loadVatClassificationTemplateNames } from '../VatClassificationsView';
 import { supabase, type Company } from '../../lib/supabase';
 import { getCurrentUserName } from '../../lib/currentUser';
+import { currentChatAuthor } from '../../lib/chatAuthor';
 import HorizontalTableScrollbar from '../HorizontalTableScrollbar';
 import { PageActionButton } from '../PageHeader';
 import SearchableSelect from '../SearchableSelect';
@@ -1492,6 +1493,7 @@ function InvoiceChatSection({
       {
         id: `invoice-chat-${Date.now()}`,
         author: getCurrentUserName(),
+        ...currentChatAuthor(),
         date: new Date().toLocaleString('lt-LT', { dateStyle: 'short', timeStyle: 'short' }),
         text,
         direction: 'written',

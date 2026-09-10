@@ -162,6 +162,7 @@ export function isSystemAdministratorRole(roleName?: string): boolean {
 }
 
 export function moduleForMenu(menu: string): AppModuleId | null {
+  if (menu === 'audit-history') return 'settings';
   if (menu === 'dashboard' || menu === 'global-dashboard' || menu === 'uploaded-documents') return 'companies';
   if (menu === 'messages') return 'chats';
   if (menu === 'notifications') return 'notifications';

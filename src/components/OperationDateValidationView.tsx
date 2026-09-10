@@ -193,6 +193,7 @@ function SelectionCheckbox({
 }
 
 export default function OperationDateValidationView() {
+  const [fixedPage0, setFixedPage0] = useState(1);
   const [organizations, setOrganizations] = useState<Company[]>([]);
   const [templates, setTemplates] = useState<OperationDateTemplate[]>(loadTemplates);
   const [assignments, setAssignments] = useState<Record<string, string>>(loadAssignments);
@@ -450,7 +451,7 @@ export default function OperationDateValidationView() {
               <span />
             </div>
             <div className="flex flex-col gap-0.5">
-            {displayedTemplates.map((template) => {
+            {displayedTemplates.slice((Math.min(fixedPage0, Math.max(1, Math.ceil(displayedTemplates.length / 20))) - 1) * 20, Math.min(fixedPage0, Math.max(1, Math.ceil(displayedTemplates.length / 20))) * 20).map((template) => {
               const assignedCount = Object.values(assignments).filter((id) => id === template.id).length;
               return (
                 <div key={template.id} style={{ gridTemplateColumns: tableGridTemplate }} className="grid h-10 items-center rounded-lg font-montserrat text-[12px] font-normal text-[#10233A] odd:bg-[#F8FDFF] hover:bg-[#E7F4F9]">
@@ -498,7 +499,7 @@ export default function OperationDateValidationView() {
 
       <HorizontalTableScrollbar scrollRef={tableScrollRef} />
       <div className="flex flex-shrink-0">
-        <TablePagination currentPage={1} totalPages={1} itemCount={visibleTemplates.length} onPageChange={() => undefined} />
+        <TablePagination currentPage={fixedPage0} totalPages={Math.max(1, Math.ceil(displayedTemplates.length / 20))} itemCount={displayedTemplates.length} onPageChange={setFixedPage0} />
       </div>
 
       {showColumns && (

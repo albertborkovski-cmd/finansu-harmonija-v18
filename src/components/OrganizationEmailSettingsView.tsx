@@ -30,7 +30,7 @@ const DEFAULT_COLUMNS: ColConfig[] = [
   { key: 'status', label: 'Status', width: 140, visible: true },
 ];
 
-const PAGE_SIZE = 4;
+const PAGE_SIZE = 20;
 const ACTION_COLUMN_WIDTH = 80;
 
 function templateValue(template: OrganizationEmailTemplate, key: TemplateColumnKey) {

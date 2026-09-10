@@ -44,7 +44,7 @@ const INITIAL_COLUMNS: ColConfig[] = [
   { key: 'modifiedDate', label: 'Last update', width: 150, visible: false },
 ];
 
-const ROWS_PER_PAGE = 4;
+const ROWS_PER_PAGE = 20;
 const PROCESS_STORAGE_KEY = 'finansu-harmonija-v4:automation-processes';
 
 function Checkbox({ checked, onChange, label = 'Select record' }: { checked: boolean; onChange: () => void; label?: string }) {

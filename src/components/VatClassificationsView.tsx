@@ -766,6 +766,8 @@ async function readImportedClassifications(file: File) {
 }
 
 export default function VatClassificationsView() {
+  const [fixedPage1, setFixedPage1] = useState(1);
+  const [fixedPage0, setFixedPage0] = useState(1);
   const [templates, setTemplates] = useState<VatClassificationTemplate[]>(
     loadVatClassificationTemplates,
   );
@@ -1154,7 +1156,7 @@ export default function VatClassificationsView() {
               <div className="w-[80px] flex-shrink-0" />
             </div>
             <div className="flex flex-col gap-0.5">
-              {visibleTemplates.map((template, rowIndex) => (
+              {visibleTemplates.slice((Math.min(fixedPage0, Math.max(1, Math.ceil(visibleTemplates.length / 20))) - 1) * 20, Math.min(fixedPage0, Math.max(1, Math.ceil(visibleTemplates.length / 20))) * 20).map((template, rowIndex) => (
                 <div
                   key={template.id}
                   role="button"
@@ -1254,11 +1256,11 @@ export default function VatClassificationsView() {
         <HorizontalTableScrollbar scrollRef={templateTableScrollRef} />
         <div>
           <TablePagination
-            currentPage={1}
-            totalPages={1}
+            currentPage={fixedPage0}
+            totalPages={Math.max(1, Math.ceil(visibleTemplates.length / 20))}
             itemCount={visibleTemplates.length}
-            itemsPerPage={Math.max(1, visibleTemplates.length)}
-            onPageChange={() => undefined}
+            itemsPerPage={20}
+            onPageChange={setFixedPage0}
             onShowMore={() => undefined}
           />
         </div>
@@ -1421,7 +1423,7 @@ export default function VatClassificationsView() {
           </div>
 
           <div className="flex flex-col gap-0.5">
-            {visibleRows.map((row, rowIndex) => (
+            {visibleRows.slice((Math.min(fixedPage1, Math.max(1, Math.ceil(visibleRows.length / 20))) - 1) * 20, Math.min(fixedPage1, Math.max(1, Math.ceil(visibleRows.length / 20))) * 20).map((row, rowIndex) => (
               <div
                 key={row.id}
                 className={`group flex h-10 items-center rounded-lg font-montserrat text-[12px] text-[#10233A] transition-colors ${rowIndex % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} hover:bg-[#E7F4F9]`}
@@ -1521,11 +1523,11 @@ export default function VatClassificationsView() {
       <HorizontalTableScrollbar scrollRef={classificationTableScrollRef} />
       <div>
         <TablePagination
-          currentPage={1}
-          totalPages={1}
+          currentPage={fixedPage1}
+          totalPages={Math.max(1, Math.ceil(visibleRows.length / 20))}
           itemCount={visibleRows.length}
-          itemsPerPage={Math.max(1, visibleRows.length)}
-          onPageChange={() => undefined}
+          itemsPerPage={20}
+          onPageChange={setFixedPage1}
           onShowMore={() => undefined}
         />
       </div>

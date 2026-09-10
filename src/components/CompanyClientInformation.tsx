@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   Check,
@@ -28,6 +28,7 @@ import { loadGeneralLedgerTemplateNames } from "./GeneralLedgerView";
 import CompanyClientsView from "./CompanyClientsView";
 import { ensureOrganizationProductGroups } from "../lib/organizationProductGroups";
 import { loadCompanyLogo, saveCompanyLogo } from "../lib/companyBranding";
+import { createOrganization } from '../lib/organizationCreation';
 
 const STATS_TABS = [
   "Stats",
@@ -164,6 +165,26 @@ const ORGANIZATION_DIMENSION_EDITORS: Record<
     itemSingular: "product group",
     itemPlural: "product groups",
   },
+};
+
+const ADDITIONAL_SETTINGS_FIELDS: Record<string, keyof Company> = {
+  generalLedger: 'general_ledger',
+  vatClassification: 'vat_classification_template',
+  departmentCodes: 'department_codes',
+  objects: 'objects',
+  projects: 'projects',
+  costCenters: 'cost_centers',
+  productGroups: 'product_groups',
+  documentSeries: 'document_series',
+};
+
+const DIGITIZATION_SETTINGS_FIELDS: Record<string, keyof Company> = {
+  allowDocumentDuplicates: 'allow_document_duplicates',
+  invoiceDigitization: 'invoice_digitization',
+  documentSplitting: 'document_splitting',
+  rejectNonInvoices: 'reject_non_invoices',
+  primaryExportFormat: 'primary_export_format',
+  twoFactorAuthentication: 'two_factor_authentication',
 };
 
 type DimensionItem = { code: string; name?: string };
@@ -603,7 +624,7 @@ function createClientFields(
   }
 }
 
-function ClientField({
+export function ClientField({
   field,
   onChange,
 }: {
@@ -615,6 +636,26 @@ function ClientField({
   const [customOptions, setCustomOptions] = useState<string[]>([]);
   const [addingOption, setAddingOption] = useState(false);
   const [newOption, setNewOption] = useState("");
+  const fieldRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!isOpen) return;
+    const dismissOutside = (event: PointerEvent) => {
+      if (!fieldRef.current?.contains(event.target as Node)) {
+        setIsOpen(false);
+        setQuery('');
+        setAddingOption(false);
+      }
+    };
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setIsOpen(false); setQuery(''); setAddingOption(false); }
+    };
+    document.addEventListener('pointerdown', dismissOutside);
+    document.addEventListener('keydown', dismissOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', dismissOutside);
+      document.removeEventListener('keydown', dismissOnEscape);
+    };
+  }, [isOpen]);
   const referenceSectionByField: Partial<
     Record<string, OrganizationReferenceSection>
   > = {
@@ -655,7 +696,7 @@ function ClientField({
     "h-[42px] w-full rounded-lg border border-[#D3E1EC] bg-white px-[14px] font-montserrat text-[14px] font-medium leading-5 text-[#10233A] outline-none transition-colors focus:border-[#1B55E9]";
 
   return (
-    <label className="flex h-[70px] w-full flex-col gap-2">
+    <div ref={fieldRef} className="flex h-[70px] min-w-0 w-full flex-col gap-2" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) { setIsOpen(false); setQuery(''); } }}>
       <span className="font-montserrat text-[14px] font-semibold leading-5 text-[#10233A]">
         {optionName}
         {required && <span className="ml-1 text-[#E45858]">*</span>}
@@ -795,7 +836,7 @@ function ClientField({
           </>
         )}
       </span>
-    </label>
+    </div>
   );
 }
 
@@ -805,22 +846,33 @@ export default function CompanyClientInformation({
   onCompanyUpdated,
   onBack,
   onNavigateToUserDirectory,
+  onOpenSetupIntegration,
   organizationMode = false,
   organizationDesign = false,
   createMode = false,
+  additionalSettingsOnly = false,
+  bankInformationOnly = false,
+  digitizationSettingsOnly = false,
 }: {
   company: Company;
   activeTab: string;
   onCompanyUpdated?: (company: Company) => void;
   onBack?: () => void;
+  onOpenSetupIntegration?: () => void;
   onNavigateToUserDirectory?: (
     audience: "Internal users" | "External users",
   ) => void;
   organizationMode?: boolean;
   organizationDesign?: boolean;
   createMode?: boolean;
+  additionalSettingsOnly?: boolean;
+  bankInformationOnly?: boolean;
+  digitizationSettingsOnly?: boolean;
 }) {
   const organizationInformationDesign = organizationMode || organizationDesign;
+  const scopedSettingsOnly = additionalSettingsOnly || digitizationSettingsOnly;
+  const scopedSettingsFields = digitizationSettingsOnly ? DIGITIZATION_SETTINGS_FIELDS : ADDITIONAL_SETTINGS_FIELDS;
+  const scopedSettingsTitle = digitizationSettingsOnly ? 'Document digitization settings' : 'Additional settings';
   const [companyLogo, setCompanyLogo] = useState(() =>
     company.logo_url || loadCompanyLogo(company.id),
   );
@@ -837,7 +889,7 @@ export default function CompanyClientInformation({
     | "counterparties"
     | "users"
     | "email-history"
-  >("general");
+  >(bankInformationOnly ? "banking" : "general");
   const [organizationBankAccounts, setOrganizationBankAccounts] = useState<
     OrganizationBankAccount[]
   >(() => parseOrganizationBankAccounts(company.organization_bank_accounts));
@@ -1064,11 +1116,11 @@ export default function CompanyClientInformation({
     const values = Object.fromEntries(
       fields.map((field) => [field.key, field.value]),
     );
-    if (fields.some((field) => field.required && !field.value.trim())) {
+    if (fields.some((field) => (!scopedSettingsOnly || field.key in scopedSettingsFields) && field.required && !field.value.trim())) {
       setSaveError("Please complete all required fields.");
       return;
     }
-    if (/["“”„]/.test(values.legalName)) {
+    if (!scopedSettingsOnly && /["“”„]/.test(values.legalName)) {
       setSaveError("Company name cannot contain quotation marks.");
       return;
     }
@@ -1123,7 +1175,13 @@ export default function CompanyClientInformation({
             }
           : {}),
       };
-      if (organizationInformationDesign) {
+      if (scopedSettingsOnly) {
+        const allowedKeys = new Set(Object.values(scopedSettingsFields));
+        for (const key of Object.keys(companyUpdate) as Array<keyof Company>) {
+          if (!allowedKeys.has(key)) delete companyUpdate[key];
+        }
+      }
+      if (organizationInformationDesign && !createMode && !scopedSettingsOnly) {
         const { data: companyRows, error: companyLookupError } = await supabase
           .from("companies")
           .select("*");
@@ -1137,12 +1195,13 @@ export default function CompanyClientInformation({
         if (duplicateCode) throw new Error("DUPLICATE_COMPANY_CODE");
       }
       const saveResult = createMode
-        ? await supabase.from("companies").insert({
+        ? { data: [await createOrganization({
+            ...company,
             ...companyUpdate,
             client_since:
               Number(values.clientSince) || new Date().getFullYear(),
             action_required: 0,
-          })
+          })], error: null }
         : await supabase
             .from("companies")
             .update(companyUpdate)
@@ -1156,7 +1215,7 @@ export default function CompanyClientInformation({
             ...((saveResult.data?.[0] ?? {}) as Partial<Company>),
           } as Company)
         : ({ ...company, ...companyUpdate } as Company);
-      if (organizationInformationDesign) {
+      if (organizationInformationDesign && !digitizationSettingsOnly) {
         const scopedSeriesType = `series::company::${savedCompany.id}`;
         await supabase
           .from("lookup_values")
@@ -1190,9 +1249,15 @@ export default function CompanyClientInformation({
             .upsert(lookupRows, { onConflict: "type,value" });
         }
       }
+      let cachedValues = values;
+      if (scopedSettingsOnly) {
+        let previousValues: Record<string, string> = {};
+        try { previousValues = JSON.parse(window.localStorage.getItem(`${CLIENT_INFORMATION_STORAGE_KEY}${savedCompany.id}`) || '{}'); } catch { /* Keep current organization values when cache is invalid. */ }
+        cachedValues = { ...previousValues, ...Object.fromEntries(Object.entries(values).filter(([key]) => key in scopedSettingsFields)) };
+      }
       window.localStorage.setItem(
         `${CLIENT_INFORMATION_STORAGE_KEY}${savedCompany.id}`,
-        JSON.stringify(values),
+        JSON.stringify(cachedValues),
       );
       window.dispatchEvent(
         new CustomEvent("finansu-harmonija:settings-data-changed", {
@@ -1205,16 +1270,35 @@ export default function CompanyClientInformation({
       setSaveError(
         error instanceof Error && error.message === "DUPLICATE_COMPANY_CODE"
           ? "Company code must be unique."
-          : "Client information could not be saved. Please try again.",
+          : createMode && error instanceof Error ? error.message : "Client information could not be saved. Please try again.",
       );
     } finally {
       setSaving(false);
     }
   };
 
+  if (scopedSettingsOnly) return (
+    <section className="flex min-w-0 flex-col gap-6 rounded-lg border border-[#D3E1EC] p-5">
+      <h3 className="font-montserrat text-[16px] font-semibold leading-6 text-[#10233A]">{scopedSettingsTitle}</h3>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        {fields.filter(field => field.key in scopedSettingsFields).map(field => {
+          const dimension = ORGANIZATION_DIMENSION_EDITORS[field.key];
+          return dimension ? (
+            <div key={field.key} className="min-w-0">
+              <DepartmentCodesEditor value={field.value} onChange={value => updateField(field.key, value)} title={dimension.title} requiredLabel={dimension.requiredLabel} itemSingular={dimension.itemSingular} itemPlural={dimension.itemPlural} manageWhenNotRequired={field.key === 'productGroups' || field.key === 'documentSeries'} />
+            </div>
+          ) : <ClientField key={field.key} field={field} onChange={value => updateField(field.key, value)} />;
+        })}
+      </div>
+      {saveError && <p role="alert" className="font-montserrat text-[12px] text-[#D64545]">{saveError}</p>}
+      {saved && <p role="status" className="font-montserrat text-[12px] text-[#2EA96B]">{scopedSettingsTitle} saved.</p>}
+      <div className="flex justify-end"><PageActionButton disabled={saving} onClick={() => void saveClientInformation()}>{saving ? 'Saving…' : 'Save'}</PageActionButton></div>
+    </section>
+  );
+
   return (
-    <div className="relative flex min-h-full flex-col items-start gap-8 bg-white px-[72px] py-14">
-      <PageHeader
+    <div className={`relative flex min-w-0 flex-col items-start gap-6 bg-white ${bankInformationOnly ? 'w-full' : 'min-h-full px-[72px] py-14'}`}>
+      {!bankInformationOnly && <PageHeader
         title={createMode ? "Create organization" : company.name}
         className="max-w-[1440px]"
         leading={
@@ -1235,6 +1319,7 @@ export default function CompanyClientInformation({
               organizationFormSection !== "email-history")) ||
           (!organizationMode && activeTab === "Contacts") ? (
             <>
+              {!createMode && onOpenSetupIntegration && <PageActionButton onClick={onOpenSetupIntegration}>Setup & integration</PageActionButton>}
               <PageActionButton onClick={saveClientInformation}>
                 {saving
                   ? "Saving..."
@@ -1250,7 +1335,7 @@ export default function CompanyClientInformation({
             </>
           ) : undefined
         }
-      />
+      />}
       {!organizationMode && !createMode && (
         <CompanyBreadcrumb
           companyName={company.name}
@@ -1287,7 +1372,7 @@ export default function CompanyClientInformation({
                     : "max-w-[980px]"
             }`}
           >
-            {organizationInformationDesign && (
+            {organizationInformationDesign && !bankInformationOnly && (
               <div
                 role="tablist"
                 aria-label="Organization settings sections"
@@ -1659,6 +1744,7 @@ export default function CompanyClientInformation({
                   {saveError}
                 </span>
               )}
+              {bankInformationOnly && <div className="flex justify-end"><PageActionButton disabled={saving} onClick={() => void saveClientInformation()}>{saving ? 'Saving…' : 'Save'}</PageActionButton></div>}
             </div>
           </div>
         ) : activeTab === "Contacts" ? (
@@ -1777,13 +1863,7 @@ function StatsView({
               <div className="h-2 w-1/2 rounded-full bg-[#D3E1EC]" />
             </div>
             <div className="flex items-center gap-4">
-              <span>1–2 from 2 items</span>
-              <button
-                type="button"
-                className="h-9 rounded-lg border-2 border-[#D3E1EC] px-4 text-[14px] font-semibold"
-              >
-                Show more
-              </button>
+              <span>1–2 from 2</span>
             </div>
           </div>
         </div>

@@ -1,3 +1,4 @@
+import TablePagination from "./TablePagination";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, UserPlus } from "lucide-react";
 import OcrSearchField from "./OcrSearchField";
@@ -11,6 +12,7 @@ import { ResizeHandle, useColumnResize } from "./useColumnResize";
 import { supabase } from "../lib/supabase";
 import {
   loadLinkedDirectoryUsers,
+  addAccountantToOrganizations,
   loadOrganizationUserIds,
   reconcileOrganizationUserLinks,
   setOrganizationAssignmentsAndSyncUsers,
@@ -57,11 +59,16 @@ export default function OrganizationUsersSettings({
   organizationId,
   organizationName,
   onCreateUser,
+  onAudienceChange,
+  assignedOnly = false,
 }: {
   organizationId: string;
   organizationName: string;
   onCreateUser: (audience: Audience) => void;
+  onAudienceChange?: (audience: Audience) => void;
+  assignedOnly?: boolean;
 }) {
+  const [tablePage, setTablePage] = useState(1);
   const [audience, setAudience] = useState<Audience>("Internal users");
   const [directories, setDirectories] = useState<Record<Audience, DirectoryUser[]>>(() => ({
     "Internal users": loadDirectory("Internal users"),
@@ -135,13 +142,14 @@ export default function OrganizationUsersSettings({
   const selected = assignments[audience];
   const filteredUsers = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    if (!normalized) return users;
-    return users.filter((user) =>
+    const visibleUsers = assignedOnly ? users.filter(user => selected.has(user.id)) : users;
+    if (!normalized) return visibleUsers;
+    return visibleUsers.filter((user) =>
       [user.fullName, user.username, user.email, user.phone, user.roles]
         .filter(Boolean)
         .some((value) => value!.toLowerCase().includes(normalized)),
     );
-  }, [query, users]);
+  }, [query, users, selected, assignedOnly]);
   const { sortedRows, changeSort, directionFor } = useMultiColumnSort<
     DirectoryUser,
     UserColumnKey
@@ -163,6 +171,11 @@ export default function OrganizationUsersSettings({
     const currentOrganization =
       organizations.find((organization) => organization.id === organizationId) ??
       { id: organizationId, name: organizationName, company_status: "Active" };
+    if (audience === 'Internal users') {
+      const added = [...next].filter(id => !selected.has(id));
+      const removed = [...selected].filter(id => !next.has(id));
+      if (added.length || removed.length) addAccountantToOrganizations(added, [currentOrganization], removed);
+    }
     const linked = setOrganizationAssignmentsAndSyncUsers(
       currentOrganization,
       organizations,
@@ -213,6 +226,7 @@ export default function OrganizationUsersSettings({
             aria-selected={audience === item}
             onClick={() => {
               setAudience(item);
+              onAudienceChange?.(item);
               setQuery("");
             }}
             className={`border-b-2 px-4 py-2.5 font-montserrat text-[13px] font-semibold ${
@@ -234,7 +248,6 @@ export default function OrganizationUsersSettings({
           value={query}
           onChange={setQuery}
           ariaLabel={`Search ${audience.toLowerCase()}`}
-          className="w-full max-w-[420px]"
         />
         <div className="flex items-center gap-4">
           {saved && (
@@ -286,7 +299,7 @@ export default function OrganizationUsersSettings({
             })}
           </div>
           <div className="flex flex-col gap-0.5">
-            {sortedRows.map((user, rowIndex) => {
+            {sortedRows.slice((Math.min(tablePage, Math.max(1, Math.ceil(sortedRows.length / 20))) - 1) * 20, Math.min(tablePage, Math.max(1, Math.ceil(sortedRows.length / 20))) * 20).map((user, rowIndex) => {
               const checked = selected.has(user.id);
               return (
                 <button
@@ -340,6 +353,7 @@ export default function OrganizationUsersSettings({
         </div>
       </div>
       <HorizontalTableScrollbar scrollRef={tableScrollRef} fixed={false} />
+      <TablePagination currentPage={tablePage} totalPages={Math.max(1, Math.ceil(sortedRows.length / 20))} itemCount={sortedRows.length} itemsPerPage={20} onPageChange={setTablePage} />
       {showColumns && (
         <ColumnSettingsPanel
           columns={columns}

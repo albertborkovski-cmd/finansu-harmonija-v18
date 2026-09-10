@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import useAppTableFooterPosition from "../hooks/useAppTableFooterPosition";
 
 interface TablePaginationProps {
@@ -15,16 +15,13 @@ interface TablePaginationProps {
   className?: string;
 }
 
-/** Shared table footer: pagination on the left, item range and Show more on the right. */
+/** Shared table footer: fixed-size pages and an exact record range. */
 export default function TablePagination({
   currentPage,
   totalPages,
   itemCount,
-  itemsPerPage = 14,
+  itemsPerPage = 20,
   onPageChange,
-  onShowMore,
-  showMoreLabel = "Show more",
-  allItemsVisible = false,
   hideSummary = false,
   className = "",
 }: TablePaginationProps) {
@@ -42,14 +39,14 @@ export default function TablePagination({
       : undefined;
   const normalizedPageSize = Number.isFinite(itemsPerPage)
     ? Math.max(1, Math.floor(itemsPerPage))
-    : 14;
+    : 20;
   const safeTotal = normalizedItemCount !== undefined
       ? Math.max(1, Math.ceil(normalizedItemCount / normalizedPageSize))
       : Math.max(1, normalizedTotal);
   const safeCurrent = Math.min(safeTotal, Math.max(1, normalizedCurrent));
   const pages = Array.from(
     { length: Math.min(5, safeTotal) },
-    (_, index) => index + 1,
+    (_, index) => Math.max(1, Math.min(safeCurrent - 2, safeTotal - 4)) + index,
   );
   const hasMore = safeTotal > 5;
   const displayedItemCount =
@@ -71,6 +68,7 @@ export default function TablePagination({
         className="order-first mr-auto flex h-8 flex-row items-center flex-shrink-0"
         aria-label="Table pages"
       >
+        <button type="button" aria-label="Previous page" disabled={safeCurrent <= 1} onClick={() => onPageChange(safeCurrent - 1)} className="flex h-8 w-8 items-center justify-center text-[#7288A3] disabled:cursor-not-allowed disabled:opacity-40"><ChevronLeft size={14} /></button>
         {pages.map((page) => (
           <button
             key={page}
@@ -102,17 +100,8 @@ export default function TablePagination({
 
       {!hideSummary && <div className="ml-auto flex h-8 flex-shrink-0 flex-row items-center gap-[14px]">
         <span className="whitespace-nowrap font-montserrat text-[12px] font-normal leading-[18px] text-[#7288A3]">
-          {allItemsVisible
-            ? `${displayedItemCount.toLocaleString()} from ${displayedItemCount.toLocaleString()} items`
-            : `${rangeStart.toLocaleString()}–${rangeEnd.toLocaleString()} from ${displayedItemCount.toLocaleString()} items`}
+          {`${rangeStart.toLocaleString()}–${rangeEnd.toLocaleString()} from ${displayedItemCount.toLocaleString()}`}
         </span>
-        <button
-          type="button"
-          onClick={onShowMore}
-          className="flex h-8 min-w-[107px] items-center justify-center whitespace-nowrap rounded-md border-2 border-[#D3E1EC] bg-white px-3 py-[6px] font-montserrat text-[14px] font-semibold leading-5 text-[#7288A3] transition-colors hover:border-[#007EA7] active:border-[#007EA7] active:text-[#007EA7]"
-        >
-          {showMoreLabel}
-        </button>
       </div>}
     </div>
   );

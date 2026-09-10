@@ -642,7 +642,7 @@ export default function OrganizationReferenceValuesView({
     });
   }, [activeFilterKeys, filterValues, search, section, sortedRows]);
 
-  const recordsPerPage = 4;
+  const recordsPerPage = 20;
   const paginationItemCount =
     section === "Document type" && selectedDocumentTypeCode
       ? visibleSubtypeRecords.length

@@ -39,7 +39,7 @@ function TrainModelOptionsModal({ onClose, onSelect, models }: { onClose: () => 
             <div className="flex h-[396px] flex-col gap-4 overflow-hidden">
               <div className="grid h-5 grid-cols-[256px_250px_1fr] items-center gap-3 px-3 font-montserrat text-[12px] font-medium leading-[18px] text-[#7288A3]"><span className="text-[#10233A]">Name</span><span>Description</span><span /></div>
               <div className="flex flex-col overflow-hidden">
-                {options.map((option, index) => (
+                {options.slice((Math.min(page, Math.max(1, Math.ceil(options.length / 20))) - 1) * 20, Math.min(page, Math.max(1, Math.ceil(options.length / 20))) * 20).map((option, index) => (
                   <div key={option.id} className={`grid h-9 flex-shrink-0 grid-cols-[256px_250px_1fr] items-center gap-3 rounded-lg px-3 font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
                     <span className="truncate">{option.name}</span><span className="truncate">{option.description}</span>
                     <span className="flex justify-end"><button type="button" aria-label={`Select train model option ${index + 1}`} onClick={() => onSelect(option)} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] hover:border-[#007EA7] hover:text-[#007EA7]"><Target size={16} /></button></span>

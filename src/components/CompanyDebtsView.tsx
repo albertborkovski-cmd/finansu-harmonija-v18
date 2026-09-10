@@ -276,9 +276,9 @@ export default function CompanyDebtsView({ companyName = "" }: { companyName?: s
       <div className="flex flex-shrink-0 items-center justify-between pt-2">
         <TablePagination
           currentPage={currentPage}
-          totalPages={Math.max(1, Math.ceil(sortedRows.length / 14))}
+          totalPages={Math.max(1, Math.ceil(sortedRows.length / 20))}
           itemCount={sortedRows.length}
-          itemsPerPage={14}
+          itemsPerPage={20}
           onPageChange={setCurrentPage}
         />
       </div>

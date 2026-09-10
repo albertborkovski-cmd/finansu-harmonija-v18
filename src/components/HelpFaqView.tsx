@@ -116,7 +116,6 @@ export default function HelpFaqView() {
     SAMPLE_ROWS,
   );
   const [currentPage, setCurrentPage] = useState(1);
-  const totalPages = 10;
   const [selectedRow, setSelectedRow] = useState<ActionRow | null>(null);
   const [showColumnSettings, setShowColumnSettings] = useState(false);
   const [columns, setColumns] = usePersistentState<ColConfig[]>(
@@ -249,7 +248,7 @@ export default function HelpFaqView() {
 
             {/* Rows */}
             <div className="flex flex-col">
-              {sortedRows.map((row, rowIndex) => (
+              {sortedRows.slice((Math.min(currentPage, Math.max(1, Math.ceil(sortedRows.length / 20))) - 1) * 20, Math.min(currentPage, Math.max(1, Math.ceil(sortedRows.length / 20))) * 20).map((row, rowIndex) => (
                 <div
                   key={row.id}
                   className={`flex flex-row items-center pl-3 gap-3 h-9 rounded-lg min-w-fit ${
@@ -318,8 +317,8 @@ export default function HelpFaqView() {
           <div className="flex flex-row items-center gap-4">
             <TablePagination
               currentPage={currentPage}
-              totalPages={totalPages}
-              itemCount={rows.length}
+              totalPages={Math.max(1, Math.ceil(sortedRows.length / 20))}
+              itemCount={sortedRows.length}
               onPageChange={setCurrentPage}
             />
           </div>

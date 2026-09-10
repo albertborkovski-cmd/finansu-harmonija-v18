@@ -139,7 +139,7 @@ function GroupManagementView({ documentSet, onBack, onOpenDocumentSet }: { docum
               <span className="w-9 flex-shrink-0" />
             </div>
             <div className="mt-4 flex flex-col">
-              {members.map((member, index) => (
+              {members.slice((Math.min(groupPage, Math.max(1, Math.ceil(members.length / 20))) - 1) * 20, Math.min(groupPage, Math.max(1, Math.ceil(members.length / 20))) * 20).map((member, index) => (
                 <div key={member.id} className={`flex h-9 items-center rounded-lg font-montserrat text-[12px] leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
                   {visibleGroupColumns.map((column) => (
                     <div key={column.key} className="flex flex-shrink-0 items-center gap-3 truncate px-3" style={{ width: column.width }}>
@@ -205,7 +205,6 @@ export default function MachineLearningView({
   const [documentSets, setDocumentSets] = usePersistentState<DocumentSet[]>('finansu-harmonija:v7:ml-document-sets', SAMPLE_SETS);
   const [query, setQuery] = useState('');
   const { startResize } = useColumnResize(columns, setColumns);
-  const totalPages = 10;
   const visibleColumns = columns.filter(column => column.visible);
   const tableMinWidth = visibleColumns.reduce((total, column) => total + column.width, 68);
   const filteredSets = useMemo(() => documentSets.filter(documentSet => matchesTextSearch(documentSet, query)), [documentSets, query]);
@@ -419,7 +418,7 @@ export default function MachineLearningView({
 
               {/* Rows */}
               <div className="flex flex-col">
-                {sortedSets.map((set, i) => (
+                {sortedSets.slice((Math.min(currentPage, Math.max(1, Math.ceil(sortedSets.length / 20))) - 1) * 20, Math.min(currentPage, Math.max(1, Math.ceil(sortedSets.length / 20))) * 20).map((set, i) => (
                   <div
                     key={set.id}
                     className={`group flex h-9 w-full flex-row items-center rounded-lg ${i % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} transition-colors hover:bg-[#E7F4F9]`}
@@ -479,7 +478,7 @@ export default function MachineLearningView({
 
           {/* Footer / Pagination */}
           <div className="flex flex-row flex-wrap justify-between items-center gap-4 flex-shrink-0">
-            <TablePagination currentPage={currentPage} totalPages={totalPages} itemCount={SAMPLE_SETS.length} onPageChange={setCurrentPage} />
+            <TablePagination currentPage={currentPage} totalPages={Math.max(1, Math.ceil(sortedSets.length / 20))} itemCount={sortedSets.length} onPageChange={setCurrentPage} />
           </div>
         </div>
       </div>

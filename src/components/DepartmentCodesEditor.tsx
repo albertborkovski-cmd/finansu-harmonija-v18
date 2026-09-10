@@ -1,7 +1,9 @@
 import { useRef, useState } from "react";
-import { Check, FileUp, Plus, Trash2, X } from "lucide-react";
+import { FileUp, Plus, Trash2, X } from "lucide-react";
 import * as XLSX from "xlsx";
 import OcrSearchField from "./OcrSearchField";
+
+const ACTION_BUTTON_STYLE = 'flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md border-2 border-[#D3E1EC] bg-white px-3 font-montserrat text-[12px] font-semibold leading-5 text-[#7288A3] transition-colors hover:border-[#A1B6C6] active:border-[#007EA7] active:bg-[#007EA7] active:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#007EA7]/30';
 
 interface DepartmentCodeItem {
   id: string;
@@ -156,27 +158,17 @@ export default function DepartmentCodesEditor({
 
   return (
     <section className="flex flex-col gap-4 rounded-xl border border-[#D3E1EC] bg-white p-4">
-      <div className="flex items-center justify-between gap-4">
-        <label className="flex cursor-pointer items-center gap-3 font-montserrat text-[14px] font-semibold text-[#10233A]">
+      <div className="flex min-h-9 flex-wrap items-center justify-between gap-3">
+        <label className="flex min-w-0 cursor-pointer items-center gap-3 font-montserrat text-[14px] font-semibold text-[#10233A]">
           <input
             type="checkbox"
-            className="sr-only"
+            className="shrink-0"
             checked={config.enabled}
             onChange={(event) => {
               update({ ...config, enabled: event.target.checked });
               if (!event.target.checked) closeManager();
             }}
           />
-          <span
-            aria-hidden="true"
-            className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border ${
-              config.enabled
-                ? "border-[#008AAF] bg-[#008AAF] text-white"
-                : "border-[#AFC3D4] bg-white text-transparent"
-            }`}
-          >
-            <Check size={14} strokeWidth={3} />
-          </span>
           {requiredLabel}
         </label>
 
@@ -185,7 +177,7 @@ export default function DepartmentCodesEditor({
             type="button"
             aria-expanded={expanded}
             onClick={openManager}
-            className="flex h-9 shrink-0 items-center gap-2 rounded-lg border border-[#D3E1EC] px-3 font-montserrat text-[13px] font-semibold text-[#007EA7] hover:border-[#008AAF] hover:bg-[#F2FAFC]"
+            className={ACTION_BUTTON_STYLE}
           >
             Manage codes
           </button>
@@ -249,7 +241,7 @@ export default function DepartmentCodesEditor({
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex h-9 items-center gap-1.5 rounded-lg border border-[#D3E1EC] px-3 font-montserrat text-[11px] font-semibold text-[#7288A3] hover:border-[#008AAF] hover:text-[#007EA7]"
+                  className={ACTION_BUTTON_STYLE}
                 >
                   <FileUp size={15} />
                   Import
@@ -262,7 +254,7 @@ export default function DepartmentCodesEditor({
                       items: [...config.items, createItem()],
                     })
                   }
-                  className="flex h-9 items-center gap-1.5 rounded-lg bg-[#008AAF] px-3 font-montserrat text-[11px] font-semibold text-white hover:bg-[#007A9B]"
+                  className={ACTION_BUTTON_STYLE}
                 >
                   <Plus size={15} />
                   Add {itemSingular}
@@ -366,7 +358,7 @@ export default function DepartmentCodesEditor({
                   <button
                     type="button"
                     onClick={() => update({ ...config, items: [createItem()] })}
-                    className="flex h-9 items-center gap-1.5 rounded-lg bg-[#008AAF] px-3 font-montserrat text-[11px] font-semibold text-white"
+                    className={ACTION_BUTTON_STYLE}
                   >
                     <Plus size={15} />
                     Add {itemSingular}
@@ -392,7 +384,7 @@ export default function DepartmentCodesEditor({
               <button
                 type="button"
                 onClick={closeManager}
-                className="h-9 rounded-lg bg-[#008AAF] px-4 font-montserrat text-[12px] font-semibold text-white hover:bg-[#007A9B]"
+                className={ACTION_BUTTON_STYLE}
               >
                 Done
               </button>

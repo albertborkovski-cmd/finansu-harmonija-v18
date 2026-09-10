@@ -22,7 +22,7 @@ import {
   SETTINGS_DATA_CHANGED_EVENT,
 } from "../lib/linkedSettingsData";
 
-const ANALYTICS_ROWS_PER_PAGE = 6;
+const ANALYTICS_ROWS_PER_PAGE = 20;
 
 type DirectoryUser = {
   id: string;

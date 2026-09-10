@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Copy, Download, Eye, FileClock, X } from "lucide-react";
 import type { Company, DbDocument } from "../lib/supabase";
 import { supabase } from "../lib/supabase";
+import { canAccessAssignedOrganization } from '../lib/linkedSettingsData';
+import { parseSession } from '../lib/accessControl';
+import { AUTH_SESSION_KEY } from '../lib/currentUser';
 import { usePersistentState } from "../hooks/usePersistentState";
 import { PageActionButton, PageHeader } from "./PageHeader";
 import CompanyBreadcrumb from "./CompanyBreadcrumb";
@@ -15,10 +18,12 @@ import TablePagination from "./TablePagination";
 import ColumnSortButton, { useMultiColumnSort } from "./ColumnSortButton";
 import { ResizeHandle, useColumnResize } from "./useColumnResize";
 import { getCurrentUserName } from "../lib/currentUser";
+import { SystemBreadcrumb } from './SystemNavigation';
 
 type ActionStatus = "Active" | "Archived";
 
 type ActionHistoryRow = {
+  organization?: string;
   id: string;
   date: string;
   user: string;
@@ -31,6 +36,9 @@ type ActionHistoryRow = {
 };
 
 type RawDocumentHistory = {
+  organization_id?: string;
+  category?: string;
+  organization_name?: string;
   id: string;
   document_id: string;
   user_name: string;
@@ -40,6 +48,7 @@ type RawDocumentHistory = {
 };
 
 type ActionColumnKey =
+  | "organization"
   | "date"
   | "user"
   | "userType"
@@ -57,6 +66,7 @@ const DEFAULT_COLUMNS: ColConfig[] = [
   { key: "objectNumber", label: "Object ID / No.", width: 170, visible: true },
   { key: "status", label: "Status", width: 130, visible: true },
 ];
+const GLOBAL_COLUMNS: ColConfig[] = [DEFAULT_COLUMNS[0], { key: 'organization', label: 'Organization', width: 200, visible: true }, ...DEFAULT_COLUMNS.slice(1)];
 
 const STATUS_COLOR: Record<ActionStatus, string> = {
   Active: "#0ED8A8",
@@ -105,41 +115,55 @@ function objectNumberFor(document: DbDocument) {
   return document.number?.trim() || document.file_case?.trim() || document.id;
 }
 
-export default function CompanyActionHistoryView({ company }: { company: Company }) {
+export default function CompanyActionHistoryView({ company, administrativeOnly = false, global = false, embedded = false }: { company: Company; administrativeOnly?: boolean; global?: boolean; embedded?: boolean }) {
   const [rows, setRows] = useState<ActionHistoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [filterKeys, setFilterKeys] = useState<string[]>([]);
   const [filterValues, setFilterValues] = useState<Record<string, string[]>>({});
   const [columns, setColumns] = usePersistentState<ColConfig[]>(
-    `finansu-harmonija:v12:columns:company-action-history:${company.id}`,
-    DEFAULT_COLUMNS,
+    `finansu-harmonija:v12:columns:company-action-history:${global ? 'centralized' : company.id}`,
+    global ? GLOBAL_COLUMNS : DEFAULT_COLUMNS,
   );
   const [showColumns, setShowColumns] = useState(false);
   const [selectedAction, setSelectedAction] = useState<ActionHistoryRow | null>(null);
   const [copied, setCopied] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(4);
+  const [itemsPerPage, setItemsPerPage] = useState(20);
   const [refreshingText, setRefreshingText] = useState(false);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const { startResize } = useColumnResize(columns, setColumns);
 
   const loadActions = useCallback(async () => {
     setLoading(true);
-    const [documentResult, historyResult] = await Promise.all([
+    const [documentResult, historyResult, companyResult] = await Promise.all([
       supabase
         .from("documents")
         .select("*")
-        .eq("company_id", company.id)
         .order("created_at", { ascending: false }),
       supabase
         .from("document_history")
         .select("*")
         .order("created_at", { ascending: false }),
+      supabase.from('companies').select('*'),
     ]);
 
-    const documents = (documentResult.data ?? []) as unknown as DbDocument[];
+    const session = parseSession(localStorage.getItem(AUTH_SESSION_KEY));
+    const organizations = ((companyResult.data ?? []) as unknown as Company[]).filter(organization => session && canAccessAssignedOrganization(organization, session));
+    const accessibleIds = new Set(organizations.map(organization => organization.id));
+    const documents = ((documentResult.data ?? []) as unknown as DbDocument[]).filter(document => accessibleIds.has(document.company_id || '') && (global || document.company_id === company.id));
     const documentById = new Map(documents.map((document) => [document.id, document]));
+    const adminRows: ActionHistoryRow[] = ((historyResult.data ?? []) as unknown as RawDocumentHistory[])
+      .filter(row => row.organization_id && accessibleIds.has(row.organization_id) && row.category && (global || row.organization_id === company.id))
+      .map(row => ({ id: row.id, date: row.created_at, user: normalizeHistoricalUser(row.user_name), userType: 'Internal user', actionType: row.action, objectType: row.category!, objectNumber: row.organization_name || row.organization_id!, status: 'Active', details: row.details }));
+    const legacyRows: ActionHistoryRow[] = [];
+    for (const organization of organizations) {
+      if (!global && organization.id !== company.id) continue;
+      try {
+        const entries = JSON.parse(organization.organization_status_history || '[]');
+        if (Array.isArray(entries)) entries.forEach((entry, index) => legacyRows.push({ id: `organization-status-${organization.id}-${index}`, date: entry.changedAt, user: entry.changedBy || 'Unknown user', userType: 'Internal user', actionType: `Status changed to ${entry.status}`, objectType: 'Status', objectNumber: organization.name, status: 'Active', details: entry.reason || '' }));
+      } catch { /* Preserve unreadable legacy data without fabricating events. */ }
+    }
     const savedHistory = ((historyResult.data ?? []) as unknown as RawDocumentHistory[])
       .filter((history) => documentById.has(history.document_id))
       .map<ActionHistoryRow>((history) => {
@@ -163,7 +187,7 @@ export default function CompanyActionHistoryView({ company }: { company: Company
       user:
         document.source === "Manual"
           ? document.created_by?.trim() || "Unknown user"
-          : company.name,
+          : organizations.find(organization => organization.id === document.company_id)?.name || company.name,
       userType: document.source === "Manual" ? "Internal user" : "Client",
       actionType:
         document.source === "Manual" ? "Document creation" : "Document upload",
@@ -176,21 +200,30 @@ export default function CompanyActionHistoryView({ company }: { company: Company
           : `Document received from ${document.source || "an external source"}.`,
     }));
 
+    const organizationByEvent = new Map<string, string>();
+    for (const document of documents) organizationByEvent.set(`created-${document.id}`, organizations.find(organization => organization.id === document.company_id)?.name || document.company_id || '—');
+    for (const event of (historyResult.data ?? []) as unknown as RawDocumentHistory[]) {
+      const organizationId = event.organization_id || documentById.get(event.document_id)?.company_id;
+      organizationByEvent.set(event.id, organizations.find(organization => organization.id === organizationId)?.name || event.organization_name || '—');
+    }
     setRows(
-      [...savedHistory, ...creationRows].sort(
+      [...adminRows, ...legacyRows, ...(administrativeOnly ? [] : [...savedHistory, ...creationRows])].map(row => ({ ...row, organization: row.id.startsWith('organization-status-') ? row.objectNumber : organizationByEvent.get(row.id) || '—' })).sort(
         (left, right) =>
           new Date(right.date).getTime() - new Date(left.date).getTime(),
       ),
     );
     setLoading(false);
-  }, [company.id, company.name]);
+  }, [company.id, company.name, administrativeOnly, global]);
 
   useEffect(() => {
     void loadActions();
+    const refresh = () => { void loadActions(); };
+    window.addEventListener('administrative-history-changed', refresh);
+    return () => window.removeEventListener('administrative-history-changed', refresh);
   }, [loadActions]);
 
   const visibleColumns = columns.filter((column) => column.visible);
-  const filterColumns = DEFAULT_COLUMNS.map((column) => ({
+  const filterColumns = (global ? GLOBAL_COLUMNS : DEFAULT_COLUMNS).map((column) => ({
     key: column.key,
     label: column.label,
     options: Array.from(
@@ -264,14 +297,15 @@ export default function CompanyActionHistoryView({ company }: { company: Company
   };
 
   return (
-    <main className="flex min-h-full min-w-0 flex-1 flex-col gap-8 bg-white px-4 py-14 sm:px-8 lg:px-[72px]">
+    <main className={`flex min-h-full min-w-0 flex-1 flex-col gap-8 bg-white ${embedded ? '' : 'px-4 py-14 sm:px-8 lg:px-[72px]'}`}>
       <PageHeader
-        title="Action history"
+        title={administrativeOnly ? 'Audit history' : 'Action history'}
         actions={
           <PageActionButton onClick={exportHistory}>Export history</PageActionButton>
         }
       />
-      <CompanyBreadcrumb companyName={company.name} items={["Action history"]} />
+      {!embedded && (global ? <SystemBreadcrumb items={['Action history']} /> : <CompanyBreadcrumb companyName={company.name} items={[administrativeOnly ? 'Audit history' : 'Action history']} />)}
+      {administrativeOnly && <p className="font-montserrat text-[12px] text-[#7288A3]">{global ? 'All organizations' : company.name} · Administrative changes: status, accountants, substitutions, access, services, setup / integration.</p>}
 
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">

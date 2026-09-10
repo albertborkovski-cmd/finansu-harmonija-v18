@@ -127,6 +127,7 @@ function createJournalCandidates(document: Document, activeAccounts: Set<string>
 }
 
 export default function CompanyGlJournalView({ company }: { company: Company }) {
+  const [fixedPage0, setFixedPage0] = useState(1);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
@@ -339,7 +340,7 @@ export default function CompanyGlJournalView({ company }: { company: Company }) 
           </div>
 
           <div className="flex flex-col gap-0.5">
-            {sortedRows.map((row, index) => (
+            {sortedRows.slice((Math.min(fixedPage0, Math.max(1, Math.ceil(sortedRows.length / 20))) - 1) * 20, Math.min(fixedPage0, Math.max(1, Math.ceil(sortedRows.length / 20))) * 20).map((row, index) => (
               <div key={row.id} className={`group flex h-10 items-center rounded-lg ${index % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} hover:bg-[#E7F4F9]`}>
                 {visibleColumns.map((column) => (
                   <div key={column.key} style={{ width: column.width }} className="flex-shrink-0 overflow-hidden px-3 font-montserrat text-[12px] font-normal text-[#10233A]">
@@ -365,7 +366,7 @@ export default function CompanyGlJournalView({ company }: { company: Company }) 
       </div>
 
       <HorizontalTableScrollbar scrollRef={tableScrollRef} />
-      <TablePagination currentPage={1} totalPages={1} itemCount={sortedRows.length} onPageChange={() => undefined} />
+      <TablePagination currentPage={fixedPage0} totalPages={Math.max(1, Math.ceil(sortedRows.length / 20))} itemCount={sortedRows.length} onPageChange={setFixedPage0} />
 
       {showColumns && (
         <ColumnSettingsPanel columns={columns} defaultColumns={DEFAULT_COLUMNS} onSave={(next) => { setColumns(next); setShowColumns(false); }} onClose={() => setShowColumns(false)} />

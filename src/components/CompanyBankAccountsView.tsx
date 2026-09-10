@@ -161,7 +161,7 @@ export default function CompanyBankAccountsView({ company, onCompanyUpdated }: {
   }, [filterKeys, filterValues, query, rows]);
 
   const { sortedRows, changeSort, directionFor } = useMultiColumnSort<BankAccountRow, BankAccountColumnKey>(filteredRows, (row, key) => row[key]);
-  const itemsPerPage = showAll ? Math.max(1, sortedRows.length) : 4;
+  const itemsPerPage = showAll ? Math.max(1, sortedRows.length) : 20;
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / itemsPerPage));
   const currentPage = Math.min(page, totalPages);
   const visibleRows = showAll ? sortedRows : sortedRows.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, User, Menu, LogOut, ChevronDown, LayoutDashboard, Files, HandCoins, Scale, BarChart3, History, Building2, Headphones, HelpCircle, BookOpenText, Landmark } from 'lucide-react';
+import { ArrowLeft, User, Menu, LogOut, ChevronDown, LayoutDashboard, Files, HandCoins, Scale, BarChart3, Building2, Headphones, HelpCircle, BookOpenText, Landmark } from 'lucide-react';
 import type { Company } from '../lib/supabase';
 import Documents from './Documents';
 import DashboardView from './DashboardView';
@@ -12,7 +12,6 @@ import AllDocumentsView from './AllDocumentsView';
 import CompanyBreadcrumb from './CompanyBreadcrumb';
 import GeneralLedgerView from './GeneralLedgerView';
 import CompanyReportsView from './CompanyReportsView';
-import CompanyActionHistoryView from './CompanyActionHistoryView';
 import CompanyGlJournalView from './CompanyGlJournalView';
 import CompanyBankView from './CompanyBankView';
 import CompanyBankAccountsView from './CompanyBankAccountsView';
@@ -26,6 +25,7 @@ interface CompanyDetailProps {
   onOpenProfile: () => void;
   initialMenu?: string;
   initialDocumentId?: string | null;
+  initialDocumentMode?: 'view' | 'edit' | 'original-view';
   onOpenChat?: (context: InvoiceChatContext) => void;
 }
 
@@ -37,7 +37,6 @@ const mainMenuItems = [
   { id: 'reports',       label: 'Debts', icon: HandCoins },
   { id: 'services',      label: 'Reconciliation', icon: Scale },
   { id: 'settings',      label: 'Reports', icon: BarChart3 },
-  { id: 'notifications', label: 'Action history', icon: History },
   { id: 'activity',      label: 'Company/Client information', icon: Building2 },
 ];
 
@@ -81,7 +80,7 @@ function SubmenuStepperDot({ isActive, isFirst, isLast }: { isActive: boolean; i
   );
 }
 
-export default function CompanyDetail({ company, onBack, onLogout, onOpenProfile, initialMenu = 'overview', initialDocumentId = null, onOpenChat }: CompanyDetailProps) {
+export default function CompanyDetail({ company, onBack, onLogout, onOpenProfile, initialMenu = 'overview', initialDocumentId = null, initialDocumentMode = 'view', onOpenChat }: CompanyDetailProps) {
   const [currentCompany, setCurrentCompany] = useState(company);
   const [isExpanded, setIsExpanded] = useState(true);
   const [activeMenu, setActiveMenu] = useState(initialMenu === 'invoices' ? 'documents' : initialMenu);
@@ -327,7 +326,7 @@ export default function CompanyDetail({ company, onBack, onLogout, onOpenProfile
       <div data-app-main className="relative min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-white">
         {activeMenu === 'documents' ? (
           activeDocumentsMenu === 'documents'
-            ? <Documents companyId={currentCompany.id} companyName={currentCompany.name} company={currentCompany} generalLedgerName={currentCompany.general_ledger ?? ''} initialViewDocumentId={dashboardDocumentId} onInitialViewConsumed={() => setDashboardDocumentId(null)} onInitialViewBack={initialDocumentId ? onBack : () => setActiveMenu('overview')} onOpenGeneralLedger={openGeneralLedger} onStartChat={onOpenChat} />
+            ? <Documents companyId={currentCompany.id} companyName={currentCompany.name} company={currentCompany} generalLedgerName={currentCompany.general_ledger ?? ''} initialViewDocumentId={dashboardDocumentId} initialDocumentMode={initialDocumentMode} onInitialViewConsumed={() => setDashboardDocumentId(null)} onInitialViewBack={initialDocumentId ? onBack : () => setActiveMenu('overview')} onOpenGeneralLedger={openGeneralLedger} onStartChat={onOpenChat} />
             : activeDocumentsMenu === 'invoices'
               ? <InvoicesView companyId={currentCompany.id} companyName={currentCompany.name} company={currentCompany} onStartChat={onOpenChat} />
               : <AllDocumentsView mode="processed" scope="company" companyName={currentCompany.name} />
@@ -359,8 +358,6 @@ export default function CompanyDetail({ company, onBack, onLogout, onOpenProfile
           <CompanyReconciliationView companyName={currentCompany.name} />
         ) : activeMenu === 'settings' ? (
           <CompanyReportsView company={currentCompany} />
-        ) : activeMenu === 'notifications' ? (
-          <CompanyActionHistoryView company={currentCompany} />
         ) : (
           <div className="px-9 py-14">
             <CompanyOverview company={currentCompany} sectionLabel={fallbackMenuLabel} />

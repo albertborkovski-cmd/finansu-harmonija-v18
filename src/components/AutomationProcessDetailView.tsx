@@ -755,7 +755,7 @@ export function RunsTab({ startSignal, refreshSignal = 0, bulkDeleteSignal, runs
             <span aria-hidden="true" className="sticky right-0 z-10 h-6 bg-white" />
           </div>
           <div className="flex flex-col">
-            {sortedRuns.map((row, i) => {
+            {sortedRuns.slice((Math.min(page, Math.max(1, Math.ceil(sortedRuns.length / 20))) - 1) * 20, Math.min(page, Math.max(1, Math.ceil(sortedRuns.length / 20))) * 20).map((row, i) => {
               const runKey = getRunKey(row);
               return (
               <div key={runKey} className={`system-table-row group grid h-10 w-full items-center rounded-lg ${i % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} hover:bg-[#E7F4F9] transition-colors`} style={{ gridTemplateColumns }}>
@@ -995,7 +995,7 @@ export function NodesTab({ refreshSignal, createSignal, bulkDeleteSignal, onSele
             <span aria-hidden="true" className="sticky right-0 z-10 h-6 bg-white" />
           </div>
           <div className="flex flex-col">
-            {sortedNodes.map((row, i) => (
+            {sortedNodes.slice((Math.min(page, Math.max(1, Math.ceil(sortedNodes.length / 20))) - 1) * 20, Math.min(page, Math.max(1, Math.ceil(sortedNodes.length / 20))) * 20).map((row, i) => (
               <div key={row.id} className={`group grid h-10 w-full items-center rounded-lg ${i % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} hover:bg-[#E7F4F9] transition-colors`} style={{ gridTemplateColumns: configurationGridTemplate }}>
                 <div className="system-table-select-cell flex h-10 items-center px-3">
                   <Checkbox checked={selected.has(row.id)} onChange={() => toggleRow(row.id)} />
@@ -1754,7 +1754,7 @@ export function AlertsTab({ createSignal, alerts, setAlerts }: {
           {/* Data rows */}
           {alerts.length > 0 && (
             <div className="mt-4 flex flex-col">
-              {sortedAlerts.map((row, i) => (
+              {sortedAlerts.slice((Math.min(page, Math.max(1, Math.ceil(sortedAlerts.length / 20))) - 1) * 20, Math.min(page, Math.max(1, Math.ceil(sortedAlerts.length / 20))) * 20).map((row, i) => (
                 <div
                   key={row.id}
                   className={`group grid h-9 w-full items-center rounded-lg transition-colors ${i % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} hover:bg-[#E7F4F9]`}

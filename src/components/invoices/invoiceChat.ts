@@ -4,6 +4,13 @@ export type InvoiceChatMessage = {
   date: string;
   text: string;
   direction: 'received' | 'written';
+  authorEmail?: string;
+  authorType?: 'Client' | 'MESO accountant' | 'FH AI';
+  sentAt?: string;
+  systemEvent?: 'accountant-handoff';
+  actorEmail?: string;
+  recipientEmail?: string;
+  attachments?: Array<{ documentId: string; name: string; size: number; url: string }>;
 };
 
 export type InvoiceChatContext = {
@@ -12,6 +19,17 @@ export type InvoiceChatContext = {
   companyName?: string;
   subject?: string;
   sourceType?: 'Document' | 'Topic';
+  organizationId?: string;
+  recipientId?: string;
+  recipientEmail?: string;
+  recipientName?: string;
+  createdByEmail?: string;
+  createdByName?: string;
+  participantType?: 'FH AI' | 'MESO accountant' | 'Client';
+  handedOffAt?: string;
+  handedOffBy?: string;
+  aiEnabled?: boolean;
+  relatedObject?: { id: string; organizationId: string; type: 'Document' | 'Invoice' | 'Bank operation' | 'Reconciliation' | 'Debt' | 'Other'; label: string };
 };
 
 const CHAT_CONVERSATIONS_KEY = 'finansu-harmonija:v12:chat:conversations';
@@ -33,8 +51,20 @@ export function loadChatConversations(): InvoiceChatContext[] {
 
 export function registerChatConversation(context: InvoiceChatContext) {
   const current = loadChatConversations();
+  const existing = current.find(item => item.storageKey === context.storageKey);
+  // A stale AI view must never reactivate a conversation already handed to a human.
+  const saved = existing?.handedOffAt ? {
+    ...context,
+    handedOffAt: existing.handedOffAt,
+    handedOffBy: existing.handedOffBy,
+    recipientId: existing.recipientId,
+    recipientName: existing.recipientName,
+    recipientEmail: existing.recipientEmail,
+    participantType: existing.participantType,
+    aiEnabled: false,
+  } : context;
   const next = [
-    context,
+    saved,
     ...current.filter((item) => item.storageKey !== context.storageKey),
   ];
   window.localStorage.setItem(CHAT_CONVERSATIONS_KEY, JSON.stringify(next));

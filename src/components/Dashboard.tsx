@@ -5,8 +5,11 @@ import {
   type ReactNode,
 } from "react";
 import Sidebar from "./Sidebar";
+import { canAccessAssignedOrganization } from '../lib/linkedSettingsData';
+import { useOrganizationAccessRevision } from './useOrganizationAccessRevision';
 import ProfileSettings from "./ProfileSettings";
 import Companies from "./Companies";
+import CompanyActionHistoryView from './CompanyActionHistoryView';
 import CompanyDetail from "./CompanyDetail";
 import DashboardView from "./DashboardView";
 import UploadedDocumentsView from "./UploadedDocumentsView";
@@ -16,7 +19,7 @@ import AllDocumentsView from "./AllDocumentsView";
 import OcrProcessedDocumentsView from "./OcrProcessedDocumentsView";
 import WorkspaceView, { type WorkspaceTask } from "./WorkspaceView";
 import MachineLearningView from "./ml";
-import NotificationsView from "./NotificationsView";
+import OrganizationRequiredActionsView from './OrganizationRequiredActionsView';
 import ChatsView from "./ChatsView";
 import type { InvoiceChatContext } from "./invoices/invoiceChat";
 import HelpFaqView from "./HelpFaqView";
@@ -53,7 +56,7 @@ import {
 } from "../lib/accessControl";
 import { userProfileStorageKey } from "../lib/currentUser";
 import { useAttentionNotifications } from "../hooks/useAttentionNotifications";
-import type { NotificationTab } from "../lib/notifications";
+import { getRelevantActions, requiresAction, type NotificationTab } from "../lib/notifications";
 
 interface DashboardProps {
   onLogout: () => void;
@@ -117,8 +120,10 @@ function ReadOnlyBoundary({
 }
 
 export default function Dashboard({ onLogout, session }: DashboardProps) {
-  const attentionNotifications = useAttentionNotifications();
-  const [notificationTarget, setNotificationTarget] = useState<{ tab: NotificationTab; query: string }>({ tab: "notifications", query: "" });
+  const organizationAccessRevision = useOrganizationAccessRevision();
+  const notificationRecords = useAttentionNotifications(true);
+  const attentionNotifications = getRelevantActions(notificationRecords, session).filter(requiresAction);
+  const [notificationTarget, setNotificationTarget] = useState<{ tab: NotificationTab; query: string; organization?: { id: string; name: string } }>({ tab: "notifications", query: "" });
   const [isMenuExpanded, setIsMenuExpanded] = useState(true);
   const [activeMenu, setActiveMenu] = useState(() => firstAccessibleMenu(session));
   const [uploadedDocumentsGroup, setUploadedDocumentsGroup] =
@@ -134,8 +139,15 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
   );
   const currentUserName = userProfile.fullName.trim() || session.fullName;
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
+  useEffect(() => {
+    if (selectedCompany && !canAccessAssignedOrganization(selectedCompany, session)) {
+      setSelectedCompany(null);
+      setActiveMenu('dashboard');
+    }
+  }, [selectedCompany, session, organizationAccessRevision]);
   const [selectedCompanyMenu, setSelectedCompanyMenu] = useState("overview");
   const [selectedCompanyDocumentId, setSelectedCompanyDocumentId] = useState<string | null>(null);
+  const [selectedCompanyDocumentMode, setSelectedCompanyDocumentMode] = useState<'view' | 'edit' | 'original-view'>('view');
   const [selectedChat, setSelectedChat] = useState<InvoiceChatContext | null>(null);
   const [automationProcessFromNode, setAutomationProcessFromNode] =
     useState<OcrProcess | null>(null);
@@ -341,19 +353,20 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
     setActiveMenu("ocr-admin-groups");
   };
 
-  const openCompany = (company: Company, menu = "overview", documentId: string | null = null) => {
+  const openCompany = (company: Company, menu = "overview", documentId: string | null = null, mode: 'view' | 'edit' | 'original-view' = 'view') => {
+    setSelectedCompanyDocumentMode(mode);
     setSelectedCompanyMenu(menu);
     setSelectedCompanyDocumentId(documentId);
     setSelectedCompany(company);
   };
 
-  const openDocumentInOrganization = async (document: DbDocument) => {
+  const openDocumentInOrganization = async (document: DbDocument, mode: 'view' | 'edit' | 'original-view' = 'view') => {
     if (!document.company_id) return;
     const { data } = await supabase.from("companies").select("*");
     const company = (data as unknown as Company[] | null)?.find(
       (candidate) => candidate.id === document.company_id,
     );
-    if (company) openCompany(company, "documents", document.id);
+    if (company) openCompany(company, "documents", document.id, mode);
   };
 
   const completeWorkspaceTask = async (task: WorkspaceTask) => {
@@ -443,12 +456,13 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
     openCompany(company, "documents");
   };
 
-  const companyContent = selectedCompany ? (
+  const companyContent = selectedCompany && canAccessAssignedOrganization(selectedCompany, session) ? (
       <ReadOnlyBoundary readOnly={!session.access.companies.edit}>
         <CompanyDetail
           company={selectedCompany}
           initialMenu={selectedCompanyMenu}
           initialDocumentId={selectedCompanyDocumentId}
+          initialDocumentMode={selectedCompanyDocumentMode}
           onLogout={onLogout}
           onOpenProfile={() => {
             setSelectedCompany(null);
@@ -461,7 +475,7 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
             setActiveMenu("profile");
           }}
           onOpenChat={(context) => {
-            setSelectedChat(context);
+            setSelectedChat({ ...context, organizationId: selectedCompany.id });
             setSelectedCompany(null);
             setSelectedCompanyMenu("overview");
             setSelectedCompanyDocumentId(null);
@@ -520,7 +534,14 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
         />
       );
     if (activeMenu === "dashboard")
-      return <Companies onViewDetails={(company) => openCompany(company)} />;
+      return <SettingsOrganizationsView companiesMode onNavigateToUserDirectory={audience => {
+        setUserDirectoryCreateRequest(audience);
+        handleMenuClick(audience === 'Internal users' ? 'settings-internal-users' : 'settings-external-users');
+      }} onViewCompany={(company) => openCompany(company)} onOpenRequiredActions={company => {
+        setNotificationTarget({ tab: 'notifications', query: '', organization: { id: company.id, name: company.name } });
+        setActiveMenu('notifications');
+      }} />;
+    if (activeMenu === 'audit-history') return <CompanyActionHistoryView company={{ id: 'all', name: 'All organizations', company_code: '', vat_code: '', client_since: 0, action_required: 0 }} global />;
     if (activeMenu === "global-dashboard")
       return (
         <DashboardView
@@ -548,8 +569,8 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
         />
       );
     if (activeMenu === "messages")
-      return <ChatsView currentUserName={currentUserName} conversation={selectedChat} />;
-    if (activeMenu === "notifications") return <NotificationsView key={`${notificationTarget.tab}:${notificationTarget.query}`} initialTab={notificationTarget.tab} initialQuery={notificationTarget.query} />;
+      return <ChatsView currentUserName={currentUserName} conversation={selectedChat} onOpenDocument={openDocumentInOrganization} />;
+    if (activeMenu === "notifications") return <OrganizationRequiredActionsView key={`${notificationTarget.organization?.id ?? 'all'}:${notificationTarget.query}`} organization={notificationTarget.organization} session={session} initialQuery={notificationTarget.query} onBack={notificationTarget.organization ? () => setActiveMenu('dashboard') : undefined} />;
     if (activeMenu === "info") return <HelpFaqView />;
     const settingsSections = {
       "settings-internal-roles": {

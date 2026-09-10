@@ -43,11 +43,12 @@ const mainMenuItems = [
   { id: "uploaded-documents", label: "Uploaded documents", icon: FileUp },
   { id: "dashboard", label: "Companies", icon: Home },
   { id: "messages", label: "Chats", icon: MessageSquare },
-  { id: "notifications", label: "Notifications", icon: Bell },
+  { id: "notifications", label: "Notifications & Tasks", icon: Bell },
   { id: "settings", label: "Settings", icon: Settings, hasDropdown: true },
   { id: "settings-analytics", label: "Analytics", icon: BarChart3 },
   { id: "info", label: "FAQ", icon: FolderOpen },
   { id: "ocr", label: "OCR", icon: ScanText },
+  { id: "audit-history", label: "Action history", icon: ClipboardCheck },
 ];
 
 const settingsGroups = [

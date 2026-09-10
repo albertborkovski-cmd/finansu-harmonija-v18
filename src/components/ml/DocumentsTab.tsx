@@ -73,7 +73,6 @@ export default function DocumentsTab({
   const [documents, setDocuments] = usePersistentState<DocumentEntry[]>('finansu-harmonija:v7:ml-documents', SAMPLE_DOCS);
   const { startResize } = useColumnResize(columns, setColumns);
   const visibleColumns = columns.filter(column => column.visible);
-  const totalPages = 9 as const;
   const normalizedQuery = query.trim().toLowerCase();
   const visibleDocuments = documents.filter((document) => !normalizedQuery || `${document.name} ${document.status}`.toLowerCase().includes(normalizedQuery));
   const { sortedRows, changeSort, directionFor } = useMultiColumnSort(visibleDocuments, (document, key) => {
@@ -174,7 +173,7 @@ export default function DocumentsTab({
 
         {/* Rows */}
         <div className="flex flex-col">
-          {sortedRows.map((doc, idx) => (
+          {sortedRows.slice((Math.min(currentPage, Math.max(1, Math.ceil(sortedRows.length / 20))) - 1) * 20, Math.min(currentPage, Math.max(1, Math.ceil(sortedRows.length / 20))) * 20).map((doc, idx) => (
             <div
               key={doc.id}
               className={`flex min-w-max flex-row items-center gap-3 h-9 rounded-lg px-3 transition-colors group ${
@@ -200,7 +199,7 @@ export default function DocumentsTab({
 
       {/* Pagination */}
       <div className="flex flex-row items-center justify-between gap-4 flex-shrink-0 pt-2">
-        <TablePagination currentPage={currentPage} totalPages={totalPages} itemCount={visibleDocuments.length} onPageChange={setCurrentPage} />
+        <TablePagination currentPage={currentPage} totalPages={Math.max(1, Math.ceil(sortedRows.length / 20))} itemCount={sortedRows.length} onPageChange={setCurrentPage} />
         <div className="flex items-center gap-[14px]"><span className="whitespace-nowrap font-montserrat font-normal text-[12px] leading-[18px] text-[#7288A3]">14 from 15,000 items</span><button className="flex items-center justify-center px-3 py-[6px] gap-1 border-2 border-[#D3E1EC] rounded-md h-8 hover:border-[#007EA7] transition-colors"><span className="font-montserrat font-semibold text-[14px] leading-5 text-[#7288A3]">View all</span></button></div>
       </div>
 

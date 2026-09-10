@@ -605,6 +605,7 @@ export default function AllDocumentsView({
   scope?: "global" | "company";
   companyName?: string;
 }) {
+  const [fixedPage0, setFixedPage0] = useState(1);
   const processedSectionLabel =
     scope === "company" ? "Draft" : "Processed documents";
   const [query, setQuery] = useState("");
@@ -1413,7 +1414,7 @@ export default function AllDocumentsView({
           </div>
 
           <div className="flex flex-col gap-0.5">
-            {sortedRows.map((record, index) => {
+            {sortedRows.slice((Math.min(fixedPage0, Math.max(1, Math.ceil(sortedRows.length / 20))) - 1) * 20, Math.min(fixedPage0, Math.max(1, Math.ceil(sortedRows.length / 20))) * 20).map((record, index) => {
               const rowBackground =
                 index % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white";
               const editAction = (
@@ -1521,10 +1522,10 @@ export default function AllDocumentsView({
       <HorizontalTableScrollbar scrollRef={tableScrollRef} />
       <div className="flex flex-shrink-0">
         <TablePagination
-          currentPage={1}
-          totalPages={1}
+          currentPage={fixedPage0}
+          totalPages={Math.max(1, Math.ceil(sortedRows.length / 20))}
           itemCount={sortedRows.length}
-          onPageChange={() => undefined}
+          onPageChange={setFixedPage0}
         />
       </div>
 

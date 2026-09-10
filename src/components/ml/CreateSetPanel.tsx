@@ -76,7 +76,7 @@ function TrainingModelOptionsModal({ onClose, onSelect, models }: { onClose: () 
                 <span className="text-[#10233A]">Name</span><span>Description</span><span />
               </div>
               <div className="flex h-[360px] flex-col overflow-hidden">
-                {options.map((option, index) => (
+                {options.slice((Math.min(page, Math.max(1, Math.ceil(options.length / 20))) - 1) * 20, Math.min(page, Math.max(1, Math.ceil(options.length / 20))) * 20).map((option, index) => (
                   <div key={option.id} className={`grid h-9 flex-shrink-0 grid-cols-[minmax(180px,278px)_minmax(220px,1fr)_36px] items-center rounded-lg font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
                     <span className="truncate px-3">{option.name}</span>
                     <span className="truncate px-[10px]">{option.description}</span>
@@ -123,7 +123,7 @@ function ExecutionModelOptionsModal({ onClose, onSelect }: { onClose: () => void
                 <span className="text-[#10233A]">Name</span><span>Version</span><span>Description</span><span>Status</span><span />
               </div>
               <div className="flex h-[360px] flex-col overflow-hidden">
-                {options.map((option, index) => (
+                {options.slice((Math.min(page, Math.max(1, Math.ceil(options.length / 20))) - 1) * 20, Math.min(page, Math.max(1, Math.ceil(options.length / 20))) * 20).map((option, index) => (
                   <div key={option.id} className={`grid h-9 flex-shrink-0 grid-cols-[minmax(150px,278px)_84px_minmax(150px,250px)_minmax(90px,140px)_36px] items-center rounded-lg font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
                     <span className="truncate px-3">{option.name}</span>
                     <span className="truncate px-[10px]">{option.version}</span>

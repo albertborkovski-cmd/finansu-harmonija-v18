@@ -1,3 +1,20 @@
+import { getCurrentUserName } from './currentUser';
+
+let administrativeWrite: Promise<void> = Promise.resolve();
+// Use the existing Action history store, not a separate audit system.
+export function recordAdministrativeAction(organizationId: string, category: string, action: string, details: string) {
+  const user = getCurrentUserName();
+  const createdAt = new Date().toISOString();
+  administrativeWrite = administrativeWrite.then(async () => {
+    const history = await readTable('document_history');
+    const organizations = await readTable('companies');
+    history.push({ id: crypto.randomUUID(), organization_id: organizationId, organization_name: organizations.find(row => row.id === organizationId)?.name || organizationId, category, action, details, user_name: user, created_at: createdAt });
+    await writeTable('document_history', history);
+    window.dispatchEvent(new Event('administrative-history-changed'));
+  }).catch(error => { console.error('Unable to save administrative action history', error); });
+  return administrativeWrite;
+}
+
 export interface Company {
   id: string;
   name: string;
@@ -6,6 +23,11 @@ export interface Company {
   client_since: number;
   action_required: number;
   company_status?: string;
+  primary_accountant_id?: string;
+  company_status_reason?: string;
+  company_status_changed_at?: string;
+  company_status_changed_by?: string;
+  organization_status_history?: string;
   logo_url?: string;
   client_type?: string;
   address?: string;
@@ -457,6 +479,7 @@ class LocalQuery {
       }
 
       if (this.operation === "update") {
+        const previousRows = rows.filter(row => this.matches(row));
         const updated: LocalRow[] = [];
         rows = rows.map((row) => {
           if (!this.matches(row)) return row;
@@ -469,6 +492,15 @@ class LocalQuery {
           return next;
         });
         await writeTable(this.table, rows);
+        if (this.table === 'companies') {
+          for (const previous of previousRows) {
+            const next = updated.find(row => row.id === previous.id)!;
+            const fields = Object.keys(this.values as LocalRow).filter(key => JSON.stringify(previous[key]) !== JSON.stringify(next[key]));
+            for (const [category, matching] of Object.entries({ Services: fields.filter(key => key === 'service_scope'), 'Setup / integration': fields.filter(key => /sharepoint|sync|integration|portfolio|source_system/i.test(key)), Accountants: fields.filter(key => /accountant/.test(key)) })) {
+              if (matching.length) await recordAdministrativeAction(String(next.id), category, 'Updated', `Changed fields: ${matching.join(', ')}.`);
+            }
+          }
+        }
         return { data: updated, error: null };
       }
 

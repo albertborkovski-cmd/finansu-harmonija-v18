@@ -121,6 +121,7 @@ function RoleCheckbox({ checked, onChange, label }: { checked: boolean; onChange
 }
 
 function RoleDetails({ role, onBack }: { role: RoleRecord; onBack: () => void }) {
+  const [tablePage, setTablePage] = useState(1);
   const permissionStorageKey = `finansu-harmonija-v6:group-permissions:${role.id}`;
   const [activeTab, setActiveTab] = useState<'roles' | 'users' | 'third-party'>('roles');
   const [query, setQuery] = useState('');
@@ -275,7 +276,7 @@ function RoleDetails({ role, onBack }: { role: RoleRecord; onBack: () => void })
               <div className="w-[46px] flex-shrink-0" />
             </div>
 
-            {visibleDetails.map(detailRow => (
+            {visibleDetails.slice((Math.min(tablePage, Math.max(1, Math.ceil(visibleDetails.length / 20))) - 1) * 20, Math.min(tablePage, Math.max(1, Math.ceil(visibleDetails.length / 20))) * 20).map(detailRow => (
               <div key={detailRow.id} className="flex h-11 items-center border-b border-[#E5EDF9] bg-white transition-colors hover:bg-[#F8FDFF]">
                 <div className="flex w-[42px] flex-shrink-0 items-center px-3">
                   <RoleCheckbox
@@ -336,7 +337,7 @@ function RoleDetails({ role, onBack }: { role: RoleRecord; onBack: () => void })
               <div className="w-[46px] flex-shrink-0" />
             </div>
 
-            {assignedUsers.map((user, index) => (
+            {assignedUsers.slice((Math.min(tablePage, Math.max(1, Math.ceil(assignedUsers.length / 20))) - 1) * 20, Math.min(tablePage, Math.max(1, Math.ceil(assignedUsers.length / 20))) * 20).map((user, index) => (
               <div key={user.id} className={`flex h-11 items-center border-b border-[#E5EDF9] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
                 <div className="flex w-[42px] flex-shrink-0 items-center px-3">
                   <RoleCheckbox checked={selected.has(user.id)} onChange={() => setSelected(current => { const next = new Set(current); if (next.has(user.id)) next.delete(user.id); else next.add(user.id); return next; })} label={`Select ${user.username}`} />
@@ -356,7 +357,7 @@ function RoleDetails({ role, onBack }: { role: RoleRecord; onBack: () => void })
 
         <HorizontalTableScrollbar scrollRef={tableScrollRef} />
         <div className="flex h-8 items-center justify-between">
-          <TablePagination currentPage={1} totalPages={1} itemCount={currentRows.length} onPageChange={() => undefined} />
+          <TablePagination currentPage={tablePage} totalPages={Math.max(1, Math.ceil(currentRows.length / 20))} itemCount={currentRows.length} onPageChange={setTablePage} />
         </div>
       </div>
 
@@ -518,7 +519,7 @@ export default function AutomationSecurityAccessView() {
             </div>
 
             <div className="flex flex-col">
-              {displayedRoles.map((role, index) => (
+              {displayedRoles.slice((Math.min(page, Math.max(1, Math.ceil(displayedRoles.length / 20))) - 1) * 20, Math.min(page, Math.max(1, Math.ceil(displayedRoles.length / 20))) * 20).map((role, index) => (
                 <div
                   key={role.id}
                   role="button"

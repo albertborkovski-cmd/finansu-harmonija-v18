@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useId } from "react";
 import {
   Activity,
   ArrowLeft,
@@ -14,6 +14,8 @@ import {
   X,
   RefreshCw,
   Download,
+  Upload,
+  Settings2,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { supabase, type Company } from "../lib/supabase";
@@ -29,6 +31,16 @@ import CreateableEmptyState from "./CreateableEmptyState";
 import ImportButton from "./ImportButton";
 import OcrSearchField from "./OcrSearchField";
 import { matchesTextSearch } from "../utils/textSearch";
+import { canEditMenu, parseSession } from "../lib/accessControl";
+import { AUTH_SESSION_KEY } from "../lib/currentUser";
+import { addAccountantToOrganizations, replaceAccountantInOrganizations, isAccountantAssigned, loadLinkedDirectoryUsers, organizationAccountantEntries, organizationAccountantNames } from "../lib/linkedSettingsData";
+import { canAccessAssignedOrganization, isMesoAccountant, setOrganizationSubstitution, loadOrganizationSubstitutions, hasOrganizationSubstitution, organizationAccessDate } from '../lib/linkedSettingsData';
+import { useOrganizationAccessRevision } from './useOrganizationAccessRevision';
+import { useAttentionNotifications } from '../hooks/useAttentionNotifications';
+import { getOrganizationRequiredActions } from '../lib/notifications';
+import { createOrganization } from '../lib/organizationCreation';
+import OrganizationImportWizard from './OrganizationImportWizard';
+import { isSystemAdministratorRole } from '../lib/accessControl';
 import DepartmentCodesEditor from "./DepartmentCodesEditor";
 import OrganizationCounterpartiesSettings from "./OrganizationCounterpartiesSettings";
 import {
@@ -39,8 +51,9 @@ import {
 import { loadGeneralLedgerTemplateNames } from "./GeneralLedgerView";
 import { loadVatClassificationTemplateNames } from "./VatClassificationsView";
 import SearchableSelect from "./SearchableSelect";
+import ManageCompanyView from "./ManageCompanyView";
 
-const ROWS_PER_PAGE = 4;
+const ROWS_PER_PAGE = 20;
 
 const COUNTRY_CURRENCIES: Record<string, string> = {
   Lithuania: "EUR",
@@ -197,6 +210,53 @@ const SHAREPOINT_SYNC_OPTIONS = [
   "Synchronization disabled",
   "Manual synchronization",
 ];
+function AccountantMultiSelect({ options, value, onChange, label = 'Accountants', single = false }: {
+  options: Array<{ id: string; label: string }>;
+  value: string[];
+  onChange: (ids: string[]) => void;
+  label?: string;
+  single?: boolean;
+}) {
+  const inputId = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  useEffect(() => {
+    const close = (event: PointerEvent) => {
+      if (event.target instanceof Node && !rootRef.current?.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, []);
+  const selected = options.filter((option) => value.includes(option.id));
+  const filtered = options.filter((option) => option.label.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
+  return (
+    <div ref={rootRef} className="relative min-w-0" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setOpen(false); } }}>
+      <label htmlFor={inputId} className="mb-2 block font-montserrat text-[12px] font-medium text-[#10233A]">{label} <span className="text-red-500">*</span></label>
+      <div className={`flex h-[42px] items-center gap-2 rounded-lg border bg-white px-3 ${open ? 'border-[#007EA7] ring-2 ring-[#007EA7]/10' : 'border-[#D3E1EC]'}`}>
+        <input id={inputId} aria-label={`Search ${label.toLowerCase()}`} aria-expanded={open} aria-controls={`${inputId}-options`} value={single && !open ? selected[0]?.label ?? '' : search} onFocus={() => { setSearch(''); setOpen(true); }} onChange={(event) => { setSearch(event.target.value); setOpen(true); }} placeholder={single ? selected[0]?.label || 'Select internal user' : selected.length ? `${selected.length} selected — search users` : 'Select internal users'} className="min-w-0 flex-1 bg-transparent font-montserrat text-[12px] leading-[18px] text-[#10233A] outline-none placeholder:text-[#7288A3]" />
+        <button type="button" aria-label={`Toggle ${label.toLowerCase()}`} aria-expanded={open} onClick={() => { setSearch(''); setOpen((current) => !current); }} className="flex h-6 w-6 flex-shrink-0 items-center justify-center text-[#7288A3]"><ChevronDown size={16} className={open ? 'rotate-180' : ''} /></button>
+      </div>
+      {open && (
+        <div id={`${inputId}-options`} className="absolute left-0 right-0 top-[68px] z-[110] max-h-[240px] overflow-y-auto rounded-lg border border-[#D3E1EC] bg-white p-1 shadow-[0_8px_24px_rgba(16,35,58,0.14)]">
+          {filtered.map((option) => (
+            <label key={option.id} className="flex min-h-[42px] cursor-pointer items-center gap-3 rounded-md px-3 py-2 hover:bg-[#F0F7FA]">
+              <input type="checkbox" checked={value.includes(option.id)} onChange={() => {
+                if (single) { onChange([option.id]); setSearch(''); setOpen(false); }
+                else onChange(value.includes(option.id) ? value.filter((id) => id !== option.id) : [...value, option.id]);
+              }} className="h-[18px] w-[18px] flex-shrink-0 accent-[#007EA7]" />
+              <span className="min-w-0 break-words font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A]">
+                {option.label}
+              </span>
+            </label>
+          ))}
+          {!filtered.length && <p className="px-3 py-3 font-montserrat text-[12px] text-[#7288A3]">No users found</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OrganizationSelect({
   label,
   value,
@@ -540,7 +600,7 @@ const ALL_COLUMNS: ColumnDef[] = [
   { key: "client_since", label: "Client since", width: 80 },
   { key: "action_required", label: "Action required", width: 110 },
   { key: "company_status", label: "Company status", width: 120 },
-  { key: "assigned_accountant", label: "Assigned accountant", width: 150 },
+  { key: "assigned_accountant", label: "Assigned accountant(s)", width: 200 },
   { key: "company_type", label: "Company type", width: 120 },
   { key: "service_scope", label: "Service scope", width: 120 },
   { key: "phone", label: "Phone", width: 120 },
@@ -558,7 +618,6 @@ const DEFAULT_VISIBLE = new Set([
   "client_since",
   "action_required",
 ]);
-const DEFAULT_ORDER = ALL_COLUMNS.map((c) => c.key);
 
 const DEFAULT_FILTER_KEYS = [
   "company_status",
@@ -594,7 +653,7 @@ function getCompanyCellText(key: string, row: Company): string {
     case "company_status":
       return row.company_status ?? "Active";
     case "assigned_accountant":
-      return row.assigned_accountant ?? "Not assigned";
+      return organizationAccountantNames(row);
     case "company_type":
       return row.company_type ?? "UAB";
     case "service_scope":
@@ -602,6 +661,17 @@ function getCompanyCellText(key: string, row: Company): string {
     default:
       return (row as unknown as Record<string, unknown>)[key]?.toString() ?? "";
   }
+}
+
+function activeSubstitutes(row: Company) {
+  const today = organizationAccessDate();
+  const users = loadLinkedDirectoryUsers('Internal users');
+  const untilByUser = new Map<string, string>();
+  for (const entry of loadOrganizationSubstitutions()) {
+    if (entry.organizationId !== row.id || entry.from > today || entry.to < today || !hasOrganizationSubstitution(row.id, entry.userId)) continue;
+    if ((untilByUser.get(entry.userId) || '') < entry.to) untilByUser.set(entry.userId, entry.to);
+  }
+  return [...untilByUser].map(([id, until]) => ({ id, label: users.find(user => user.id === id)?.fullName || users.find(user => user.id === id)?.username || 'Unnamed user', until }));
 }
 
 function renderDataCell(key: string, row: Company) {
@@ -629,6 +699,21 @@ function renderDataCell(key: string, row: Company) {
       return text(row.client_since);
     case "action_required":
       return dotCell(row.action_required);
+    case "assigned_accountant": {
+      const substitutes = activeSubstitutes(row);
+      const accountants = [...substitutes, ...organizationAccountantEntries(row).filter(entry => !substitutes.some(substitute => substitute.id === entry.id))];
+      const description = (entry: typeof accountants[number]) => `${entry.label}${'until' in entry ? ` · Substitute until ${entry.until}` : ''}`;
+      return accountants.length ? (
+        <div className="flex min-w-0 items-center gap-1.5 font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A]">
+          <span title={description(accountants[0])} className="min-w-0 truncate">{accountants[0].label}{'until' in accountants[0] && <span className="block truncate text-[10px] leading-[14px] text-[#7288A3]">Substitute until {String(accountants[0].until)}</span>}</span>
+          {accountants.length > 1 && (
+            <span title={accountants.slice(1).map(description).join('\n')} aria-label={`${accountants.length - 1} additional assigned accountants`} className="flex-shrink-0 text-[#007EA7]">
+              +{accountants.length - 1}
+            </span>
+          )}
+        </div>
+      ) : text('Not assigned');
+    }
     default: {
       const value = getCompanyCellText(key, row);
       return value === "" ? (
@@ -643,6 +728,9 @@ function renderDataCell(key: string, row: Company) {
 }
 
 interface CompaniesProps {
+  onOpenOrganizationSetup?: (company: Company) => void;
+  onOrganizationCreated?: (company: Company) => void;
+  onOpenRequiredActions?: (company: Company) => void;
   onViewDetails?: (company: Company) => void;
   onCreate?: () => void;
   title?: string;
@@ -653,6 +741,9 @@ interface CompaniesProps {
 }
 
 export default function Companies({
+  onOpenOrganizationSetup,
+  onOrganizationCreated,
+  onOpenRequiredActions,
   onViewDetails,
   onCreate,
   title = "Companies",
@@ -661,6 +752,7 @@ export default function Companies({
   dataSource = "companies",
   breadcrumbs,
 }: CompaniesProps) {
+  const attentionActions = useAttentionNotifications(true);
   const managedTaxCountries = loadOrganizationReferenceValues("Tax country");
   const managedLegalForms = loadOrganizationReferenceValues("Legal form");
   const managedBaseCurrencies =
@@ -678,6 +770,8 @@ export default function Companies({
   const [refreshing, setRefreshing] = useState(false);
   const [colSettingsOpen, setColSettingsOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [organizationImportOpen, setOrganizationImportOpen] = useState(false);
+  const isOrganizationForm = entityLabel === 'organization' || entityLabel === 'company';
   const [counterpartyToDelete, setCounterpartyToDelete] =
     useState<Company | null>(null);
   const [editingCounterpartyId, setEditingCounterpartyId] = useState<
@@ -741,6 +835,59 @@ export default function Companies({
   >(() => mergeCounterpartyGlSettings());
   const [createError, setCreateError] = useState("");
   const [creating, setCreating] = useState(false);
+  const [selectedCompanyIds, setSelectedCompanyIds] = useState<Set<string>>(() => new Set());
+  const [bulkActionsOpen, setBulkActionsOpen] = useState(false);
+  const [managedCompany, setManagedCompany] = useState<Company | null>(null);
+  const [selectedBulkAction, setSelectedBulkAction] = useState<string | null>(null);
+  const [bulkAccountantIds, setBulkAccountantIds] = useState<string[]>([]);
+  useOrganizationAccessRevision();
+  const [substituteId, setSubstituteId] = useState('');
+  const [substitutionFrom, setSubstitutionFrom] = useState('');
+  const [substitutionTo, setSubstitutionTo] = useState('');
+  const [editingSubstitutionIds, setEditingSubstitutionIds] = useState<string[]>([]);
+  const substituteOptions = loadLinkedDirectoryUsers('Internal users')
+    .filter(user => isMesoAccountant(user) && (!user.status || ['enabled', 'active'].includes(user.status.toLowerCase())))
+    .map(user => ({ id: user.id, label: `${user.fullName || user.username || user.id} (${user.email || user.id})` }));
+  const [initialBulkAccountantIds, setInitialBulkAccountantIds] = useState<string[]>([]);
+  const [fromAccountantId, setFromAccountantId] = useState('');
+  const [toAccountantId, setToAccountantId] = useState('');
+  const replacementSourceOptions = loadLinkedDirectoryUsers('Internal users')
+    .filter((user) => companies.some((organization) => selectedCompanyIds.has(organization.id) && isAccountantAssigned(organization, user)))
+    .map((user) => ({ value: user.id, label: `${user.fullName || user.username || user.id} (${user.email || user.id})` }));
+  const accountantOptions = loadLinkedDirectoryUsers('Internal users')
+    .filter((user) => !user.status || ['enabled', 'active'].includes(user.status.toLowerCase()))
+    .map((user) => {
+      const targets = companies.filter((organization) => selectedCompanyIds.has(organization.id));
+      const assignedCount = targets.filter((organization) => isAccountantAssigned(organization, user)).length;
+      return {
+        id: user.id,
+        label: `${user.fullName || user.username || user.id} (${user.email || user.id})`,
+        alreadyAssigned: targets.length > 0 && assignedCount === targets.length,
+      };
+    });
+  const [bulkAssignmentError, setBulkAssignmentError] = useState('');
+  const bulkSession = parseSession(window.localStorage.getItem(AUTH_SESSION_KEY));
+  const canCreateOrganization = Boolean(bulkSession?.roleNames.some(isSystemAdministratorRole));
+  const canManageAccountants = Boolean(bulkSession && canEditMenu(bulkSession, 'dashboard'));
+  const availableBulkActions = canManageAccountants
+    ? ['Assign accountant', 'Replace accountant', 'Set substitution']
+    : [];
+  const bulkActionsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!bulkActionsOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !bulkActionsRef.current?.contains(event.target)) setBulkActionsOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setBulkActionsOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [bulkActionsOpen]);
   const [query, setQuery] = useState("");
   const [visibleFilterKeys, setVisibleFilterKeys] =
     useState<string[]>([]);
@@ -755,10 +902,6 @@ export default function Companies({
   const [hydratedFilterKey, setHydratedFilterKey] = useState<string | null>(
     null,
   );
-  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(
-    new Set(DEFAULT_VISIBLE),
-  );
-  const [columnOrder, setColumnOrder] = useState<string[]>(DEFAULT_ORDER);
   const [columns, setColumns] = useState<ColConfig[]>(
     ALL_COLUMNS.map((c) => ({
       key: c.key,
@@ -767,7 +910,9 @@ export default function Companies({
       visible: DEFAULT_VISIBLE.has(c.key),
     })),
   );
-  const { startResize } = useColumnResize(columns, setColumns);
+  const visibleColumns = new Set(columns.filter(column => column.visible).map(column => column.key));
+  const columnOrder = columns.map(column => column.key);
+  const { startResize } = useColumnResize(columns, setColumns, `${dataSource}:${entityLabel}`);
   const pageRootRef = useRef<HTMLDivElement>(null);
   const filterMenuRef = useRef<HTMLDivElement>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
@@ -812,6 +957,7 @@ export default function Companies({
           filterValues?: unknown;
         };
         const availableKeys = new Set(ALL_COLUMNS.map((column) => column.key));
+        if (entityLabel === 'company') availableKeys.add('assignment_type');
         const restoredKeys = Array.isArray(parsed.visibleFilterKeys)
           ? parsed.visibleFilterKeys.filter(
               (key): key is string =>
@@ -855,7 +1001,7 @@ export default function Companies({
       setFilterValues({});
     }
     setHydratedFilterKey(filterPersistenceKey);
-  }, [filterPersistenceKey]);
+  }, [filterPersistenceKey, entityLabel]);
 
   useEffect(() => {
     if (hydratedFilterKey !== filterPersistenceKey) return;
@@ -986,7 +1132,9 @@ export default function Companies({
   };
 
   const createCompany = async () => {
-    const organizationMode = entityLabel === "organization";
+    if (creating) return;
+    if (dataSource === 'companies' && !canCreateOrganization) { setCreateError('Only an administrator can create an organization.'); return; }
+    const organizationMode = isOrganizationForm;
     const counterpartyMode = entityLabel === "counterparty";
     if (
       !newCompany.name.trim() ||
@@ -1010,7 +1158,7 @@ export default function Companies({
       return;
     }
     if (
-      companies.some(
+      dataSource === 'counterparties' && companies.some(
         (company) =>
           company.id !== editingCounterpartyId &&
           company.company_code.trim().toLowerCase() ===
@@ -1111,10 +1259,12 @@ export default function Companies({
       setPage(1);
       return;
     }
-    const { error: insertError } = await supabase.from("companies").insert({
+    let createdOrganization: Company;
+    try {
+    createdOrganization = await createOrganization({
       name: newCompany.name.trim(),
       company_code: newCompany.companyCode.trim(),
-      vat_code: newCompany.vatCode.trim() || newCompany.companyCode.trim(),
+      vat_code: newCompany.vatCode.trim(),
       client_since: Number(newCompany.clientSince) || new Date().getFullYear(),
       action_required: Number(newCompany.actionRequired) || 0,
       tax_country: newCompany.taxCountry,
@@ -1141,8 +1291,8 @@ export default function Companies({
       sharepoint_sync_time: newCompany.sharepointSyncTime,
       counterparties_settings: newCompany.counterpartiesSettings,
     });
-    if (insertError) {
-      setCreateError(insertError.message);
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : 'Unable to create organization.');
       setCreating(false);
       return;
     }
@@ -1150,6 +1300,7 @@ export default function Companies({
     setCreating(false);
     setCreateOpen(false);
     setOrganizationFormSection("general");
+    onOrganizationCreated?.(createdOrganization);
     setNewCompany({
       taxCountry: managedTaxCountries[0] ?? "",
       legalForm: managedLegalForms[0] ?? "",
@@ -1192,14 +1343,6 @@ export default function Companies({
 
   const saveColSettings = (nextColumns: ColConfig[]) => {
     setColumns(nextColumns);
-    setColumnOrder(nextColumns.map((column) => column.key));
-    setVisibleColumns(
-      new Set(
-        nextColumns
-          .filter((column) => column.visible)
-          .map((column) => column.key),
-      ),
-    );
   };
 
   const handleExport = () => {
@@ -1504,14 +1647,17 @@ export default function Companies({
     setScrollRatio(max > 0 ? el.scrollLeft / max : 0);
   };
 
-  const filterOptions = useMemo(
-    () =>
+  const actionSession = parseSession(window.localStorage.getItem(AUTH_SESSION_KEY));
+  const assignmentUser = loadLinkedDirectoryUsers('Internal users').find(user => user.email?.toLowerCase() === actionSession?.email.toLowerCase());
+  const availableFilterColumns = entityLabel === 'company' ? [...ALL_COLUMNS, { key: 'assignment_type', label: 'Assignment type', width: 150 }] : ALL_COLUMNS;
+  const companiesWithActions = entityLabel === 'company' ? companies.map(company => ({ ...company, action_required: actionSession ? getOrganizationRequiredActions(attentionActions, company.id, actionSession).length : 0 })) : companies;
+  const filterOptions =
       Object.fromEntries(
         ALL_COLUMNS.map((column) => [
           column.key,
           Array.from(
             new Set(
-              companies
+              companiesWithActions
                 .map((company) => getCompanyCellText(column.key, company))
                 .filter(Boolean),
             ),
@@ -1522,13 +1668,13 @@ export default function Companies({
             }),
           ),
         ]),
-      ) as Record<string, string[]>,
-    [companies],
-  );
-
-  const filteredCompanies = useMemo(
-    () =>
-      companies.filter((company) => {
+      ) as Record<string, string[]>;
+  filterOptions.assignment_type = ['All', 'Assigned', 'Substitution'];
+  const filteredCompanies = companiesWithActions.filter((company) => {
+        const currentSession = parseSession(window.localStorage.getItem(AUTH_SESSION_KEY));
+        if (entityLabel === 'company' && currentSession && !canAccessAssignedOrganization(company, currentSession)) return false;
+        const explicitStatusFilter = visibleFilterKeys.includes('company_status') && (filterValues.company_status?.length ?? 0) > 0;
+        if (entityLabel === 'company' && !explicitStatusFilter && company.company_status === 'Archived') return false;
         if (
           !matchesTextSearch(
             ALL_COLUMNS.map((column) =>
@@ -1540,14 +1686,13 @@ export default function Companies({
           return false;
         return visibleFilterKeys.every((key) => {
           const selectedValues = filterValues[key] ?? [];
+          if (key === 'assignment_type') return selectedValues.length === 0 || selectedValues.includes('All') || Boolean(assignmentUser && ((selectedValues.includes('Assigned') && isAccountantAssigned(company, assignmentUser)) || (selectedValues.includes('Substitution') && hasOrganizationSubstitution(company.id, assignmentUser.id))));
           return (
             selectedValues.length === 0 ||
             selectedValues.includes(getCompanyCellText(key, company))
           );
         });
-      }),
-    [companies, filterValues, query, visibleFilterKeys],
-  );
+      });
 
   const {
     sortedRows: sorted,
@@ -1572,7 +1717,9 @@ export default function Companies({
       ? 76
       : entityLabel === "organization"
         ? 44
-        : 136;
+        : 168;
+  const allCompaniesSelected = sorted.length > 0 && sorted.every((row) => selectedCompanyIds.has(row.id));
+  const selectedCompanyCount = companies.filter((row) => selectedCompanyIds.has(row.id)).length;
   const applyPendingFilters = () => {
     const nextValues = { ...filterValues };
     visibleFilterKeys.forEach((key) => {
@@ -1589,6 +1736,68 @@ export default function Companies({
     });
   };
 
+  if (managedCompany) {
+    return (
+      <ManageCompanyView
+        company={managedCompany}
+        onCompanyUpdated={(updated) => {
+          setManagedCompany(updated);
+          setCompanies(current => current.map(item => item.id === updated.id ? updated : item));
+        }}
+        onBack={() => setManagedCompany(null)}
+        onOpenCompany={onViewDetails}
+        onOpenSetup={onOpenOrganizationSetup}
+        onSaveLogo={async (logo) => {
+          const { error: updateError } = await supabase.from('companies').update({ logo_url: logo }).eq('id', managedCompany.id);
+          if (updateError) throw new Error(updateError.message);
+          setCompanies((current) => current.map((item) => item.id === managedCompany.id ? { ...item, logo_url: logo } : item));
+          setManagedCompany((current) => current ? { ...current, logo_url: logo } : current);
+        }}
+        onSaveDetails={async (values) => {
+          const { error: updateError } = await supabase.from('companies').update(values).eq('id', managedCompany.id);
+          if (updateError) throw new Error(updateError.message);
+          setCompanies((current) => current.map((item) => item.id === managedCompany.id ? { ...item, ...values } : item));
+          setManagedCompany((current) => current ? { ...current, ...values } : current);
+        }}
+        onStatusChange={async (status, reason) => {
+          const changedAt = new Date().toISOString();
+          let history: Array<{ status: string; reason: string; changedAt: string; changedBy: string }> = [];
+          try {
+            const parsed = JSON.parse(managedCompany.organization_status_history || '[]');
+            if (Array.isArray(parsed)) history = parsed;
+          } catch {
+            history = [];
+          }
+          const changedBy = bulkSession?.email || 'Administrator';
+          const updated: Company = {
+            ...managedCompany,
+            company_status: status,
+            company_status_reason: reason,
+            company_status_changed_at: changedAt,
+            company_status_changed_by: changedBy,
+            organization_status_history: JSON.stringify([
+              ...history,
+              { status, reason, changedAt, changedBy },
+            ]),
+          };
+          const { error: updateError } = await supabase
+            .from('companies')
+            .update({
+              company_status: updated.company_status,
+              company_status_reason: updated.company_status_reason,
+              company_status_changed_at: updated.company_status_changed_at,
+              company_status_changed_by: updated.company_status_changed_by,
+              organization_status_history: updated.organization_status_history,
+            })
+            .eq('id', managedCompany.id);
+          if (updateError) throw new Error(updateError.message);
+          setCompanies((current) => current.map((item) => item.id === updated.id ? updated : item));
+          setManagedCompany(updated);
+        }}
+      />
+    );
+  }
+
   return (
     <div
       ref={pageRootRef}
@@ -1598,7 +1807,48 @@ export default function Companies({
       <PageHeader
         title={title}
         actions={
-          allowCreate ? (
+          <>
+          {entityLabel === "company" && (
+            <div ref={bulkActionsRef} className="relative flex items-center gap-3">
+              <span aria-live="polite" className="font-montserrat text-[12px] font-normal leading-[18px] text-[#7288A3]">
+                {selectedCompanyCount > 0 ? `${selectedCompanyCount} selected` : ''}
+              </span>
+              <PageActionButton ariaLabel="Bulk actions" className="border-2 border-[#D3E1EC]" disabled={selectedCompanyCount === 0 || availableBulkActions.length === 0} onClick={() => setBulkActionsOpen((open) => !open)}>
+                <span className="inline-flex items-center gap-2">
+                  Bulk actions
+                  <ChevronDown size={14} className={`flex-shrink-0 transition-transform ${bulkActionsOpen && selectedCompanyCount > 0 ? 'rotate-180' : ''}`} />
+                </span>
+              </PageActionButton>
+              {bulkActionsOpen && selectedCompanyCount > 0 && availableBulkActions.length > 0 && (
+                <div className="absolute right-0 top-full z-50 mt-2 w-[280px] rounded-lg border border-[#D3E1EC] bg-white p-2 shadow-lg">
+                  {availableBulkActions.map((action) => (
+                    <button key={action} type="button" onClick={() => {
+                      if (!canManageAccountants || selectedCompanyCount === 0) return;
+                      setSelectedBulkAction(action);
+                      setFromAccountantId('');
+                      setToAccountantId('');
+                      const today = organizationAccessDate();
+                      const existing = action === 'Set substitution' ? loadOrganizationSubstitutions().filter(record => selectedCompanyIds.has(record.organizationId) && record.to >= today).sort((a, b) => Number(b.from <= today) - Number(a.from <= today) || b.to.localeCompare(a.to)) : [];
+                      const candidate = existing[0];
+                      const common = candidate && [...selectedCompanyIds].every(id => existing.some(record => record.organizationId === id && record.userId === candidate.userId && record.from === candidate.from && record.to === candidate.to));
+                      setSubstituteId(common ? candidate.userId : '');
+                      setSubstitutionFrom(common ? candidate.from : '');
+                      setSubstitutionTo(common ? candidate.to : '');
+                      setEditingSubstitutionIds(common ? existing.filter(record => record.userId === candidate.userId && record.from === candidate.from && record.to === candidate.to).map(record => record.id) : []);
+                      const initialIds = action === 'Assign accountant' ? accountantOptions.filter((option) => option.alreadyAssigned).map((option) => option.id) : [];
+                      setBulkAccountantIds(initialIds);
+                      setInitialBulkAccountantIds(initialIds);
+                      setBulkAssignmentError('');
+                      setBulkActionsOpen(false);
+                    }} className="flex min-h-9 w-full items-center rounded-md px-2 py-1.5 text-left font-montserrat text-[12px] font-medium leading-[18px] text-[#10233A] hover:bg-[#F0F7FA]">
+                      {action}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {(dataSource === 'companies' ? canCreateOrganization && (entityLabel === 'company' || allowCreate) : allowCreate) ? (
             <PageActionButton
               onClick={() => {
                 if (onCreate) {
@@ -1633,13 +1883,87 @@ export default function Companies({
                 setCreateOpen(true);
               }}
             >
-              Create new
+              {entityLabel === 'company' ? '+ New organization' : 'Create new'}
             </PageActionButton>
-          ) : undefined
+          ) : null}
+          </>
         }
       />
 
       <SystemBreadcrumb items={breadcrumbs?.length ? breadcrumbs : [title]} />
+      {selectedBulkAction && canManageAccountants && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 p-6" onClick={() => setSelectedBulkAction(null)}>
+          <section role="dialog" aria-modal="true" aria-label={selectedBulkAction} className="w-full max-w-[480px] rounded-xl border border-[#D3E1EC] bg-white p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <h2 className="font-montserrat text-[20px] font-semibold text-[#10233A]">{selectedBulkAction}</h2>
+            <p className="mt-3 font-montserrat text-[12px] text-[#7288A3]">{selectedCompanyCount} organizations selected. No changes have been made.</p>
+            {selectedBulkAction === 'Assign accountant' && (
+              <div className="mt-4 space-y-2">
+                <AccountantMultiSelect options={accountantOptions} value={bulkAccountantIds} onChange={setBulkAccountantIds} />
+                <p className="font-montserrat text-[12px] text-[#7288A3]">Uncheck an assigned accountant to remove their assignment.</p>
+              </div>
+            )}
+            {selectedBulkAction === 'Set substitution' && (
+              <div className="mt-4 space-y-4">
+                <AccountantMultiSelect label="Substitute accountant" options={substituteOptions} value={substituteId ? [substituteId] : []} onChange={ids => setSubstituteId(ids[0] ?? '')} single />
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="space-y-1 font-montserrat text-[12px] text-[#10233A]">From <span className="text-red-600">*</span>
+                    <input aria-label="Substitution From" type="date" required value={substitutionFrom} onChange={event => setSubstitutionFrom(event.target.value)} className="block h-[42px] w-full rounded-lg border border-[#D3E1EC] bg-white px-3 outline-none focus:border-[#007EA7]" />
+                  </label>
+                  <label className="space-y-1 font-montserrat text-[12px] text-[#10233A]">To <span className="text-red-600">*</span>
+                    <input aria-label="Substitution To" type="date" required min={substitutionFrom || undefined} value={substitutionTo} onChange={event => setSubstitutionTo(event.target.value)} className="block h-[42px] w-full rounded-lg border border-[#D3E1EC] bg-white px-3 outline-none focus:border-[#007EA7]" />
+                  </label>
+                </div>
+                <p className="font-montserrat text-[12px] text-[#7288A3]">Temporary access through the To date, inclusive (Europe/Vilnius). Permanent assignments and role permissions stay unchanged.</p>
+              </div>
+            )}
+              {selectedBulkAction === 'Replace accountant' && (
+                <div className="mt-4 space-y-3 font-montserrat text-[12px] text-[#10233A]">
+                  <AccountantMultiSelect single label="From accountant" value={fromAccountantId ? [fromAccountantId] : []} options={replacementSourceOptions.map((option) => ({ id: option.value, label: option.label }))} onChange={([id]) => { setFromAccountantId(id); if (id === toAccountantId) setToAccountantId(''); }} />
+                  <AccountantMultiSelect single label="To accountant" value={toAccountantId ? [toAccountantId] : []} options={accountantOptions.filter((option) => option.id !== fromAccountantId)} onChange={([id]) => setToAccountantId(id)} />
+                  <p className="text-[#7288A3]">Only organizations assigned to the selected accountant will be updated. Other accountants will be kept.</p>
+                </div>
+              )}
+            <ul className="mt-4 max-h-60 overflow-auto font-montserrat text-[12px] leading-6 text-[#10233A]">
+              {companies.filter((row) => selectedCompanyIds.has(row.id)).map((row) => <li key={row.id}>{row.name}</li>)}
+            </ul>
+            {bulkAssignmentError && <p role="alert" className="mt-3 font-montserrat text-[12px] text-red-600">{bulkAssignmentError}</p>}
+            <div className="mt-6 flex justify-end gap-2">
+              <PageActionButton onClick={() => setSelectedBulkAction(null)}>Close</PageActionButton>
+              {selectedBulkAction === 'Set substitution' && <PageActionButton disabled={!substituteId || !substitutionFrom || !substitutionTo || substitutionFrom > substitutionTo || selectedCompanyCount === 0} onClick={() => {
+                const currentSession = parseSession(window.localStorage.getItem(AUTH_SESSION_KEY));
+                if (!currentSession || !canEditMenu(currentSession, 'dashboard')) { setBulkAssignmentError('You do not have permission to set substitution.'); return; }
+                try {
+                  setOrganizationSubstitution(substituteId, substitutionFrom, substitutionTo, companies.filter(row => selectedCompanyIds.has(row.id)), editingSubstitutionIds);
+                  setSelectedBulkAction(null);
+                } catch (error) { setBulkAssignmentError(error instanceof Error ? error.message : 'Unable to save substitution.'); }
+              }}>Confirm</PageActionButton>}
+              {selectedBulkAction === 'Replace accountant' && <PageActionButton disabled={!fromAccountantId || !toAccountantId || fromAccountantId === toAccountantId || selectedCompanyCount === 0} onClick={() => {
+                const currentSession = parseSession(window.localStorage.getItem(AUTH_SESSION_KEY));
+                if (!currentSession || !canEditMenu(currentSession, 'dashboard')) { setBulkAssignmentError('You do not have permission to replace accountants.'); return; }
+                try {
+                  replaceAccountantInOrganizations(fromAccountantId, toAccountantId, companies.filter((row) => selectedCompanyIds.has(row.id)));
+                  setSelectedBulkAction(null);
+                } catch (error) { setBulkAssignmentError(error instanceof Error ? error.message : 'Unable to replace accountant.'); }
+              }}>Confirm</PageActionButton>}
+              {selectedBulkAction === 'Assign accountant' && <PageActionButton disabled={(bulkAccountantIds.length === 0 && initialBulkAccountantIds.length === 0) || selectedCompanyCount === 0} onClick={() => {
+                const currentSession = parseSession(window.localStorage.getItem(AUTH_SESSION_KEY));
+                if (!currentSession || !canEditMenu(currentSession, 'dashboard')) {
+                  setBulkAssignmentError('You do not have permission to assign accountants.');
+                  return;
+                }
+                try {
+                  const targets = companies.filter((row) => selectedCompanyIds.has(row.id));
+                  const removedIds = initialBulkAccountantIds.filter((id) => !bulkAccountantIds.includes(id));
+                  addAccountantToOrganizations(bulkAccountantIds, targets, removedIds);
+                  setSelectedBulkAction(null);
+                } catch (error) {
+                  setBulkAssignmentError(error instanceof Error ? error.message : 'Unable to save assignments.');
+                }
+              }}>Confirm</PageActionButton>}
+            </div>
+          </section>
+        </div>
+      )}
 
       {/* Content */}
       <div className="flex min-h-0 flex-1 flex-col gap-6">
@@ -1648,7 +1972,7 @@ export default function Companies({
           <div className="flex h-7 min-h-7 items-center">
             <div ref={filterMenuRef} className="flex min-w-0 flex-1 flex-row flex-nowrap items-center gap-1 pr-[128px]">
               {visibleFilterKeys.map((key) => {
-                const column = ALL_COLUMNS.find((item) => item.key === key);
+                const column = availableFilterColumns.find((item) => item.key === key);
                 if (!column) return null;
                 const selectedValues = filterValues[key] ?? [];
                 const isOpen = openFilter === key;
@@ -1806,7 +2130,7 @@ export default function Companies({
                     }}
                   >
                     <div className="max-h-[300px] overflow-y-auto">
-                      {ALL_COLUMNS.map((column) => {
+                      {availableFilterColumns.map((column) => {
                         const checked = pendingFilterKeys.includes(column.key);
                         return (
                           <button
@@ -1898,7 +2222,7 @@ export default function Companies({
                   <Download size={16} />
                 </button>
               )}
-              <ImportButton
+              {entityLabel === 'company' ? <button type="button" data-button-family="import" aria-label="Import organizations" title="Import organizations" disabled={!canCreateOrganization} onClick={() => setOrganizationImportOpen(true)} className="flex h-4 w-4 items-center justify-center text-[#7288A3] hover:text-[#007EA7] disabled:opacity-40"><Upload size={16} /></button> : <ImportButton
                 scope={title}
                 onImport={
                   dataSource === "counterparties"
@@ -1907,7 +2231,7 @@ export default function Companies({
                       ? handleOrganizationImport
                       : undefined
                 }
-              />
+              />}
               <button
                 className="w-4 h-4 flex items-center justify-center text-[#7288A3] hover:text-[#007EA7] transition-colors"
                 onClick={handleRefresh}
@@ -1931,11 +2255,32 @@ export default function Companies({
           >
             <div
               style={{
-                minWidth: `${activeCols.reduce((s, c) => s + c.width + 12, 0) + 2 + actionColumnWidth + 12}px`,
+                minWidth: `${activeCols.reduce((s, c) => s + c.width + 12, 0) + 2 + actionColumnWidth + 12 + (entityLabel === "company" ? 48 : 0)}px`,
               }}
             >
               {/* Column headers */}
-              <div className="flex flex-row items-center pl-3 gap-3 h-5 mb-4">
+              <div className={`flex flex-row items-center ${entityLabel === "company" ? "pl-2" : "pl-3"} gap-3 h-5 mb-4`}>
+                {entityLabel === "company" && (
+                  <div className="flex h-5 w-9 flex-shrink-0 items-center justify-center">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all filtered organizations"
+                      title="Select all filtered organizations"
+                      checked={allCompaniesSelected}
+                      ref={(input) => { if (input) input.indeterminate = false; }}
+                      disabled={sorted.length === 0}
+                      onChange={() => setSelectedCompanyIds((current) => {
+                        const next = new Set(current);
+                        sorted.forEach((row) => {
+                          if (allCompaniesSelected) next.delete(row.id);
+                          else next.add(row.id);
+                        });
+                        return next;
+                      })}
+                      className="h-[18px] w-[18px] cursor-pointer rounded border border-[#A1B6C6] accent-[#007EA7]"
+                    />
+                  </div>
+                )}
                 {activeCols.map((col) => {
                   const colIdx = columns.findIndex((c) => c.key === col.key);
                   return (
@@ -2024,19 +2369,40 @@ export default function Companies({
                       className={`group flex h-9 w-full flex-row items-center rounded-lg transition-colors hover:bg-[#E7F4F9] ${i % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"}`}
                     >
                       <div className="flex flex-row items-center px-2 py-[9px] gap-3 flex-1 h-9 min-w-0">
+                        {entityLabel === "company" && (
+                          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center">
+                            <input
+                              type="checkbox"
+                              aria-label={`Select ${row.name}`}
+                              checked={selectedCompanyIds.has(row.id)}
+                              onClick={(event) => event.stopPropagation()}
+                              onChange={() => setSelectedCompanyIds((current) => {
+                                const next = new Set(current);
+                                if (next.has(row.id)) next.delete(row.id);
+                                else next.add(row.id);
+                                return next;
+                              })}
+                              className="h-[18px] w-[18px] cursor-pointer rounded border border-[#A1B6C6] accent-[#007EA7]"
+                            />
+                          </div>
+                        )}
                         {activeCols.map((col) => (
                           <div
                             key={col.key}
                             className="flex-shrink-0"
                             style={{ width: col.width }}
                           >
-                            {renderDataCell(col.key, row)}
+                            {col.key === 'action_required' && entityLabel === 'company' ? (
+                              <button type="button" onClick={event => { event.stopPropagation(); onOpenRequiredActions?.(row); }} className="font-montserrat text-[12px] font-normal leading-[18px] text-[#007EA7] hover:underline" aria-label={`Open required actions for ${row.name}`}>
+                                {row.action_required ?? 0}
+                              </button>
+                            ) : renderDataCell(col.key, row)}
                           </div>
                         ))}
                       </div>
 
                       <div
-                        className={`flex h-9 flex-shrink-0 flex-row items-center justify-end gap-1 p-1 transition-colors ${i % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} group-hover:bg-[#E7F4F9]`}
+                        className={`${entityLabel === "company" ? "sticky right-0 z-10" : ""} flex h-9 flex-shrink-0 flex-row items-center justify-end gap-1 p-1 transition-colors ${i % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} group-hover:bg-[#E7F4F9]`}
                         style={{ width: actionColumnWidth }}
                       >
                         <button
@@ -2071,6 +2437,20 @@ export default function Companies({
                             </span>
                           )}
                         </button>
+                        {entityLabel === "company" && (
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setManagedCompany(row);
+                            }}
+                            title="MANAGE"
+                            aria-label={`MANAGE ${row.name}`}
+                            className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border-2 border-[#D3E1EC] bg-white text-[#7288A3] transition-colors hover:border-[#007EA7] hover:text-[#007EA7]"
+                          >
+                            <Settings2 size={14} />
+                          </button>
+                        )}
                         {entityLabel === "counterparty" && (
                           <button
                             type="button"
@@ -2133,6 +2513,7 @@ export default function Companies({
         />
       )}
 
+      {organizationImportOpen && canCreateOrganization && <OrganizationImportWizard onClose={() => setOrganizationImportOpen(false)} onImported={() => { void fetchCompanies(); }} onOpenSetup={company => { setOrganizationImportOpen(false); onOpenOrganizationSetup?.(company); }} />}
       {createOpen && (
         <div
           className={
@@ -2146,10 +2527,10 @@ export default function Companies({
             className={`flex h-full min-w-0 flex-col overflow-x-hidden overflow-y-auto bg-white ${
               entityLabel === "counterparty"
                 ? "mx-auto w-full max-w-[1440px] gap-8 px-4 py-14 sm:px-8 lg:px-[72px]"
-                : `gap-6 px-6 pb-8 pt-6 shadow-[-2px_0_0_#E5EDF9] ${entityLabel === "organization" ? "w-[min(1040px,calc(100vw-24px))]" : "w-[380px]"}`
+                : `gap-6 px-6 pb-8 pt-6 shadow-[-2px_0_0_#E5EDF9] ${isOrganizationForm ? "w-[min(1040px,calc(100vw-24px))]" : "w-[380px]"}`
             }`}
             onClick={(event) => event.stopPropagation()}
-            aria-label={`Create new ${entityLabel}`}
+            aria-label={`Create new ${isOrganizationForm ? 'organization' : entityLabel}`}
           >
             {entityLabel === "counterparty" ? (
               <>
@@ -2186,7 +2567,7 @@ export default function Companies({
             ) : (
               <div className="flex items-center justify-between">
                 <h2 className="font-montserrat text-[22px] font-semibold leading-8 text-[#10233A]">
-                  {`Create new ${entityLabel}`}
+                  {`Create new ${isOrganizationForm ? 'organization' : entityLabel}`}
                 </h2>
                 <button
                   type="button"
@@ -2201,7 +2582,7 @@ export default function Companies({
                 </button>
               </div>
             )}
-            {entityLabel === "organization" && (
+            {isOrganizationForm && (
               <div
                 role="tablist"
                 aria-label="Organization settings sections"
@@ -2809,7 +3190,7 @@ export default function Companies({
                     ))}
                   </div>
                 )}
-              {entityLabel === "organization" &&
+              {isOrganizationForm &&
                 organizationFormSection === "general" && (
                   <>
                     <OrganizationSelect
@@ -2866,13 +3247,13 @@ export default function Companies({
                   </>
                 )}
               {entityLabel !== "counterparty" &&
-                (entityLabel !== "organization" ||
+                (!isOrganizationForm ||
                   organizationFormSection === "general") &&
                 [
                   {
                     key: "name",
                     label:
-                      entityLabel === "organization"
+                      isOrganizationForm
                         ? "Company name *"
                         : "Name *",
                     value: newCompany.name,
@@ -2933,7 +3314,7 @@ export default function Companies({
                     />
                   </label>
                 ))}
-              {entityLabel === "organization" &&
+              {isOrganizationForm &&
                 organizationFormSection === "general" && (
                   <>
                     <OrganizationSelect
@@ -3022,7 +3403,7 @@ export default function Companies({
                     ))}
                   </>
                 )}
-              {entityLabel === "organization" &&
+              {isOrganizationForm &&
                 organizationFormSection === "digitization" && (
                   <>
                     <h3 className="font-montserrat text-[16px] font-semibold text-[#10233A]">
@@ -3075,7 +3456,7 @@ export default function Companies({
                     ))}
                   </>
                 )}
-              {entityLabel === "organization" &&
+              {isOrganizationForm &&
                 organizationFormSection === "sharepoint" && (
                   <>
                     <h3 className="font-montserrat text-[16px] font-semibold text-[#10233A]">
@@ -3140,7 +3521,7 @@ export default function Companies({
                     )}
                   </>
                 )}
-              {entityLabel === "organization" &&
+              {isOrganizationForm &&
                 organizationFormSection === "counterparties" && (
                   <OrganizationCounterpartiesSettings
                     value={newCompany.counterpartiesSettings}
@@ -3174,7 +3555,7 @@ export default function Companies({
                   creating ||
                   !newCompany.name.trim() ||
                   !newCompany.companyCode.trim() ||
-                  (entityLabel === "organization" &&
+                  (isOrganizationForm &&
                     (!newCompany.taxCountry ||
                       !newCompany.legalForm ||
                       !newCompany.baseCurrency ||

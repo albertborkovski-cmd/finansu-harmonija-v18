@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { Company } from "../lib/supabase";
 import Companies from "./Companies";
 import CompanyClientInformation from "./CompanyClientInformation";
+import OrganizationSetupIntegration from './OrganizationSetupIntegration';
 import { loadGeneralLedgerTemplateNames } from "./GeneralLedgerView";
 
 /**
@@ -11,7 +12,13 @@ import { loadGeneralLedgerTemplateNames } from "./GeneralLedgerView";
  */
 export default function SettingsOrganizationsView({
   onNavigateToUserDirectory,
+  companiesMode = false,
+  onViewCompany,
+  onOpenRequiredActions,
 }: {
+  companiesMode?: boolean;
+  onViewCompany?: (company: Company) => void;
+  onOpenRequiredActions?: (company: Company) => void;
   onNavigateToUserDirectory: (
     audience: "Internal users" | "External users",
   ) => void;
@@ -19,6 +26,7 @@ export default function SettingsOrganizationsView({
   const [selectedOrganization, setSelectedOrganization] =
     useState<Company | null>(null);
   const [creatingOrganization, setCreatingOrganization] = useState(false);
+  const [setupOrganization, setSetupOrganization] = useState<Company | null>(null);
 
   const newOrganization = (): Company => ({
     id: `new-organization-${Date.now()}`,
@@ -46,6 +54,8 @@ export default function SettingsOrganizationsView({
     client_notes: "",
   });
 
+  if (setupOrganization) return <OrganizationSetupIntegration company={setupOrganization} onBack={() => setSetupOrganization(null)} onOpenCard={() => { setSelectedOrganization(setupOrganization); setCreatingOrganization(false); setSetupOrganization(null); }} />;
+
   if (selectedOrganization) {
     return (
       <CompanyClientInformation
@@ -62,17 +72,20 @@ export default function SettingsOrganizationsView({
           setSelectedOrganization(organization);
         }}
         onNavigateToUserDirectory={onNavigateToUserDirectory}
+        onOpenSetupIntegration={() => setSetupOrganization(selectedOrganization)}
       />
     );
   }
 
   return (
     <Companies
-      title="Organizations"
-      entityLabel="organization"
+      title={companiesMode ? 'Companies' : 'Organizations'}
+      entityLabel={companiesMode ? 'company' : 'organization'}
       allowCreate
-      breadcrumbs={["Settings", "Organizations"]}
-      onViewDetails={setSelectedOrganization}
+      breadcrumbs={companiesMode ? ['Companies'] : ["Settings", "Organizations"]}
+      onViewDetails={companiesMode ? onViewCompany : setSelectedOrganization}
+      onOpenRequiredActions={onOpenRequiredActions}
+      onOpenOrganizationSetup={setSetupOrganization}
       onCreate={() => {
         setCreatingOrganization(true);
         setSelectedOrganization(newOrganization());

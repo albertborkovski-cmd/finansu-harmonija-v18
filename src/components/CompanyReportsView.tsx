@@ -197,7 +197,7 @@ export default function CompanyReportsView({ company }: { company: Company }) {
   const [deleteReport, setDeleteReport] = useState<CompanyReport | null>(null);
   const [previewReport, setPreviewReport] = useState<CompanyReport | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(4);
+  const [itemsPerPage, setItemsPerPage] = useState(20);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const { startResize } = useColumnResize(columns, setColumns);
 

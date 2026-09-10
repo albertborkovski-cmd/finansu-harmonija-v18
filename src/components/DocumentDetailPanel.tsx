@@ -23,17 +23,30 @@ import {
 import { ensureOrganizationProductGroup } from "../lib/organizationProductGroups";
 import { loadOperationDateValidationRule } from "./OperationDateValidationView";
 import {
-  hasAdministratorRole,
+  isAccountantAssigned,
   loadLinkedDirectoryUsers,
   SETTINGS_DATA_CHANGED_EVENT,
   type LinkedDirectoryUser,
 } from "../lib/linkedSettingsData";
 
-function loadAccountableUsers() {
+function loadAccountableUsers(organization: { id: string; name: string; assigned_accountant?: string }) {
   return loadLinkedDirectoryUsers("Internal users").filter(
     (user) =>
       (user.status ?? "Enabled").toLocaleLowerCase() !== "disabled" &&
-      !hasAdministratorRole(user),
+      isAccountantAssigned(organization, user),
+  );
+}
+
+function isUnassignedAccountablePerson(value: string) {
+  const normalized = value.trim();
+  if (!normalized || /^[—–-]$/.test(normalized)) return true;
+  // These names were populated by the original demo-document generator,
+  // not selected from the user directory. Keep them only if a real user exists.
+  if (!["J. Pavardenis", "A. Varduonis", "K. Jonaitis"].includes(normalized)) return false;
+  return !loadLinkedDirectoryUsers("Internal users").some((user) =>
+    [user.fullName, user.username, user.email].some((identity) =>
+      identity?.trim().toLocaleLowerCase() === normalized.toLocaleLowerCase(),
+    ),
   );
 }
 
@@ -199,7 +212,7 @@ function AccountablePersonField({
       <span className="font-montserrat text-[14px] font-semibold leading-5 text-[#10233A]">
         Accountable person
       </span>
-      <SearchableSelect ariaLabel="Accountable person" value={value} placeholder="Select internal user" emptyMessage="No internal users configured" options={users.map((user) => { const name = user.fullName || user.username || user.email || "Unnamed user"; return { value: name, label: user.email && user.email !== name ? `${name} · ${user.email}` : name }; })} onChange={onChange} className="h-8 rounded-md border border-[#D3E1EC] bg-white px-2 pr-9 font-montserrat text-[14px] font-medium leading-5 text-[#10233A]" />
+      <SearchableSelect ariaLabel="Accountable person" value={value} placeholder={value || "Select assigned accountant"} emptyMessage="No accountants assigned to this organization" options={users.map((user) => { const name = user.fullName || user.username || user.email || "Unnamed user"; return { value: name, label: name }; })} onChange={onChange} className="h-8 rounded-md border border-[#D3E1EC] bg-white px-2 pr-9 font-montserrat text-[14px] font-medium leading-5 text-[#10233A]" />
     </div>
   );
 }
@@ -311,23 +324,26 @@ function PercentEditCell({
   value,
   width,
   onChange,
+  readOnly = false,
 }: {
   value: string;
   width: number;
   onChange: (value: string) => void;
+  readOnly?: boolean;
 }) {
   return (
     <div
-      className="flex h-[26px] flex-shrink-0 items-center rounded border border-[#D3E1EC] bg-white px-2 transition-colors focus-within:border-[#007EA7]"
+      className={`flex h-[26px] flex-shrink-0 items-center rounded border border-[#D3E1EC] px-2 transition-colors ${readOnly ? 'bg-[#F7F7F7] text-[#828588]' : 'bg-white text-[#10233A] focus-within:border-[#007EA7]'}`}
       style={{ width }}
     >
       <input
         inputMode="decimal"
+        readOnly={readOnly}
         value={value.replace(/%/g, "")}
         onChange={(event) => onChange(formatVatPercent(event.target.value))}
-        className="min-w-0 flex-1 bg-transparent font-montserrat text-[12px] font-medium leading-[18px] text-[#10233A] outline-none"
+        className="h-full min-w-0 flex-1 border-0 bg-transparent p-0 font-montserrat text-[12px] font-medium leading-[18px] text-inherit outline-none"
       />
-      <span className="ml-0.5 flex-shrink-0 font-montserrat text-[12px] font-medium text-[#10233A]">
+      <span className="ml-0.5 flex-shrink-0 font-montserrat text-[12px] font-medium text-inherit">
         %
       </span>
     </div>
@@ -353,6 +369,7 @@ function LookupDropdownCell({
   generalLedgerName,
   onOpenGeneralLedger,
   onChange,
+  readOnly = false,
 }: {
   value: string;
   width: number;
@@ -361,6 +378,7 @@ function LookupDropdownCell({
   generalLedgerName?: string;
   onOpenGeneralLedger?: () => void;
   onChange: (v: string) => void;
+  readOnly?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -449,6 +467,10 @@ function LookupDropdownCell({
     setNewVal("");
     setAdding(false);
     setOpen(false);
+  }
+
+  if (readOnly) {
+    return <Cell value={value || "—"} width={width} grey />;
   }
 
   if (lookupType === "gl_account") {
@@ -766,10 +788,14 @@ export default function DocumentDetailPanel({
     doc.counterpartyCode || initialCounterparty?.company_code || "",
   );
   const [internalUsers, setInternalUsers] =
-    useState<LinkedDirectoryUser[]>(loadAccountableUsers);
-  const [accountablePerson, setAccountablePerson] = useState(
+    useState<LinkedDirectoryUser[]>(() => loadAccountableUsers({ id: doc.companyId, name: companyName || "" }));
+  const [selectedAccountablePerson, setAccountablePerson] = useState(
     doc.accountableResponsible || "",
   );
+  const assignedAccountant = internalUsers.length === 1 ? internalUsers[0] : null;
+  const accountablePerson = (!isUnassignedAccountablePerson(selectedAccountablePerson) ? selectedAccountablePerson : "") || (assignedAccountant
+    ? assignedAccountant.fullName || assignedAccountant.username || assignedAccountant.email || ""
+    : "");
   const [savedAccountablePerson, setSavedAccountablePerson] = useState(
     doc.accountableResponsible || "",
   );
@@ -824,14 +850,24 @@ export default function DocumentDetailPanel({
   }, []);
 
   useEffect(() => {
-    const refresh = () => setInternalUsers(loadAccountableUsers());
+    let active = true;
+    let revision = 0;
+    const refresh = async () => {
+      const request = ++revision;
+      const { data } = await supabase.from("companies").select("*").eq("id", doc.companyId);
+      if (!active || request !== revision) return;
+      const organization = data?.[0] as Company | undefined;
+      setInternalUsers(loadAccountableUsers(organization || { id: doc.companyId, name: companyName || "" }));
+    };
+    void refresh();
     window.addEventListener(SETTINGS_DATA_CHANGED_EVENT, refresh);
     window.addEventListener("storage", refresh);
     return () => {
+      active = false;
       window.removeEventListener(SETTINGS_DATA_CHANGED_EVENT, refresh);
       window.removeEventListener("storage", refresh);
     };
-  }, []);
+  }, [doc.companyId, companyName]);
   const displayedSeller = isPurchaseDocument
     ? counterparty || doc.source || "—"
     : currentCompanyName || doc.source || "Meso group, UAB";
@@ -1186,6 +1222,7 @@ export default function DocumentDetailPanel({
   }, [doc.id]);
 
   async function handleSaveChanges() {
+    if (readOnly) return;
     if (!activeLinesValid) {
       setSaveMessage("");
       setSaveError("Please complete all required document line fields.");
@@ -1425,7 +1462,7 @@ export default function DocumentDetailPanel({
 
   return (
     <div className="fixed inset-0 z-50 bg-white flex flex-col overflow-hidden">
-      <div className="flex-1 overflow-y-auto flex flex-row gap-0 p-0">
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden flex flex-row gap-0 p-0">
         {/* Left: document preview / upload placeholder — sticky, never scrolls horizontally */}
         <input
           ref={fileInputRef}
@@ -1438,7 +1475,7 @@ export default function DocumentDetailPanel({
         {localImageUrl ? (
           <div
             className="flex-shrink-0 sticky left-0 self-start relative group cursor-pointer"
-            style={{ width: 400, height: 968 }}
+            style={{ width: 'clamp(200px, 28vw, 360px)', height: '100vh' }}
             onClick={() => {
               if (!readOnly) fileInputRef.current?.click();
             }}
@@ -1477,7 +1514,7 @@ export default function DocumentDetailPanel({
         ) : (
           <div
             className="flex-shrink-0 sticky left-0 self-start flex items-center justify-center bg-[#F8FDFF] border-r border-[#D3E1EC]"
-            style={{ width: 400, height: "100vh" }}
+            style={{ width: 'clamp(200px, 28vw, 360px)', height: "100vh" }}
           >
             <button
               type="button"
@@ -1513,18 +1550,16 @@ export default function DocumentDetailPanel({
             </button>
           </div>
         )}
-        {/* Right: content — scrolls horizontally when fields don't fit */}
+        {/* Right: responsive fields; only document lines scroll horizontally. */}
         <div className="flex-1 flex flex-col min-w-0">
           <div
-            ref={contentRef}
-            className="flex-1 overflow-x-auto overflow-y-visible min-w-0 scrollbar-hide"
+            className="flex-1 min-w-0 w-full"
           >
             <div
-              className="flex flex-col gap-8 p-6"
-              style={{ minWidth: 1984, width: 1984 }}
+              className="flex min-w-0 w-full flex-col gap-6 p-4 xl:p-6"
             >
               {/* Title bar */}
-              <div className="flex flex-row items-center gap-2 min-h-8">
+              <div className="flex flex-row flex-wrap items-center gap-2 min-h-8">
                 <div className="flex flex-row items-center gap-2 flex-1 min-w-0">
                   <span data-view-allowed="true">
                     <HeaderBackButton
@@ -1582,15 +1617,12 @@ export default function DocumentDetailPanel({
 
               <fieldset
                 disabled={readOnly}
-                className={`contents ${readOnly ? "[&_input]:cursor-default [&_input]:bg-[#F7F7F7] [&_textarea]:cursor-default [&_textarea]:bg-[#F7F7F7] [&_button]:cursor-default" : ""}`}
+                className={`contents ${readOnly ? "[&_input]:cursor-default [&_input]:!bg-[#F7F7F7] [&_input]:!text-[#828588] [&_textarea]:cursor-default [&_textarea]:!bg-[#F7F7F7] [&_textarea]:!text-[#828588] [&_select]:!bg-[#F7F7F7] [&_select]:!text-[#828588] [&_div.h-8]:!bg-[#F7F7F7] [&_div.h-8]:!text-[#828588] [&_div.h-8_span]:!text-[#828588] [&_button]:cursor-default [&_.lucide-chevron-down]:hidden [&_.lucide-trash-2]:invisible" : ""}`}
               >
 
               {/* Main fields card */}
-              <div className="flex w-[1936px] flex-row gap-4 rounded-lg border border-[#D3E1EC] p-4">
-                <div
-                  className="flex flex-col gap-4 flex-1 min-w-0"
-                  style={{ maxWidth: 216 }}
-                >
+              <div className="grid w-full min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,180px),1fr))] gap-4 rounded-lg border border-[#D3E1EC] p-4">
+                <div className="contents">
                   {isAccountingNote ? (
                     <EditablePartyField
                       label="Client"
@@ -1648,10 +1680,7 @@ export default function DocumentDetailPanel({
                     onChange={setAccountablePerson}
                   />
                 </div>
-                <div
-                  className="flex flex-col gap-4 flex-1 min-w-0"
-                  style={{ maxWidth: 216 }}
-                >
+                <div className="contents">
                   <EditableValueField
                     label="Invoice date"
                     value={invoiceDate}
@@ -1664,20 +1693,14 @@ export default function DocumentDetailPanel({
                     readOnly={!operationDateRule.manualAdjustmentAllowed}
                   />
                 </div>
-                <div
-                  className="flex flex-col gap-4 flex-1 min-w-0"
-                  style={{ maxWidth: 216 }}
-                >
+                <div className="contents">
                   <EditableValueField
                     label="Due date"
                     value={dueDate}
                     onChange={setDueDate}
                   />
                 </div>
-                <div
-                  className="flex flex-col gap-4 flex-1 min-w-0"
-                  style={{ maxWidth: 216 }}
-                >
+                <div className="contents">
                   <EditableValueField
                     label="Document Number"
                     value={documentNumber}
@@ -1689,10 +1712,7 @@ export default function DocumentDetailPanel({
                     onChange={setOrderNumber}
                   />
                 </div>
-                <div
-                  className="flex flex-col gap-4 flex-1 min-w-0"
-                  style={{ maxWidth: 216 }}
-                >
+                <div className="contents">
                   <Field label="Amount" value={formatMoney(lineAmount)} grey />
                   <Field
                     label="Total Amount"
@@ -1700,10 +1720,7 @@ export default function DocumentDetailPanel({
                     grey
                   />
                 </div>
-                <div
-                  className="flex flex-col gap-4 flex-1 min-w-0"
-                  style={{ maxWidth: 216 }}
-                >
+                <div className="contents">
                   <Field label="VAT" value={formatMoney(lineVat)} grey />
                   <EditableOptionField
                     label="Currency"
@@ -1713,10 +1730,7 @@ export default function DocumentDetailPanel({
                   />
                 </div>
                 {isAccountingNote && (
-                  <div
-                    className="flex flex-col gap-4 flex-1 min-w-0"
-                    style={{ maxWidth: 216 }}
-                  >
+                  <div className="contents">
                     <div className="flex min-w-0 flex-col gap-2">
                       <span className="font-montserrat text-[14px] font-semibold leading-5 text-[#10233A]">
                         Debit / Credit<span className="text-[#D90310]">*</span>
@@ -1747,7 +1761,7 @@ export default function DocumentDetailPanel({
               </div>
 
               {/* Line items */}
-              <div className="flex min-h-[250px] w-[1936px] flex-col gap-2 overflow-visible">
+              <div className="flex w-full min-w-0 flex-col gap-2">
                 <div className="flex items-center justify-start gap-3">
                   <div className="inline-flex rounded-md bg-[#EEF4F7] p-0.5">
                     <button
@@ -1765,7 +1779,7 @@ export default function DocumentDetailPanel({
                       Quantity ({lineItems.length})
                     </button>
                   </div>
-                  {(lineViewMode === "summary"
+                  {!readOnly && (lineViewMode === "summary"
                     ? summaryLineItems.length
                     : lineItems.length) > 0 && (
                     <button
@@ -1778,7 +1792,7 @@ export default function DocumentDetailPanel({
                       <Scissors size={14} strokeWidth={1.8} />
                     </button>
                   )}
-                  <button
+                  {!readOnly && <button
                     type="button"
                     onClick={() => addCalculatedLine(lineViewMode)}
                     className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-[#D3E1EC] bg-white text-[#7288A3] transition-colors hover:border-[#007EA7] hover:bg-[#F0F7FA] hover:text-[#007EA7]"
@@ -1786,11 +1800,12 @@ export default function DocumentDetailPanel({
                     aria-label="Add line"
                   >
                     <Plus size={14} strokeWidth={1.8} />
-                  </button>
+                  </button>}
                 </div>
                 <div className="border-b border-[#D3E1EC] pb-2 font-montserrat text-[12px] font-semibold text-[#10233A]">
                   Document lines
                 </div>
+                <div ref={contentRef} className="w-full min-w-0 overflow-x-auto scrollbar-hide">
                 {lineViewMode === "summary" ? (
                   <div className="flex w-[1936px] flex-col">
                     <div className="flex flex-row items-center gap-[2px] p-[5px]">
@@ -1925,6 +1940,7 @@ export default function DocumentDetailPanel({
                               }
                             />
                             <PercentEditCell
+                              readOnly={readOnly}
                               value={line.vatPct}
                               width={70}
                               onChange={(value) =>
@@ -1947,7 +1963,7 @@ export default function DocumentDetailPanel({
                             <LookupDropdownCell value={line.object} width={90} lookupType="object_project" companyId={doc.companyId} onChange={(value) => updateLine("object", value)} />
                             <LookupDropdownCell value={line.series} width={80} lookupType="series" companyId={doc.companyId} onChange={(value) => updateLine("series", value)} />
                             <LookupDropdownCell value={line.center} width={90} lookupType="cost_center" companyId={doc.companyId} onChange={(value) => updateLine("center", value)} />
-                            <LookupDropdownCell value={line.expense} width={110} lookupType="gl_account" companyId={doc.companyId} generalLedgerName={generalLedgerName} onOpenGeneralLedger={onOpenGeneralLedger} onChange={(value) => updateLine("expense", value)} />
+                            <LookupDropdownCell readOnly={readOnly} value={line.expense} width={110} lookupType="gl_account" companyId={doc.companyId} generalLedgerName={generalLedgerName} onOpenGeneralLedger={onOpenGeneralLedger} onChange={(value) => updateLine("expense", value)} />
                             <LookupDropdownCell value={line.vatClass} width={110} lookupType="vat_class" companyId={doc.companyId} onChange={(value) => updateLine("vatClass", value)} />
                           </div>
                         );
@@ -2420,6 +2436,7 @@ export default function DocumentDetailPanel({
                         }
                       />
                       <PercentEditCell
+                        readOnly={readOnly}
                         value={row.vatPct}
                         width={70}
                         onChange={(v) =>
@@ -2510,6 +2527,7 @@ export default function DocumentDetailPanel({
                         value={row.expense}
                         width={110}
                         lookupType="gl_account"
+                        readOnly={readOnly}
                         companyId={doc.companyId}
                         generalLedgerName={generalLedgerName}
                         onOpenGeneralLedger={onOpenGeneralLedger}
@@ -2540,6 +2558,9 @@ export default function DocumentDetailPanel({
                   </div>
                 )}
               </div>
+
+              </div>
+              <HorizontalTableScrollbar scrollRef={contentRef} className="py-2" />
 
               {/* History */}
               <div className="flex flex-col gap-4">
@@ -2641,10 +2662,6 @@ export default function DocumentDetailPanel({
               </fieldset>
             </div>
           </div>
-          <HorizontalTableScrollbar
-            scrollRef={contentRef}
-            className="px-6 py-2"
-          />
         </div>
       </div>
       {saveMessage && (

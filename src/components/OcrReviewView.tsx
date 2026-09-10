@@ -318,7 +318,7 @@ function ReviewAnalyticsView() {
   const analyticsGridTemplate = `42px ${visibleAnalyticsColumns.map((column) => `${column.width}px`).join(" ")}`;
   const analyticsTableWidth = 42 + visibleAnalyticsColumns.reduce((sum, column) => sum + column.width, 0);
 
-  const pageSize = 6;
+  const pageSize = 20;
   const totalPages = Math.max(1, Math.ceil(sortedAnalytics.length / pageSize));
   const safePage = Math.min(page, totalPages);
   const displayedWorkers = sortedAnalytics.slice((safePage - 1) * pageSize, safePage * pageSize);
@@ -462,7 +462,7 @@ function ReviewAnalyticsView() {
       </div>
 
       <HorizontalTableScrollbar scrollRef={tableScrollRef} />
-      <TablePagination currentPage={safePage} totalPages={totalPages} itemCount={analytics.length} itemsPerPage={pageSize} onPageChange={setPage} />
+      <TablePagination currentPage={safePage} totalPages={totalPages} itemCount={sortedAnalytics.length} itemsPerPage={pageSize} onPageChange={setPage} />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useCallback, useLayoutEffect, useMemo, useRef } from "react";
 import type { ColConfig } from "./ColumnSettingsPanel";
+import { readColumnLayout, saveColumnLayout } from '../lib/columnPreferences';
 
 const MIN_COLUMN_WIDTH = 88;
 const HEADER_HORIZONTAL_SPACE = 54;
@@ -129,7 +130,9 @@ function fitVisibleColumns(columns: ColConfig[], availableWidth: number) {
 export function useColumnResize(
   columns: ColConfig[],
   setColumns: (cols: ColConfig[]) => void,
+  persistenceScope?: string,
 ) {
+  const hydratedLayoutKey = useRef('');
   const startX = useRef(0);
   const startWidth = useRef(0);
   const colIndex = useRef(-1);
@@ -143,12 +146,23 @@ export function useColumnResize(
     [columns],
   );
   const storageKey = tableStorageKey(schemaKey);
+  // Sorting the schema identity prevents dragging a column from creating a new key.
+  const layoutKey = `finansu-harmonija:v14:column-layout:${persistenceScope ?? tableStorageKey(columns.map(column => column.key).sort().join('|'))}`;
 
   useLayoutEffect(() => {
     latestColumns.current = columns;
   }, [columns]);
 
   useLayoutEffect(() => {
+    if (hydratedLayoutKey.current !== layoutKey) {
+      hydratedLayoutKey.current = layoutKey;
+      const restored = readColumnLayout(layoutKey, columns);
+      if (restored.some((column, index) => column.key !== columns[index]?.key || column.visible !== columns[index]?.visible)) {
+        setColumns(restored);
+        return;
+      }
+    }
+    saveColumnLayout(layoutKey, columns);
     const visibilityKey = columns
       .filter((column) => column.visible)
       .map((column) => column.key)
@@ -191,7 +205,7 @@ export function useColumnResize(
       (column, index) => column.width !== columns[index]?.width,
     );
     if (changed) setColumns(fitted);
-  }, [columns, setColumns, storageKey]);
+  }, [columns, setColumns, storageKey, layoutKey]);
 
   const handleMouseMove = useCallback(
     (e: MouseEvent) => {

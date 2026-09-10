@@ -534,6 +534,8 @@ export default function GeneralLedgerView({
   companyName?: string;
   companyId?: string;
 } = {}) {
+  const [fixedPage1, setFixedPage1] = useState(1);
+  const [fixedPage0, setFixedPage0] = useState(1);
   const [templates, setTemplates] = usePersistentState<LedgerTemplate[]>(
     STORAGE_KEY,
     INITIAL_TEMPLATES,
@@ -1098,7 +1100,7 @@ export default function GeneralLedgerView({
               <span className="w-[108px] flex-shrink-0" aria-hidden="true" />
             </div>
             <div className="flex flex-col gap-0.5">
-              {treeAccounts.map((account, index) => (
+              {treeAccounts.slice((Math.min(fixedPage0, Math.max(1, Math.ceil(treeAccounts.length / 20))) - 1) * 20, Math.min(fixedPage0, Math.max(1, Math.ceil(treeAccounts.length / 20))) * 20).map((account, index) => (
                 <div
                   key={account.id}
                   className={`flex h-10 items-center rounded-lg font-montserrat text-[12px] text-[#10233A] transition-colors ${index % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} hover:bg-[#E7F4F9]`}
@@ -1224,11 +1226,11 @@ export default function GeneralLedgerView({
         <HorizontalTableScrollbar scrollRef={templateTableScrollRef} />
         <div>
           <TablePagination
-            currentPage={1}
-            totalPages={1}
-            itemCount={accounts.length}
-            itemsPerPage={Math.max(1, accounts.length)}
-            onPageChange={() => undefined}
+            currentPage={fixedPage0}
+            totalPages={Math.max(1, Math.ceil(treeAccounts.length / 20))}
+            itemCount={treeAccounts.length}
+            itemsPerPage={20}
+            onPageChange={setFixedPage0}
             onShowMore={() => undefined}
           />
         </div>
@@ -1421,7 +1423,7 @@ export default function GeneralLedgerView({
             <div className="w-[72px] flex-shrink-0" />
           </div>
           <div className="flex flex-col gap-0.5">
-            {sortedTemplates.map((template, index) => (
+            {sortedTemplates.slice((Math.min(fixedPage1, Math.max(1, Math.ceil(sortedTemplates.length / 20))) - 1) * 20, Math.min(fixedPage1, Math.max(1, Math.ceil(sortedTemplates.length / 20))) * 20).map((template, index) => (
               <div
                 key={template.id}
                 role="button"
@@ -1514,11 +1516,11 @@ export default function GeneralLedgerView({
       <HorizontalTableScrollbar scrollRef={templateTableScrollRef} />
       <div>
         <TablePagination
-          currentPage={1}
-          totalPages={1}
+          currentPage={fixedPage1}
+          totalPages={Math.max(1, Math.ceil(sortedTemplates.length / 20))}
           itemCount={sortedTemplates.length}
-          itemsPerPage={Math.max(1, sortedTemplates.length)}
-          onPageChange={() => undefined}
+          itemsPerPage={20}
+          onPageChange={setFixedPage1}
           onShowMore={() => undefined}
         />
       </div>

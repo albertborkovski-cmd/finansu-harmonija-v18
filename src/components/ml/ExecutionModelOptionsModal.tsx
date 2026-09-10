@@ -53,7 +53,7 @@ export default function ExecutionModelOptionsModal({ onClose, onSelect }: { onCl
                 <span className="flex items-center gap-1.5 text-[#10233A]">Name</span><span>Version</span><span>Description</span><span>Status</span><span />
               </div>
               <div className="flex h-[360px] flex-col overflow-hidden">
-                {filteredOptions.map((option, index) => (
+                {filteredOptions.slice((Math.min(page, Math.max(1, Math.ceil(filteredOptions.length / 20))) - 1) * 20, Math.min(page, Math.max(1, Math.ceil(filteredOptions.length / 20))) * 20).map((option, index) => (
                   <div key={option.id} className={`grid h-9 flex-shrink-0 grid-cols-[minmax(170px,278px)_84px_minmax(180px,250px)_minmax(90px,140px)_36px] items-center rounded-lg font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
                     <span className="truncate px-3">{option.name}</span>
                     <span className="truncate px-[10px]">{option.version}</span>

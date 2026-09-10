@@ -355,7 +355,7 @@ export default function CompanyReconciliationView({ companyName = "" }: { compan
             })}
           </div>
 
-          {sortedRows.map((row, index) => (
+          {sortedRows.slice((Math.min(currentPage, Math.max(1, Math.ceil(sortedRows.length / 20))) - 1) * 20, Math.min(currentPage, Math.max(1, Math.ceil(sortedRows.length / 20))) * 20).map((row, index) => (
             <div
               key={row.id}
               className={`group flex h-9 items-center rounded-lg pl-3 pr-2 transition-colors hover:bg-[#EEF6FA] ${index % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"}`}
@@ -389,9 +389,9 @@ export default function CompanyReconciliationView({ companyName = "" }: { compan
       <div className="flex flex-shrink-0 items-center justify-between pt-2">
         <TablePagination
           currentPage={currentPage}
-          totalPages={1}
+          totalPages={Math.max(1, Math.ceil(sortedRows.length / 20))}
           itemCount={sortedRows.length}
-          itemsPerPage={14}
+          itemsPerPage={20}
           onPageChange={setCurrentPage}
         />
       </div>

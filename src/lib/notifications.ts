@@ -1,6 +1,16 @@
 export type NotificationTab = "notifications" | "reminders";
 
-export interface NotificationRow {
+export interface OrganizationActionMetadata {
+  organizationId?: string;
+  organizationName?: string;
+  requiresAction?: boolean;
+  resolvedAt?: string;
+  actionId?: string;
+  relevantRoles?: string[];
+  recipientEmails?: string[];
+}
+
+export interface NotificationRow extends OrganizationActionMetadata {
   id: string;
   createdAt?: string;
   name: string;
@@ -9,7 +19,7 @@ export interface NotificationRow {
   status: "Active" | "Inactive";
 }
 
-export interface ReminderRow {
+export interface ReminderRow extends OrganizationActionMetadata {
   id: string;
   createdAt?: string;
   name: string;
@@ -96,15 +106,37 @@ export type AttentionNotification = (NotificationRow | ReminderRow) & {
   category: NotificationTab;
 };
 
+/** Shared by Companies counts and the destination list. Do not infer actions from Active alone. */
+export function getOrganizationRequiredActions(rows: AttentionNotification[], organizationId: string, session: { email: string; roleNames: string[] }): AttentionNotification[] {
+  return getRelevantActions(rows, session).filter(row => row.organizationId === organizationId && requiresAction(row));
+}
+
+export function requiresAction(row: AttentionNotification) {
+  return row.status === 'Active' && row.requiresAction === true && !row.resolvedAt;
+}
+
+export function getRelevantActions(rows: AttentionNotification[], session: { email: string; roleNames: string[] }): AttentionNotification[] {
+  const roles = new Set(session.roleNames.map(role => role.toLowerCase()));
+  const unique = new Map<string, AttentionNotification>();
+  for (const row of rows) {
+    if (row.relevantRoles?.length && !row.relevantRoles.some(role => roles.has(role.toLowerCase()))) continue;
+    if (row.recipientEmails?.length && !row.recipientEmails.some(email => email.toLowerCase() === session.email.toLowerCase())) continue;
+    const key = `${row.organizationId ?? ''}:${row.actionId || `${row.category}:${row.id}`}`;
+    if (!unique.has(key)) unique.set(key, row);
+  }
+  return [...unique.values()];
+}
+
 export function getAttentionNotifications(
   notifications: NotificationRow[],
   reminders: ReminderRow[],
+  includeInactive = false,
 ): AttentionNotification[] {
   return [
     ...notifications.map(row => ({ ...row, category: "notifications" as const })),
     ...reminders.map(row => ({ ...row, category: "reminders" as const })),
   ]
-    .filter(row => row.status === "Active")
+    .filter(row => includeInactive || row.status === "Active")
     .map((row, index) => ({
       row,
       index,

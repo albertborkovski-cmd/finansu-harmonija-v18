@@ -4,7 +4,7 @@ import { getAttentionNotifications, SAMPLE_NOTIFICATIONS, SAMPLE_REMINDERS } fro
 const NOTIFICATIONS_KEY = "finansu-harmonija:v7:notifications";
 const REMINDERS_KEY = "finansu-harmonija:v7:reminders";
 
-function readAttentionNotifications() {
+function readAttentionNotifications(includeInactive = false) {
   function read<T>(key: string, fallback: T[]): T[] {
     try {
       const stored = localStorage.getItem(key);
@@ -17,19 +17,20 @@ function readAttentionNotifications() {
   return getAttentionNotifications(
     read(NOTIFICATIONS_KEY, SAMPLE_NOTIFICATIONS),
     read(REMINDERS_KEY, SAMPLE_REMINDERS),
+    includeInactive,
   );
 }
 
 /** Read the same records as Notifications & Reminders without writing to them. */
-export function useAttentionNotifications() {
-  const [rows, setRows] = useState(readAttentionNotifications);
+export function useAttentionNotifications(includeInactive = false) {
+  const [rows, setRows] = useState(() => readAttentionNotifications(includeInactive));
   useEffect(() => {
     const refresh = (event: Event) => {
       const key = event instanceof StorageEvent
         ? event.key
         : (event as CustomEvent<{ storageKey?: string }>).detail?.storageKey;
       if (!key || key === NOTIFICATIONS_KEY || key === REMINDERS_KEY) {
-        setRows(readAttentionNotifications());
+        setRows(readAttentionNotifications(includeInactive));
       }
     };
     window.addEventListener("storage", refresh);
@@ -38,6 +39,6 @@ export function useAttentionNotifications() {
       window.removeEventListener("storage", refresh);
       window.removeEventListener("finansu-harmonija:persistent-state-changed", refresh);
     };
-  }, []);
+  }, [includeInactive]);
   return rows;
 }

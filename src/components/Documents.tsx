@@ -1292,6 +1292,7 @@ interface DocumentsProps {
   hideRowActions?: boolean;
   documentTypeFilter?: string;
   initialViewDocumentId?: string | null;
+  initialDocumentMode?: 'view' | 'edit' | 'original-view';
   onInitialViewConsumed?: () => void;
   onInitialViewBack?: () => void;
   onOpenGeneralLedger?: () => void;
@@ -1348,6 +1349,7 @@ export default function Documents({
   hideRowActions = false,
   documentTypeFilter = "",
   initialViewDocumentId = null,
+  initialDocumentMode = 'view',
   onInitialViewConsumed,
   onInitialViewBack,
   onOpenGeneralLedger,
@@ -1366,7 +1368,7 @@ export default function Documents({
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(8);
+  const [itemsPerPage, setItemsPerPage] = useState(20);
   const [showColumnPanel, setShowColumnPanel] = useState(false);
   const [activeColumns, setActiveColumns] = useState<ColConfig[]>(
     DOCUMENT_BASE_COLUMNS,
@@ -1733,9 +1735,10 @@ export default function Documents({
     const documentToView = docs.find((document) => document.id === initialViewDocumentId);
     if (!documentToView) return;
     initialViewHandledRef.current = true;
-    setViewDoc(documentToView);
+    if (initialDocumentMode === 'edit' || initialDocumentMode === 'original-view') setOpenDoc(documentToView);
+    else setViewDoc(documentToView);
     onInitialViewConsumed?.();
-  }, [docs, initialViewDocumentId, onInitialViewConsumed]);
+  }, [docs, initialViewDocumentId, initialDocumentMode, onInitialViewConsumed]);
 
   useEffect(() => {
     const refreshCounterparties = () => {
@@ -3132,11 +3135,18 @@ export default function Documents({
       )}
       {openDoc && (
         <DocumentDetailPanel
+          readOnly={initialDocumentMode === 'original-view' && openDoc.id === entryDocumentIdRef.current}
           doc={openDoc}
           companyName={companyName}
           generalLedgerName={generalLedgerName}
           onOpenGeneralLedger={onOpenGeneralLedger}
-          onClose={() => setOpenDoc(null)}
+          onClose={() => {
+            setOpenDoc(null);
+            if (openDoc.id === entryDocumentIdRef.current) {
+              entryDocumentIdRef.current = null;
+              onInitialViewBack?.();
+            }
+          }}
           onImageUpload={(docId, imageUrl) => {
             setDocs((prev) =>
               prev.map((d) => (d.id === docId ? { ...d, imageUrl } : d)),
