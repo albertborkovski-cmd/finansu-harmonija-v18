@@ -81,7 +81,7 @@ export default defineConfig({
   plugins: [react(), sharedDataPlugin()],
   server: {
     host: '127.0.0.1',
-    port: 5196,
+    port: 5197,
     strictPort: true,
     headers: {
       'Cache-Control': 'no-store, no-cache, must-revalidate',
@@ -91,7 +91,7 @@ export default defineConfig({
   },
   preview: {
     host: '127.0.0.1',
-    port: 5196,
+    port: 5197,
     strictPort: true,
     headers: {
       'Cache-Control': 'no-store, no-cache, must-revalidate',
