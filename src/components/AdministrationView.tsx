@@ -22,6 +22,7 @@ import { INITIAL_ADMINISTRATION_USERS } from "./administrationUsersStore";
 import { ResizeHandle, useColumnResize } from "./useColumnResize";
 import ColumnSortButton, { useMultiColumnSort } from "./ColumnSortButton";
 import TablePagination from "./TablePagination";
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import OcrFieldValidationSettings from "./OcrFieldValidationSettings";
 
 export type AdministrationSection =
@@ -764,7 +765,7 @@ function AdminTablePage({
         <OcrSearchField
           ariaLabel={`Search ${config.title}`}
           value={query}
-          onChange={setQuery}
+          onChange={(value) => { setQuery(value); setCurrentPage(1); }}
         />
         <div className="flex items-center gap-4">
           <BulkDeleteButton
@@ -817,9 +818,10 @@ function AdminTablePage({
                   <ColumnSortButton
                     columnLabel={column.label}
                     direction={directionFor(column.key)}
-                    onDirectionChange={(direction) =>
-                      changeSort(column.key, direction)
-                    }
+                    onDirectionChange={(direction) => {
+                      changeSort(column.key, direction);
+                      setCurrentPage(1);
+                    }}
                   />
                   <ResizeHandle
                     onMouseDown={(event) => startResize(realIndex, event)}
@@ -830,7 +832,7 @@ function AdminTablePage({
             <div className="w-[48px]" />
           </div>
           <div className="flex flex-col gap-0.5">
-            {sortedRows.map((row, index) => (
+            {sortedRows.slice(0, currentPage * TABLE_BATCH_SIZE).map((row, index) => (
               <div
                 key={row.id}
                 role="button"
@@ -894,9 +896,10 @@ function AdminTablePage({
       <HorizontalTableScrollbar scrollRef={tableScrollRef} />
       <TablePagination
         currentPage={currentPage}
-        totalPages={Math.max(1, Math.ceil(filtered.length / 14))}
+        totalPages={Math.max(1, Math.ceil(filtered.length / TABLE_BATCH_SIZE))}
         itemCount={filtered.length}
         onPageChange={setCurrentPage}
+        scrollRef={tableScrollRef}
       />
       {editing &&
         (section === "users" ? (
@@ -1000,7 +1003,7 @@ function LogsView() {
           <OcrSearchField
             ariaLabel="Search administration logs"
             value={query}
-            onChange={setQuery}
+            onChange={(value) => { setQuery(value); setCurrentPage(1); }}
           />
         </label>
         <LogsFilterDropdown
@@ -1021,6 +1024,7 @@ function LogsView() {
           }}
           onSelect={(value) => {
             setDomain(value);
+            setCurrentPage(1);
             setDomainOpen(false);
           }}
         />
@@ -1036,6 +1040,7 @@ function LogsView() {
           }}
           onSelect={(value) => {
             setSeverity(value);
+            setCurrentPage(1);
             setSeverityOpen(false);
           }}
         />
@@ -1045,7 +1050,7 @@ function LogsView() {
         className="min-h-[420px] overflow-x-auto rounded-xl border border-[#E5EDF9] bg-[#FBFDFF] p-5 font-mono text-[12px] leading-7 text-[#10233A] scrollbar-hide"
       >
         <div className="min-w-[900px]">
-          {rows.map((log) => (
+          {rows.slice(0, currentPage * TABLE_BATCH_SIZE).map((log) => (
             <div
               key={`${log.timestamp}-${log.domain}`}
               className="whitespace-pre-wrap"
@@ -1076,9 +1081,10 @@ function LogsView() {
       <HorizontalTableScrollbar scrollRef={tableScrollRef} />
       <TablePagination
         currentPage={currentPage}
-        totalPages={Math.max(1, Math.ceil(rows.length / 14))}
+        totalPages={Math.max(1, Math.ceil(rows.length / TABLE_BATCH_SIZE))}
         itemCount={rows.length}
         onPageChange={setCurrentPage}
+        scrollRef={tableScrollRef}
       />
     </div>
   );
@@ -1240,6 +1246,7 @@ function MonitoringView() {
         totalPages={1}
         itemCount={metrics.length}
         onPageChange={setCurrentPage}
+        scrollRef={tableScrollRef}
       />
     </div>
   );
@@ -1316,7 +1323,7 @@ function ActivityView() {
         <OcrSearchField
           ariaLabel="Search activity log"
           value={query}
-          onChange={setQuery}
+          onChange={(value) => { setQuery(value); setCurrentPage(1); }}
         />
       </div>
       <div ref={tableScrollRef} className="overflow-x-auto scrollbar-hide">
@@ -1336,9 +1343,10 @@ function ActivityView() {
                 <ColumnSortButton
                   columnLabel={column.label}
                   direction={directionFor(column.key as ActivityColumnKey)}
-                  onDirectionChange={(direction) =>
-                    changeSort(column.key as ActivityColumnKey, direction)
-                  }
+                  onDirectionChange={(direction) => {
+                    changeSort(column.key as ActivityColumnKey, direction);
+                    setCurrentPage(1);
+                  }}
                 />
                 <ResizeHandle
                   onMouseDown={(event) =>
@@ -1348,7 +1356,7 @@ function ActivityView() {
               </div>
             ))}
           </div>
-          {sortedRows.map((row, index) => (
+          {sortedRows.slice(0, currentPage * TABLE_BATCH_SIZE).map((row, index) => (
             <div
               key={`${row.id}-${row.date}`}
               className={`grid h-11 items-center rounded-lg px-3 ${index % 2 ? "bg-white" : "bg-[#F8FDFF]"}`}
@@ -1369,9 +1377,10 @@ function ActivityView() {
       <HorizontalTableScrollbar scrollRef={tableScrollRef} />
       <TablePagination
         currentPage={currentPage}
-        totalPages={Math.max(1, Math.ceil(sortedRows.length / 14))}
+        totalPages={Math.max(1, Math.ceil(sortedRows.length / TABLE_BATCH_SIZE))}
         itemCount={sortedRows.length}
         onPageChange={setCurrentPage}
+        scrollRef={tableScrollRef}
       />
     </div>
   );
@@ -1458,6 +1467,7 @@ function LicenseView() {
         totalPages={1}
         itemCount={2}
         onPageChange={setCurrentPage}
+        scrollRef={tableScrollRef}
       />
       {toast && (
         <div

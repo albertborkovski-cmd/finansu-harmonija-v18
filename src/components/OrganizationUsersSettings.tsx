@@ -1,3 +1,4 @@
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import TablePagination from "./TablePagination";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, UserPlus } from "lucide-react";
@@ -94,6 +95,7 @@ export default function OrganizationUsersSettings({
   const [showColumns, setShowColumns] = useState(false);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const { startResize } = useColumnResize(columns, setColumns);
+  useEffect(() => setTablePage(1), [organizationId, audience, query, assignedOnly]);
 
   const loadLinkedState = useCallback(async () => {
     const { data } = await supabase.from("companies").select("*");
@@ -299,7 +301,7 @@ export default function OrganizationUsersSettings({
             })}
           </div>
           <div className="flex flex-col gap-0.5">
-            {sortedRows.slice((Math.min(tablePage, Math.max(1, Math.ceil(sortedRows.length / 20))) - 1) * 20, Math.min(tablePage, Math.max(1, Math.ceil(sortedRows.length / 20))) * 20).map((user, rowIndex) => {
+            {sortedRows.slice(0, tablePage * TABLE_BATCH_SIZE).map((user, rowIndex) => {
               const checked = selected.has(user.id);
               return (
                 <button
@@ -353,7 +355,7 @@ export default function OrganizationUsersSettings({
         </div>
       </div>
       <HorizontalTableScrollbar scrollRef={tableScrollRef} fixed={false} />
-      <TablePagination currentPage={tablePage} totalPages={Math.max(1, Math.ceil(sortedRows.length / 20))} itemCount={sortedRows.length} itemsPerPage={20} onPageChange={setTablePage} />
+      <TablePagination scrollRef={tableScrollRef} currentPage={tablePage} totalPages={Math.max(1, Math.ceil(sortedRows.length / TABLE_BATCH_SIZE))} itemCount={sortedRows.length} itemsPerPage={TABLE_BATCH_SIZE} onPageChange={setTablePage} />
       {showColumns && (
         <ColumnSettingsPanel
           columns={columns}

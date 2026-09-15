@@ -14,7 +14,9 @@ import RefreshAllButton from "./RefreshAllButton";
 import { ColumnSettingsButton, ImportDataButton } from "./ScopedActionButtons";
 import SystemAddFilters from "./SystemAddFilters";
 import TablePagination from "./TablePagination";
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { ResizeHandle, useColumnResize } from "./useColumnResize";
+import RelatedObjectPreview from "./RelatedObjectPreview";
 
 type BankColumnKey =
   | "bankAccount" | "accountCode" | "transferNo" | "date"
@@ -117,7 +119,8 @@ function toBankRow(document: Document, account: BankAccount, counterpartyCodes: 
   };
 }
 
-export default function CompanyBankView({ company }: { company: Company }) {
+export default function CompanyBankView({ company, initialRecordId, onRelatedObjectBack }: { company: Company; initialRecordId?: string; onRelatedObjectBack?: () => void }) {
+  const [relatedObjectClosed, setRelatedObjectClosed] = useState(false);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
@@ -126,7 +129,6 @@ export default function CompanyBankView({ company }: { company: Company }) {
   const [filterKeys, setFilterKeys] = useState<string[]>([]);
   const [filterValues, setFilterValues] = useState<Record<string, string[]>>({});
   const [page, setPage] = useState(1);
-  const [showAll, setShowAll] = useState(false);
   const [columns, setColumns] = usePersistentState<ColConfig[]>(
     `finansu-harmonija:v12:company-bank-columns:${company.id}`,
     DEFAULT_COLUMNS,
@@ -174,10 +176,19 @@ export default function CompanyBankView({ company }: { company: Company }) {
     filteredRows,
     (row, key) => row[key],
   );
-  const itemsPerPage = showAll ? Math.max(1, sortedRows.length) : 20;
+  const itemsPerPage = TABLE_BATCH_SIZE;
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / itemsPerPage));
   const currentPage = Math.min(page, totalPages);
-  const visibleRows = showAll ? sortedRows : sortedRows.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  const visibleRows = sortedRows.slice(0, currentPage * itemsPerPage);
+
+  useEffect(() => setPage(1), [company.id, filterKeys, filterValues, query]);
+
+  if (initialRecordId && !relatedObjectClosed) {
+    const record = rows.find(row => row.documentId === initialRecordId);
+    return <RelatedObjectPreview companyName={company.name} section="Bank" title={record ? `Bank operation · ${record.transferNo}` : 'Bank operation'}
+      fields={record ? DEFAULT_COLUMNS.map(column => ({ label: column.label, value: record[column.key as BankColumnKey] })) : []}
+      loading={loading} unavailable={!loading && !record} onBack={onRelatedObjectBack ?? (() => setRelatedObjectClosed(true))} />;
+  }
 
   return (
     <div className="flex min-w-0 flex-col gap-8 bg-white px-4 py-14 sm:px-8 lg:px-[72px]">
@@ -224,7 +235,7 @@ export default function CompanyBankView({ company }: { company: Company }) {
         </div>
       </div>
       <HorizontalTableScrollbar scrollRef={tableScrollRef} />
-      <TablePagination currentPage={currentPage} totalPages={totalPages} itemCount={sortedRows.length} itemsPerPage={itemsPerPage} onPageChange={setPage} onShowMore={() => { setShowAll((value) => !value); setPage(1); }} showMoreLabel={showAll ? "Default" : "Show more"} allItemsVisible={showAll} />
+      <TablePagination scrollRef={tableScrollRef} currentPage={currentPage} totalPages={totalPages} itemCount={sortedRows.length} itemsPerPage={itemsPerPage} onPageChange={setPage} />
       {showColumns && <ColumnSettingsPanel columns={columns} defaultColumns={DEFAULT_COLUMNS} onSave={(next) => { setColumns(next); setShowColumns(false); }} onClose={() => setShowColumns(false)} />}
     </div>
   );

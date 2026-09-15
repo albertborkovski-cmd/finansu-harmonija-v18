@@ -15,6 +15,7 @@ import RefreshAllButton from "./RefreshAllButton";
 import { ColumnSettingsButton, ImportDataButton } from "./ScopedActionButtons";
 import SystemAddFilters from "./SystemAddFilters";
 import TablePagination from "./TablePagination";
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { ResizeHandle, useColumnResize } from "./useColumnResize";
 
 type JournalColumnKey =
@@ -142,6 +143,8 @@ export default function CompanyGlJournalView({ company }: { company: Company }) 
   const [filterValues, setFilterValues] = useState<Record<string, string[]>>({});
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const visibleColumns = columns.filter((column) => column.visible);
+
+  useEffect(() => setFixedPage0(1), [company.id, filterKeys, filterValues, query]);
   const { startResize } = useColumnResize(columns, setColumns);
 
   useEffect(() => {
@@ -340,14 +343,14 @@ export default function CompanyGlJournalView({ company }: { company: Company }) 
           </div>
 
           <div className="flex flex-col gap-0.5">
-            {sortedRows.slice((Math.min(fixedPage0, Math.max(1, Math.ceil(sortedRows.length / 20))) - 1) * 20, Math.min(fixedPage0, Math.max(1, Math.ceil(sortedRows.length / 20))) * 20).map((row, index) => (
+            {sortedRows.slice(0, fixedPage0 * TABLE_BATCH_SIZE).map((row, index) => (
               <div key={row.id} className={`group flex h-10 items-center rounded-lg ${index % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} hover:bg-[#E7F4F9]`}>
                 {visibleColumns.map((column) => (
                   <div key={column.key} style={{ width: column.width }} className="flex-shrink-0 overflow-hidden px-3 font-montserrat text-[12px] font-normal text-[#10233A]">
                     {renderCell(row, column.key)}
                   </div>
                 ))}
-                <div className="flex w-[70px] flex-shrink-0 items-center justify-center">
+                <div className="system-table-row-actions flex w-[70px] flex-shrink-0 items-center justify-center">
                   <button type="button" title="VIEW" aria-label={`VIEW ${row.document.number || row.document.documentType}`} onClick={() => setOpenDocument(row)} className="flex h-7 w-7 items-center justify-center rounded-md border-2 border-[#D3E1EC] bg-white text-[#7288A3] transition-colors hover:border-[#007EA7] hover:text-[#007EA7]">
                     <Eye size={15} />
                   </button>
@@ -366,7 +369,7 @@ export default function CompanyGlJournalView({ company }: { company: Company }) 
       </div>
 
       <HorizontalTableScrollbar scrollRef={tableScrollRef} />
-      <TablePagination currentPage={fixedPage0} totalPages={Math.max(1, Math.ceil(sortedRows.length / 20))} itemCount={sortedRows.length} onPageChange={setFixedPage0} />
+      <TablePagination scrollRef={tableScrollRef} currentPage={fixedPage0} totalPages={Math.max(1, Math.ceil(sortedRows.length / TABLE_BATCH_SIZE))} itemCount={sortedRows.length} itemsPerPage={TABLE_BATCH_SIZE} onPageChange={setFixedPage0} />
 
       {showColumns && (
         <ColumnSettingsPanel columns={columns} defaultColumns={DEFAULT_COLUMNS} onSave={(next) => { setColumns(next); setShowColumns(false); }} onClose={() => setShowColumns(false)} />

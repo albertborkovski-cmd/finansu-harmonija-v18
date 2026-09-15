@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowLeft, FileText, MessageSquare, Plus, Search, Send, 
 import { PageHeader, PageActionButton } from './PageHeader';
 import SearchableSelect from './SearchableSelect';
 import { chatRecipients, chatRelatedObjects, chatTargetAudience, createContextChat } from '../lib/newChat';
-import { canEditMenu, parseSession } from '../lib/accessControl';
+import { canEditMenu, canViewMenu, parseSession } from '../lib/accessControl';
 import { AUTH_SESSION_KEY } from '../lib/currentUser';
 import { canAccessAssignedOrganization, loadLinkedDirectoryUsers } from '../lib/linkedSettingsData';
 import { useOrganizationAccessRevision } from './useOrganizationAccessRevision';
@@ -19,6 +19,7 @@ import { supabase, type Company, type DbDocument } from '../lib/supabase';
 import { chatAuthorLabel, currentChatAuthor } from '../lib/chatAuthor';
 import { registerChatAttachment, validateChatAttachment } from '../lib/chatAttachment';
 import { handoffAccountants, handoffAiChat } from '../lib/chatHandoff';
+import { markChatNotificationsRead, publishChatMessageNotification } from '../lib/chatNotifications';
 
 type StoredChatMessage = Omit<InvoiceChatMessage, 'direction'> & {
   timestamp?: string;
@@ -82,10 +83,14 @@ export default function ChatsView({
   currentUserName,
   conversation,
   onOpenDocument,
+  onBack,
+  preserveConversationMetadata = false,
 }: {
   currentUserName: string;
   conversation?: InvoiceChatContext | null;
   onOpenDocument?: (document: DbDocument) => void;
+  onBack?: () => void;
+  preserveConversationMetadata?: boolean;
 }) {
   const [conversations, setConversations] = useState<InvoiceChatContext[]>(() => [
     ...loadChatConversations(),
@@ -101,6 +106,7 @@ export default function ChatsView({
   const [previewAttachment, setPreviewAttachment] = useState<NonNullable<InvoiceChatMessage['attachments']>[number] | null>(null);
   const [attachmentPreviewUrl, setAttachmentPreviewUrl] = useState('');
   const [attachmentPreviewError, setAttachmentPreviewError] = useState('');
+  const viewRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     if (!previewAttachment) return;
@@ -263,6 +269,10 @@ export default function ChatsView({
       return;
     }
     const existing = loadChatConversations().find(item => item.storageKey === conversation.storageKey);
+    if (preserveConversationMetadata) {
+      setSelected({ ...conversation, ...existing });
+      return;
+    }
     const context = {
       ...conversation,
       ...existing,
@@ -271,16 +281,23 @@ export default function ChatsView({
     };
     registerChatConversation(context);
     setSelected(context);
-  }, [conversation, currentEmail, currentUserName]);
+  }, [conversation, currentEmail, currentUserName, preserveConversationMetadata]);
 
   useEffect(() => {
     const refreshMessages = () => {
       const next = readMessages(selected);
       setMessages(next);
-      if (selected && currentEmail && next.length && document.visibilityState === 'visible') {
+      const readingSession = parseSession(window.localStorage.getItem(AUTH_SESSION_KEY));
+      const company = companies.find(item => selected?.organizationId ? item.id === selected.organizationId : selected && item.name === conversationCompany(selected));
+      const canRead = readingSession && readingSession.email.toLowerCase() === currentEmail.toLowerCase()
+        && canViewMenu(readingSession, 'messages')
+        && (selected?.storageKey === GENERAL_CHAT.storageKey || (company && canAccessAssignedOrganization(company, readingSession)));
+      if (selected && currentEmail && next.length && canRead && document.visibilityState === 'visible' && viewRef.current?.getClientRects().length) {
         const key = readReceiptKey(selected, currentEmail);
         const lastId = next[next.length - 1].id;
         if (window.localStorage.getItem(key) !== lastId) window.localStorage.setItem(key, lastId);
+        try { markChatNotificationsRead(selected, next.filter(message => isIncoming(message, currentEmail)).map(message => message.id), currentEmail); }
+        catch (error) { console.error('Unable to update chat notification reading status.', error); }
       }
     };
     refreshMessages();
@@ -295,7 +312,7 @@ export default function ChatsView({
       window.removeEventListener('chat-conversations-updated', refreshMessages);
       document.removeEventListener('visibilitychange', refreshMessages);
     };
-  }, [selected, currentEmail]);
+  }, [selected, currentEmail, companies]);
 
   const visibleConversations = useMemo(() => {
     const term = search.trim().toLocaleLowerCase();
@@ -334,6 +351,7 @@ export default function ChatsView({
       id: `message-${Date.now()}`,
       author: currentUserName,
       ...currentChatAuthor(),
+      channel: 'chat',
       date: formatTimestamp(new Date()),
       text,
       attachments,
@@ -347,15 +365,19 @@ export default function ChatsView({
     setMessages(next);
     setDraft('');
     setPendingAttachment(null);
+    try { publishChatMessageNotification(selected, message); }
+    catch { setSendError('Message saved, but its notification could not be created.'); }
+    window.dispatchEvent(new CustomEvent('chat-conversations-updated'));
     } catch (error) { setSendError(error instanceof Error ? error.message : 'Unable to send message.'); }
     finally { setSending(false); }
   };
 
   return (
     <section
+      ref={viewRef}
       className="relative flex h-screen min-h-0 flex-col gap-8 overflow-hidden bg-white px-4 py-14 font-montserrat sm:px-8 lg:px-[72px]"
     >
-      <PageHeader title="Chats" />
+      <PageHeader title="Chats" actions={onBack ? <PageActionButton onClick={onBack}>Back</PageActionButton> : undefined} />
       <SystemBreadcrumb items={["Chats"]} />
 
       <div className="grid min-h-0 flex-1 grid-cols-[330px_minmax(0,1fr)] overflow-hidden rounded-xl border border-[#D3E1EC] bg-white">
@@ -454,7 +476,7 @@ export default function ChatsView({
                   const outgoing = !isIncoming(message, currentEmail);
                   return (
                     <article key={message.id} className={`flex w-full flex-col ${outgoing ? 'items-end' : 'items-start'}`}>
-                      <p className="mb-1 flex max-w-[85%] flex-wrap items-baseline gap-x-2 gap-y-0.5 px-1 text-[12px] text-[#10233A]"><span className="font-semibold">{message.author}</span><span className="text-[11px] text-[#7288A3]">{chatAuthorLabel(message)}</span></p>
+                      <p className="mb-1 flex max-w-[85%] flex-wrap items-baseline gap-x-2 gap-y-0.5 px-1 text-[12px] text-[#10233A]"><span className="font-semibold">{message.author}</span><span className="text-[11px] text-[#7288A3]">{chatAuthorLabel(message)}</span>{message.channel === 'email' && <span className="text-[11px] text-[#7288A3]">· Email from {message.authorEmail}</span>}</p>
                       <div className={`max-w-[85%] whitespace-pre-wrap break-words rounded-xl px-4 py-2.5 text-[12px] font-normal leading-5 text-[#183047] ${outgoing ? 'bg-[#EDF6F8]' : 'border border-[#DCE7EF] bg-[#FCFDFE]'}`}>
                         {message.text}
                         {message.attachments?.map(file => <button type="button" key={file.documentId} onClick={() => setPreviewAttachment(file)} className="mt-1 block break-all text-left text-[#007EA7] hover:underline">{file.name} <span className="text-[10px] text-[#7288A3]">({Math.ceil(file.size / 1024)} KB)</span></button>)}

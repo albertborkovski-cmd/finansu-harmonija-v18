@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { AlignLeft, Check, ChevronDown, ChevronRight, Copy, Map, Maximize2, Minimize2, MoreVertical, Search, Target, X } from 'lucide-react';
 import TablePagination from '../TablePagination';
+import { TABLE_BATCH_SIZE } from "../../lib/tablePaging";
 import { SystemCopyToast, useSystemCopyFeedback } from '../SystemCopyFeedback';
 import { useModelCatalog, type ModelRecord } from './modelCatalogStore';
 
@@ -21,6 +22,7 @@ const TRAIN_JSON = `{
 function TrainModelOptionsModal({ onClose, onSelect, models }: { onClose: () => void; onSelect: (option: ModelRecord) => void; models: ModelRecord[] }) {
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
   const normalized = query.trim().toLowerCase();
   const options = models.filter((option) => !normalized || `${option.name} ${option.description}`.toLowerCase().includes(normalized));
 
@@ -33,24 +35,23 @@ function TrainModelOptionsModal({ onClose, onSelect, models }: { onClose: () => 
         </div>
 
         <div className="flex h-[504px] w-full flex-col gap-6">
-          <label className="flex h-7 w-[260px] items-center justify-between rounded bg-[#E5EDF9] px-2"><input aria-label="Search train model options" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search" className="min-w-0 flex-1 bg-transparent font-montserrat text-[12px] font-medium leading-[18px] text-[#10233A] outline-none placeholder:text-[#7288A3]" /><Search size={16} className="text-[#7288A3]" /></label>
+          <label className="flex h-7 w-[260px] items-center justify-between rounded bg-[#E5EDF9] px-2"><input aria-label="Search train model options" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="Search" className="min-w-0 flex-1 bg-transparent font-montserrat text-[12px] font-medium leading-[18px] text-[#10233A] outline-none placeholder:text-[#7288A3]" /><Search size={16} className="text-[#7288A3]" /></label>
 
           <div className="flex h-[452px] w-full flex-col justify-between gap-12">
             <div className="flex h-[396px] flex-col gap-4 overflow-hidden">
-              <div className="grid h-5 grid-cols-[256px_250px_1fr] items-center gap-3 px-3 font-montserrat text-[12px] font-medium leading-[18px] text-[#7288A3]"><span className="text-[#10233A]">Name</span><span>Description</span><span /></div>
-              <div className="flex flex-col overflow-hidden">
-                {options.slice((Math.min(page, Math.max(1, Math.ceil(options.length / 20))) - 1) * 20, Math.min(page, Math.max(1, Math.ceil(options.length / 20))) * 20).map((option, index) => (
-                  <div key={option.id} className={`grid h-9 flex-shrink-0 grid-cols-[256px_250px_1fr] items-center gap-3 rounded-lg px-3 font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
+              <div className="grid min-w-max h-5 grid-cols-[256px_250px_36px] items-center gap-3 px-3 font-montserrat text-[12px] font-medium leading-[18px] text-[#7288A3]"><span className="text-[#10233A]">Name</span><span>Description</span><span /></div>
+              <div ref={tableScrollRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+                {options.slice(0, page * TABLE_BATCH_SIZE).map((option, index) => (
+                  <div key={option.id} className={`grid min-w-max h-9 flex-shrink-0 grid-cols-[256px_250px_36px] items-center gap-3 rounded-lg px-3 font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
                     <span className="truncate">{option.name}</span><span className="truncate">{option.description}</span>
-                    <span className="flex justify-end"><button type="button" aria-label={`Select train model option ${index + 1}`} onClick={() => onSelect(option)} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] hover:border-[#007EA7] hover:text-[#007EA7]"><Target size={16} /></button></span>
+                    <span className="system-table-row-actions flex justify-end"><button type="button" aria-label={`Select train model option ${index + 1}`} onClick={() => onSelect(option)} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] hover:border-[#007EA7] hover:text-[#007EA7]"><Target size={16} /></button></span>
                   </div>
                 ))}
               </div>
             </div>
 
             <div className="flex h-8 items-center justify-between gap-4">
-              <TablePagination currentPage={page} totalPages={5} itemCount={options.length} onPageChange={setPage} />
-              <span className="font-montserrat text-[12px] font-normal leading-[18px] text-[#7288A3]">14 from 15,000 items</span>
+              <TablePagination currentPage={page} totalPages={Math.max(1, Math.ceil(options.length / TABLE_BATCH_SIZE))} itemCount={options.length} onPageChange={setPage} scrollRef={tableScrollRef} />
             </div>
           </div>
         </div>

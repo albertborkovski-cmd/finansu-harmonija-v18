@@ -22,6 +22,7 @@ import CreateDocumentModal from "./CreateDocumentModal";
 import { PageActionButton, PageHeader } from "./PageHeader";
 import HorizontalTableScrollbar from "./HorizontalTableScrollbar";
 import TablePagination from "./TablePagination";
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { supabase, type Company, type DbDocument } from "../lib/supabase";
 import ColumnSortButton, { useMultiColumnSort } from "./ColumnSortButton";
 import {
@@ -1368,7 +1369,7 @@ export default function Documents({
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(20);
+  const itemsPerPage = TABLE_BATCH_SIZE;
   const [showColumnPanel, setShowColumnPanel] = useState(false);
   const [activeColumns, setActiveColumns] = useState<ColConfig[]>(
     DOCUMENT_BASE_COLUMNS,
@@ -1438,7 +1439,6 @@ export default function Documents({
     null,
   );
 
-  const [, setShowPerPageMenu] = useState(false);
 
   useEffect(() => {
     window.localStorage.setItem(
@@ -1995,10 +1995,11 @@ export default function Documents({
     });
 
   const totalDocs = sortedDocs.length;
-  const totalPages = Math.ceil(totalDocs / itemsPerPage);
-  const startIdx = (currentPage - 1) * itemsPerPage;
-  const endIdx = Math.min(startIdx + itemsPerPage, totalDocs);
-  const pageDocs = sortedDocs.slice(startIdx, endIdx);
+  const totalPages = Math.max(1, Math.ceil(totalDocs / itemsPerPage));
+  const safePage = Math.min(currentPage, totalPages);
+  const pageDocs = sortedDocs.slice(0, safePage * itemsPerPage);
+
+  useEffect(() => setCurrentPage(1), [companyId, companyName, allCompanies, documentTypeFilter, title, selectedPeriod, selectedCurrency, selectedCounterparty, selectedStatus, dynamicFilters, searchQuery, appliedRangeMin, appliedRangeMax]);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -2047,14 +2048,6 @@ export default function Documents({
 
   function goToPage(page: number) {
     setCurrentPage(Math.max(1, Math.min(totalPages, page)));
-    setSelectedIds(new Set());
-  }
-
-  function changeItemsPerPage(n: number) {
-    setItemsPerPage(n);
-    setCurrentPage(1);
-    setSelectedIds(new Set());
-    setShowPerPageMenu(false);
   }
 
   function toggleAll() {
@@ -2943,17 +2936,15 @@ export default function Documents({
 
       <HorizontalTableScrollbar scrollRef={tableRef} />
 
-      {/* Pagination */}
+      {/* Accumulated row count and automatic loading */}
       <div className="flex flex-row items-center justify-between mt-2">
-        {/* Page numbers */}
         <TablePagination
-          currentPage={currentPage}
+          scrollRef={tableRef}
+          currentPage={safePage}
           totalPages={totalPages}
           itemCount={totalDocs}
           itemsPerPage={itemsPerPage}
           onPageChange={goToPage}
-          onShowMore={() => changeItemsPerPage(itemsPerPage === 8 ? 15 : 8)}
-          showMoreLabel={itemsPerPage === 8 ? "Show more" : "Default"}
         />
       </div>
 

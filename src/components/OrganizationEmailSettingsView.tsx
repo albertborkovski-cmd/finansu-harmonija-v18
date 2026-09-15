@@ -1,3 +1,4 @@
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Pencil, X } from 'lucide-react';
 import ColumnSettingsPanel, { type ColConfig } from './ColumnSettingsPanel';
@@ -30,7 +31,7 @@ const DEFAULT_COLUMNS: ColConfig[] = [
   { key: 'status', label: 'Status', width: 140, visible: true },
 ];
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = TABLE_BATCH_SIZE;
 const ACTION_COLUMN_WIDTH = 80;
 
 function templateValue(template: OrganizationEmailTemplate, key: TemplateColumnKey) {
@@ -48,7 +49,6 @@ export default function OrganizationEmailSettingsView() {
   const [filterValues, setFilterValues] = useState<Record<string, string[]>>({});
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
-  const [viewAll, setViewAll] = useState(false);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const { startResize } = useColumnResize(columns, setColumns);
 
@@ -74,17 +74,15 @@ export default function OrganizationEmailSettingsView() {
 
   const { sortedRows, changeSort, directionFor } = useMultiColumnSort<OrganizationEmailTemplate, TemplateColumnKey>(filteredTemplates, templateValue);
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
-  const displayedTemplates = viewAll
-    ? sortedRows
-    : sortedRows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const displayedTemplates = sortedRows.slice(0, currentPage * PAGE_SIZE);
   const visibleColumns = columns.filter((column) => column.visible);
   const tableWidth = visibleColumns.reduce((sum, column) => sum + column.width, 0) + 42 + ACTION_COLUMN_WIDTH;
   const allDisplayedSelected = displayedTemplates.length > 0 && displayedTemplates.every((template) => selectedIds.has(template.id));
   const someDisplayedSelected = !allDisplayedSelected && displayedTemplates.some((template) => selectedIds.has(template.id));
 
   useEffect(() => {
-    if (!viewAll && currentPage > totalPages) setCurrentPage(totalPages);
-  }, [currentPage, totalPages, viewAll]);
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
 
   const saveTemplate = (template: OrganizationEmailTemplate) => {
     const next = templates.some((item) => item.id === template.id)
@@ -159,7 +157,7 @@ export default function OrganizationEmailSettingsView() {
       </div>
 
       <HorizontalTableScrollbar scrollRef={tableScrollRef} />
-      <TablePagination currentPage={viewAll ? 1 : currentPage} totalPages={totalPages} itemCount={sortedRows.length} itemsPerPage={viewAll ? Math.max(1, sortedRows.length) : PAGE_SIZE} onPageChange={setCurrentPage} onShowMore={() => { setViewAll((current) => !current); setCurrentPage(1); }} showMoreLabel={viewAll ? 'Default' : 'Show more'} allItemsVisible={viewAll} />
+      <TablePagination scrollRef={tableScrollRef} currentPage={currentPage} totalPages={totalPages} itemCount={sortedRows.length} itemsPerPage={PAGE_SIZE} onPageChange={setCurrentPage} />
 
       {showColumns && <ColumnSettingsPanel columns={columns} defaultColumns={DEFAULT_COLUMNS} onSave={(next) => { setColumns(next); setShowColumns(false); }} onClose={() => setShowColumns(false)} />}
       {editing && <TemplatePanel template={editing} onCancel={() => setEditing(null)} onSave={saveTemplate} />}

@@ -30,6 +30,7 @@ import ColumnSettingsPanel, { type ColConfig } from "./ColumnSettingsPanel";
 import ColumnSortButton, { useMultiColumnSort } from "./ColumnSortButton";
 import HorizontalTableScrollbar from "./HorizontalTableScrollbar";
 import TablePagination from "./TablePagination";
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { ResizeHandle, useColumnResize } from "./useColumnResize";
 import RefreshAllButton from "./RefreshAllButton";
 import OcrSearchField from "./OcrSearchField";
@@ -879,6 +880,8 @@ export default function AllDocumentsView({
     status,
   ]);
 
+  useEffect(() => setFixedPage0(1), [query, organizationName, period, status, source, fileName, documentType, documentSubtype, duplicateRelation, activeFilterKeys, mode, scope, companyName]);
+
   const filterBindings: Record<
     ColumnKey,
     { value: string; options: string[]; onChange: (value: string) => void }
@@ -1396,9 +1399,10 @@ export default function AllDocumentsView({
                   <ColumnSortButton
                     columnLabel={column.label}
                     direction={directionFor(column.key as ColumnKey)}
-                    onDirectionChange={(direction) =>
-                      changeSort(column.key as ColumnKey, direction)
-                    }
+                    onDirectionChange={(direction) => {
+                      changeSort(column.key as ColumnKey, direction);
+                      setFixedPage0(1);
+                    }}
                   />
                   <ResizeHandle
                     onMouseDown={(event) => startResize(realIndex, event)}
@@ -1414,7 +1418,7 @@ export default function AllDocumentsView({
           </div>
 
           <div className="flex flex-col gap-0.5">
-            {sortedRows.slice((Math.min(fixedPage0, Math.max(1, Math.ceil(sortedRows.length / 20))) - 1) * 20, Math.min(fixedPage0, Math.max(1, Math.ceil(sortedRows.length / 20))) * 20).map((record, index) => {
+            {sortedRows.slice(0, fixedPage0 * TABLE_BATCH_SIZE).map((record, index) => {
               const rowBackground =
                 index % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white";
               const editAction = (
@@ -1523,9 +1527,10 @@ export default function AllDocumentsView({
       <div className="flex flex-shrink-0">
         <TablePagination
           currentPage={fixedPage0}
-          totalPages={Math.max(1, Math.ceil(sortedRows.length / 20))}
+          totalPages={Math.max(1, Math.ceil(sortedRows.length / TABLE_BATCH_SIZE))}
           itemCount={sortedRows.length}
           onPageChange={setFixedPage0}
+          scrollRef={tableScrollRef}
         />
       </div>
 

@@ -31,6 +31,7 @@ import OcrBreadcrumb from '../OcrBreadcrumb';
 import CreateableEmptyState from '../CreateableEmptyState';
 import HorizontalTableScrollbar from '../HorizontalTableScrollbar';
 import TablePagination from '../TablePagination';
+import { TABLE_BATCH_SIZE } from "../../lib/tablePaging";
 import OcrSearchField from '../OcrSearchField';
 import { ColumnSettingsButton } from '../ScopedActionButtons';
 import ImportButton from '../ImportButton';
@@ -193,6 +194,7 @@ function CreateModelModal({ onClose, onCreate }: { onClose: () => void; onCreate
 
 function TrainModelCatalogModal({ models, onClose, onSelect }: { models: ModelRecord[]; onClose: () => void; onSelect: (modelId: string) => void }) {
   const [currentPage, setCurrentPage] = useState(1);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState('');
   const filteredModels = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -217,20 +219,20 @@ function TrainModelCatalogModal({ models, onClose, onSelect }: { models: ModelRe
           <button type="button" aria-label="Close Train model options" onClick={onClose} className="flex h-8 w-8 items-center justify-center text-[#7288A3] transition-colors hover:text-[#10233A]"><X size={28} strokeWidth={1.7} /></button>
         </div>
 
-        <OcrSearchField ariaLabel="Search train model options" value={query} onChange={setQuery} />
+        <OcrSearchField ariaLabel="Search train model options" value={query} onChange={(value) => { setQuery(value); setCurrentPage(1); }} />
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div ref={tableScrollRef} className="min-h-0 flex-1 overflow-y-auto">
           <div className="grid grid-cols-[minmax(220px,1fr)_minmax(320px,1.8fr)_44px] items-center gap-6 px-4 pb-4 font-montserrat text-[14px] font-medium leading-5 text-[#7288A3]">
             <span className="text-[#10233A]">Name</span>
             <span>Description</span>
             <span />
           </div>
           <div className="flex flex-col">
-            {sortedModels.slice((Math.min(currentPage, Math.max(1, Math.ceil(sortedModels.length / 20))) - 1) * 20, Math.min(currentPage, Math.max(1, Math.ceil(sortedModels.length / 20))) * 20).map((model, index) => (
+            {sortedModels.slice(0, currentPage * TABLE_BATCH_SIZE).map((model, index) => (
               <div key={model.id} className={`grid min-h-[48px] grid-cols-[minmax(220px,1fr)_minmax(320px,1.8fr)_44px] items-center gap-6 rounded-lg px-4 font-montserrat text-[14px] font-medium leading-5 text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
                 <span className="truncate">{model.name}</span>
                 <span className="truncate">{model.description}</span>
-                <button type="button" title="SELECT MODEL" aria-label={`Select train model ${model.name}`} onClick={() => onSelect(model.id)} className="flex h-8 w-8 items-center justify-center rounded border border-[#D3E1EC] bg-white text-[#7288A3] transition-colors hover:border-[#007EA7] hover:text-[#007EA7]"><Target size={18} strokeWidth={1.8} /></button>
+                <div className="system-table-row-actions flex items-center"><button type="button" title="SELECT MODEL" aria-label={`Select train model ${model.name}`} onClick={() => onSelect(model.id)} className="flex h-8 w-8 items-center justify-center rounded border border-[#D3E1EC] bg-white text-[#7288A3] transition-colors hover:border-[#007EA7] hover:text-[#007EA7]"><Target size={18} strokeWidth={1.8} /></button></div>
               </div>
             ))}
             {!filteredModels.length && <div className="flex min-h-[180px] items-center justify-center font-montserrat text-[14px] font-medium text-[#7288A3]">No models found</div>}
@@ -238,7 +240,7 @@ function TrainModelCatalogModal({ models, onClose, onSelect }: { models: ModelRe
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[#E5EDF9] pt-5">
-          <TablePagination currentPage={currentPage} totalPages={Math.max(1, Math.ceil(filteredModels.length / 20))} itemCount={filteredModels.length} onPageChange={setCurrentPage} />
+          <TablePagination currentPage={currentPage} totalPages={Math.max(1, Math.ceil(filteredModels.length / TABLE_BATCH_SIZE))} itemCount={filteredModels.length} onPageChange={setCurrentPage} scrollRef={tableScrollRef} />
         </div>
       </div>
     </div>
@@ -637,6 +639,7 @@ export default function ModelsView() {
   const [modelVersions, setModelVersions] = useState(MODEL_VERSIONS);
   const [versionFilterKeys, setVersionFilterKeys] = useState<string[]>([]);
   const [versionFilterValues, setVersionFilterValues] = useState<Record<string, string[]>>({});
+  useEffect(() => setCurrentPage(1), [detailModel?.id, versionQuery, versionFilterKeys, versionFilterValues]);
 
   const filteredModels = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -762,7 +765,7 @@ export default function ModelsView() {
             </div>
 
             <div className="flex flex-1 flex-col justify-between gap-12">
-              <div className="relative min-h-[340px] overflow-x-auto scrollbar-hide">
+              <div ref={tableScrollRef} className="relative min-h-[340px] overflow-x-auto scrollbar-hide">
                 <div className="min-w-max">
                   <div className="system-table-header-row mb-4 grid h-5 items-center font-montserrat text-[12px] font-medium leading-[18px] text-[#10233A]" style={{ gridTemplateColumns: `${logColumns.filter(column => column.visible).map(column => `${column.width}px`).join(' ')} 68px` }}>
                     {logColumns.filter(column => column.visible).map((column, index) => <div data-table-header-select={column.key === 'name' ? "true" : undefined} key={column.key} className={`flex h-5 min-w-0 items-center gap-[6px] px-3 ${index > 0 ? 'border-l border-[#D3E1EC]' : ''}`}>{column.key === 'name' && <Checkbox checked={false} label="Select all model logs" onChange={() => undefined} />}<span className="truncate">{column.label}</span></div>)}<div />
@@ -777,7 +780,7 @@ export default function ModelsView() {
               <HorizontalTableScrollbar />
 
               <div className="flex flex-wrap items-center justify-between gap-4 pt-4">
-                <TablePagination currentPage={1} totalPages={9} itemCount={0} onPageChange={() => undefined} />
+                <TablePagination currentPage={1} totalPages={1} itemCount={0} onPageChange={() => undefined} scrollRef={tableScrollRef} />
               </div>
             </div>
           </div>
@@ -843,12 +846,12 @@ export default function ModelsView() {
           </div>
 
           <div className="flex flex-1 flex-col justify-between gap-12">
-            <div className="overflow-x-auto scrollbar-hide">
+            <div ref={tableScrollRef} className="overflow-x-auto scrollbar-hide">
               <div style={{ minWidth: versionTableMinWidth }}>
                 <div className="system-table-header-row mb-4 grid h-5 items-center font-montserrat text-[12px] font-medium leading-[18px] text-[#10233A]" style={{ gridTemplateColumns: versionGrid }}>
                   {visibleVersionColumns.map((column, index) => <div data-table-header-select={column.key === 'version' ? "true" : undefined} key={column.key} className={`flex h-5 min-w-0 items-center gap-[6px] px-3 ${index > 0 ? 'border-l border-[#D3E1EC]' : ''}`}>{column.key === 'version' && <Checkbox checked={allVersionsSelected} label="Select all model versions" onChange={() => setSelectedVersions(allVersionsSelected ? new Set() : new Set(visibleVersions.map((version) => version.version)))} />}<span className="truncate">{column.label}</span></div>)}<div />
                 </div>
-                {visibleVersions.slice((Math.min(currentPage, Math.max(1, Math.ceil(visibleVersions.length / 20))) - 1) * 20, Math.min(currentPage, Math.max(1, Math.ceil(visibleVersions.length / 20))) * 20).map((version, index) => (
+                {visibleVersions.slice(0, currentPage * TABLE_BATCH_SIZE).map((version, index) => (
                   <div key={version.version} className={`grid h-9 items-center rounded-lg font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} hover:bg-[#E7F4F9]`} style={{ gridTemplateColumns: versionGrid }}>
                     {visibleVersionColumns.map(column => <div key={column.key} className="flex min-w-0 items-center gap-[6px] overflow-hidden px-3"><span className="flex min-w-0 items-center gap-[6px] truncate">{column.key === 'version' && <Checkbox checked={selectedVersions.has(version.version)} label={`Select version ${version.version}`} onChange={() => setSelectedVersions((current) => { const next = new Set(current); if (next.has(version.version)) next.delete(version.version); else next.add(version.version); return next; })} />}{column.key === 'status' && <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${version.status === 'Archived' ? 'bg-[#A1B6C6]' : 'bg-[#0ED8A8]'}`} />}{String(version[column.key as keyof typeof version] ?? '—')}</span></div>)}
                     <span className="flex h-9 items-center justify-end gap-1 pr-1">
@@ -866,7 +869,7 @@ export default function ModelsView() {
             <HorizontalTableScrollbar />
 
             <div className="flex flex-wrap items-center justify-between gap-4 pt-4">
-              <TablePagination currentPage={currentPage} totalPages={Math.max(1, Math.ceil(visibleVersions.length / 20))} itemCount={visibleVersions.length} onPageChange={setCurrentPage} />
+              <TablePagination currentPage={currentPage} totalPages={Math.max(1, Math.ceil(visibleVersions.length / TABLE_BATCH_SIZE))} itemCount={visibleVersions.length} onPageChange={setCurrentPage} scrollRef={tableScrollRef} />
             </div>
           </div>
         </div>
@@ -917,7 +920,7 @@ export default function ModelsView() {
                 )})}
                 <div aria-hidden="true" />
               </div>
-              {sortedModels.length ? sortedModels.slice((Math.min(currentPage, Math.max(1, Math.ceil(sortedModels.length / 20))) - 1) * 20, Math.min(currentPage, Math.max(1, Math.ceil(sortedModels.length / 20))) * 20).map((model, index) => (
+              {sortedModels.length ? sortedModels.slice(0, currentPage * TABLE_BATCH_SIZE).map((model, index) => (
                 <div key={model.id} onClick={() => setDetailModel(model)} className={`system-table-row group grid h-9 cursor-pointer items-center rounded-lg font-montserrat text-[12px] leading-[18px] text-[#10233A] transition-colors hover:bg-[#E7F4F9] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`} style={{ gridTemplateColumns: tableGrid }}>
                   {visibleColumns.map((column) => <div key={column.key} className="min-w-0 overflow-hidden px-3">{modelCell(model, column.key)}</div>)}
                   <div className="table-row-actions flex h-9 items-center justify-end gap-1 pr-1"><button type="button" aria-label={`Open ${model.name} resources`} onClick={(event) => { event.stopPropagation(); setDetailModel(model); setVersionQuery(''); setSelectedVersions(new Set()); setLogVersion(null); }} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] transition-colors hover:border-[#007EA7] hover:text-[#007EA7]"><UsersRound size={16} strokeWidth={1.8} /></button><button type="button" data-button-family="row-delete" aria-label={`Delete ${model.name}`} onClick={(event) => { event.stopPropagation(); deleteModels(new Set([model.id])); }} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] hover:border-[#D64545] hover:text-[#D64545]"><Trash2 size={16} /></button></div>
@@ -931,7 +934,7 @@ export default function ModelsView() {
           <HorizontalTableScrollbar scrollRef={tableScrollRef} />
 
           <div className="flex flex-wrap items-center justify-between gap-4 pt-4">
-            <TablePagination currentPage={currentPage} totalPages={5} itemCount={filteredModels.length} onPageChange={setCurrentPage} />
+            <TablePagination currentPage={currentPage} totalPages={Math.max(1, Math.ceil(filteredModels.length / TABLE_BATCH_SIZE))} itemCount={filteredModels.length} onPageChange={setCurrentPage} scrollRef={tableScrollRef} />
           </div>
         </div>
       </div>

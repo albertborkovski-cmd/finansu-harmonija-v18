@@ -18,6 +18,7 @@ import { ColumnSettingsButton } from "./ScopedActionButtons";
 import RefreshAllButton from "./RefreshAllButton";
 import HorizontalTableScrollbar from "./HorizontalTableScrollbar";
 import TablePagination from "./TablePagination";
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import ColumnSortButton, { useMultiColumnSort } from "./ColumnSortButton";
 import { ResizeHandle, useColumnResize } from "./useColumnResize";
 import { HeaderBackButton } from "./SystemNavigation";
@@ -197,7 +198,7 @@ export default function CompanyReportsView({ company }: { company: Company }) {
   const [deleteReport, setDeleteReport] = useState<CompanyReport | null>(null);
   const [previewReport, setPreviewReport] = useState<CompanyReport | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(20);
+  const itemsPerPage = TABLE_BATCH_SIZE;
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const { startResize } = useColumnResize(columns, setColumns);
 
@@ -260,9 +261,11 @@ export default function CompanyReportsView({ company }: { company: Company }) {
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / itemsPerPage));
   const safePage = Math.min(currentPage, totalPages);
   const pageRows = sortedRows.slice(
-    (safePage - 1) * itemsPerPage,
+    0,
     safePage * itemsPerPage,
   );
+
+  useEffect(() => setCurrentPage(1), [company.id]);
 
   const filterColumns = REPORT_COLUMNS.map((column) => ({
     key: column.key,
@@ -445,7 +448,7 @@ export default function CompanyReportsView({ company }: { company: Company }) {
                     )}
                   </div>
                 ))}
-                <div className="flex w-[88px] flex-shrink-0 items-center justify-center gap-2">
+                <div className="system-table-row-actions flex w-[88px] flex-shrink-0 items-center justify-center gap-2">
                   <button
                     type="button"
                     title="VIEW"
@@ -484,17 +487,12 @@ export default function CompanyReportsView({ company }: { company: Company }) {
 
       <HorizontalTableScrollbar scrollRef={tableScrollRef} />
       <TablePagination
+        scrollRef={tableScrollRef}
         currentPage={safePage}
         totalPages={totalPages}
         itemCount={sortedRows.length}
         itemsPerPage={itemsPerPage}
         onPageChange={setCurrentPage}
-        onShowMore={() => {
-          setItemsPerPage((current) => (current === 4 ? Math.max(4, sortedRows.length) : 4));
-          setCurrentPage(1);
-        }}
-        showMoreLabel={itemsPerPage === 4 ? "Show more" : "Default"}
-        allItemsVisible={itemsPerPage !== 4}
       />
 
       {showColumns && (
@@ -641,6 +639,8 @@ const PREVIEW_COLUMNS = [
 
 function ReportPreview({ companyName, companyLogo, report, onBack }: { companyName: string; companyLogo?: string; report: CompanyReport; onBack: () => void }) {
   const tableRef = useRef<HTMLDivElement>(null);
+  const [previewPage, setPreviewPage] = useState(1);
+  useEffect(() => setPreviewPage(1), [report.id]);
   const previewRows = Array.from({ length: 6 }, (_, index) => [
     String(index + 1),
     "Web transaction",
@@ -715,7 +715,7 @@ function ReportPreview({ companyName, companyLogo, report, onBack }: { companyNa
               <div key={column} className={`w-[150px] flex-shrink-0 px-3 ${index > 0 ? "border-l border-[#D3E1EC]" : ""}`}>{column}</div>
             ))}
           </div>
-          {previewRows.map((row, rowIndex) => (
+          {previewRows.slice(0, previewPage * TABLE_BATCH_SIZE).map((row, rowIndex) => (
             <div key={rowIndex} className={`flex h-10 items-center rounded-lg font-montserrat text-[12px] text-[#10233A] ${rowIndex % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} hover:bg-[#E7F4F9]`}>
               {row.map((value, cellIndex) => <div key={cellIndex} title={value} className="w-[150px] flex-shrink-0 truncate px-3">{value}</div>)}
             </div>
@@ -723,7 +723,7 @@ function ReportPreview({ companyName, companyLogo, report, onBack }: { companyNa
         </div>
       </div>
       <HorizontalTableScrollbar scrollRef={tableRef} />
-      <TablePagination currentPage={1} totalPages={1} itemCount={previewRows.length} itemsPerPage={previewRows.length} onPageChange={() => undefined} onShowMore={() => undefined} />
+      <TablePagination scrollRef={tableRef} currentPage={previewPage} totalPages={Math.max(1, Math.ceil(previewRows.length / TABLE_BATCH_SIZE))} itemCount={previewRows.length} itemsPerPage={TABLE_BATCH_SIZE} onPageChange={setPreviewPage} />
     </main>
   );
 }

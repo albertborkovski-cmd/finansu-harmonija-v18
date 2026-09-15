@@ -5,6 +5,7 @@ import { loadVatClassificationTemplateNames } from '../VatClassificationsView';
 import { supabase, type Company } from '../../lib/supabase';
 import { getCurrentUserName } from '../../lib/currentUser';
 import { currentChatAuthor } from '../../lib/chatAuthor';
+import { publishChatMessageNotification } from '../../lib/chatNotifications';
 import HorizontalTableScrollbar from '../HorizontalTableScrollbar';
 import { PageActionButton } from '../PageHeader';
 import SearchableSelect from '../SearchableSelect';
@@ -13,6 +14,7 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import SendInvoicePanel from './SendInvoicePanel';
 import {
   invoiceChatPersistenceKey,
+  loadChatConversations,
   registerChatConversation,
   type InvoiceChatContext,
   type InvoiceChatMessage,
@@ -1488,18 +1490,25 @@ function InvoiceChatSection({
   const sendMessage = () => {
     const text = message.trim();
     if (!text) return;
-    setMessages((current) => [
-      ...current,
-      {
-        id: `invoice-chat-${Date.now()}`,
-        author: getCurrentUserName(),
-        ...currentChatAuthor(),
-        date: new Date().toLocaleString('lt-LT', { dateStyle: 'short', timeStyle: 'short' }),
-        text,
-        direction: 'written',
-      },
-    ]);
+    const nextMessage: InvoiceChatMessage = {
+      id: `invoice-chat-${crypto.randomUUID()}`,
+      author: getCurrentUserName(),
+      ...currentChatAuthor(),
+      channel: 'chat',
+      date: new Date().toLocaleString('lt-LT', { dateStyle: 'short', timeStyle: 'short' }),
+      text,
+      direction: 'written',
+    };
+    const next = [...messages, nextMessage];
+    window.localStorage.setItem(persistenceKey, JSON.stringify(next));
+    setMessages(next);
     setMessage('');
+    const context = loadChatConversations().find(chat => chat.storageKey === storageKey);
+    if (context) {
+      try { publishChatMessageNotification(context, nextMessage); }
+      catch (error) { console.error('Message saved, but its notification could not be created.', error); }
+    }
+    window.dispatchEvent(new CustomEvent('chat-conversations-updated'));
   };
 
   const receivedCount = messages.filter((item) => item.direction === 'received').length;

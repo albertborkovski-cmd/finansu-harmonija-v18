@@ -14,6 +14,7 @@ import { ColumnSettingsButton } from "./ScopedActionButtons";
 import RefreshAllButton from "./RefreshAllButton";
 import HorizontalTableScrollbar from "./HorizontalTableScrollbar";
 import TablePagination from "./TablePagination";
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { ResizeHandle, useColumnResize } from "./useColumnResize";
 import {
   OCR_FIELD_VALIDATION_CHANGED_EVENT,
@@ -317,7 +318,6 @@ export function ProcessedDocumentsTable({
   const [filterValues, setFilterValues] = useState<Record<string, string[]>>({});
   const [showColumns, setShowColumns] = useState(false);
   const [page, setPage] = useState(1);
-  const [showAll, setShowAll] = useState(false);
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
   const [importing, setImporting] = useState(false);
   const [fieldValidationRules, setFieldValidationRules] = useState(() => loadOcrFieldValidationRules());
@@ -436,13 +436,13 @@ export function ProcessedDocumentsTable({
     filteredRows,
     (row, key) => row[key],
   );
-  const pageSize = showAll ? Math.max(1, sortedRows.length) : 20;
+  const pageSize = TABLE_BATCH_SIZE;
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
   const safePage = Math.min(page, totalPages);
-  const displayedRows = showAll
-    ? sortedRows
-    : sortedRows.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const displayedRows = sortedRows.slice(0, safePage * pageSize);
   const visibleColumns = columns.filter((column) => column.visible);
+  const rowActionCount = Number(Boolean(onEditDocument)) + Number(Boolean(onRunDocument)) + Number(Boolean(onApproveDocument));
+  const rowActionsWidth = rowActionCount ? Math.max(88, rowActionCount * 36 + 12) : 0;
   const validationLevelByField = useMemo(
     () => new Map(fieldValidationRules.map((rule) => [rule.key, rule.level])),
     [fieldValidationRules],
@@ -482,7 +482,7 @@ export function ProcessedDocumentsTable({
     }
   };
 
-  useEffect(() => setPage(1), [activeFilterKeys, filterValues, query, selectedOrganizationIds, showAll]);
+  useEffect(() => setPage(1), [activeFilterKeys, filterValues, query, selectedOrganizationIds]);
 
   const importAction = selectable && onImportDocuments ? (
     <PageActionButton
@@ -533,7 +533,7 @@ export function ProcessedDocumentsTable({
           </div>
 
           <div ref={tableScrollRef} className="min-h-0 flex-1 overflow-x-auto scrollbar-hide">
-            <div style={{ minWidth: visibleColumns.reduce((sum, column) => sum + column.width, (selectable ? 42 : 0) + (onEditDocument || onRunDocument || onApproveDocument ? 88 : 0)) }}>
+            <div style={{ minWidth: visibleColumns.reduce((sum, column) => sum + column.width, (selectable ? 42 : 0) + rowActionsWidth) }}>
           <div className="mb-3 flex h-9 items-center">
             {selectable && (
               <div data-table-header-select="true" className="flex w-[42px] flex-shrink-0 items-center justify-center">
@@ -552,13 +552,13 @@ export function ProcessedDocumentsTable({
                   <ColumnSortButton
                     columnLabel={column.label}
                     direction={directionFor(column.key as ProcessedColumnKey)}
-                    onDirectionChange={(direction) => changeSort(column.key as ProcessedColumnKey, direction)}
+                    onDirectionChange={(direction) => { changeSort(column.key as ProcessedColumnKey, direction); setPage(1); }}
                   />
                   <ResizeHandle onMouseDown={(event) => startResize(columnIndex, event)} />
                 </div>
               );
             })}
-            {(onEditDocument || onRunDocument || onApproveDocument) && <div className="w-[88px] flex-shrink-0" aria-hidden="true" />}
+            {rowActionCount > 0 && <div style={{ width: rowActionsWidth }} className="flex-shrink-0" aria-hidden="true" />}
           </div>
 
               <div className="flex flex-col gap-0.5">
@@ -598,7 +598,7 @@ export function ProcessedDocumentsTable({
                   );
                 })}
                 {(onEditDocument || onRunDocument || onApproveDocument) && (
-                  <div className="sticky right-0 z-10 flex h-10 w-[88px] flex-shrink-0 items-center justify-center gap-2 border-l border-[#E5EDF9] bg-inherit">
+                  <div style={{ width: rowActionsWidth }} className="system-table-row-actions flex h-10 flex-shrink-0 items-center justify-center gap-2 border-l border-[#E5EDF9] bg-inherit">
                     {onEditDocument && <button
                         type="button"
                         title="EDIT"
@@ -657,9 +657,7 @@ export function ProcessedDocumentsTable({
             itemCount={sortedRows.length}
             itemsPerPage={pageSize}
             onPageChange={setPage}
-            onShowMore={() => setShowAll((current) => !current)}
-            showMoreLabel={showAll ? "Default" : "Show more"}
-            allItemsVisible={showAll}
+            scrollRef={tableScrollRef}
           />
         </div>
       </div>

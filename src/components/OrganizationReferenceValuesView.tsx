@@ -1,3 +1,4 @@
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, FileText, Pencil, X } from "lucide-react";
 import ColumnSettingsPanel, { type ColConfig } from "./ColumnSettingsPanel";
@@ -518,7 +519,6 @@ export default function OrganizationReferenceValuesView({
   const [showColumns, setShowColumns] = useState(false);
   const [showSubtypeColumns, setShowSubtypeColumns] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const [viewAll, setViewAll] = useState(false);
   const [columns, setColumns] = useState<ColConfig[]>(() =>
     columnsForSection(section),
   );
@@ -642,20 +642,13 @@ export default function OrganizationReferenceValuesView({
     });
   }, [activeFilterKeys, filterValues, search, section, sortedRows]);
 
-  const recordsPerPage = 20;
+  const recordsPerPage = TABLE_BATCH_SIZE;
   const paginationItemCount =
     section === "Document type" && selectedDocumentTypeCode
       ? visibleSubtypeRecords.length
       : visibleRecords.length;
-  const totalPages = viewAll
-    ? 1
-    : Math.max(1, Math.ceil(paginationItemCount / recordsPerPage));
-  const displayedRecords = viewAll
-    ? visibleRecords
-    : visibleRecords.slice(
-        (currentPage - 1) * recordsPerPage,
-        currentPage * recordsPerPage,
-      );
+  const totalPages = Math.max(1, Math.ceil(paginationItemCount / recordsPerPage));
+  const displayedRecords = visibleRecords.slice(0, currentPage * recordsPerPage);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -696,7 +689,6 @@ export default function OrganizationReferenceValuesView({
     setFilterValues({});
     setSubtypeEditingIndex(null);
     setCurrentPage(1);
-    setViewAll(false);
   }, [section]);
 
   useEffect(() => {
@@ -759,7 +751,6 @@ export default function OrganizationReferenceValuesView({
     setFilterValues({});
     setSelected(new Set());
     setCurrentPage(1);
-    setViewAll(false);
   };
 
   const activeParentCode =
@@ -907,15 +898,8 @@ export default function OrganizationReferenceValuesView({
         42 +
         detailColumns.reduce((sum, column) => sum + column.width, 0) +
         72;
-      const subtypeTotalPages = viewAll
-        ? 1
-        : Math.max(1, Math.ceil(visibleSubtypeRecords.length / recordsPerPage));
-      const displayedSubtypes = viewAll
-        ? visibleSubtypeRecords
-        : visibleSubtypeRecords.slice(
-            (currentPage - 1) * recordsPerPage,
-            currentPage * recordsPerPage,
-          );
+      const subtypeTotalPages = Math.max(1, Math.ceil(visibleSubtypeRecords.length / recordsPerPage));
+      const displayedSubtypes = visibleSubtypeRecords.slice(0, currentPage * recordsPerPage);
       const allSubtypesSelected =
         displayedSubtypes.length > 0 &&
         displayedSubtypes.every(({ index }) => selected.has(index));
@@ -940,7 +924,6 @@ export default function OrganizationReferenceValuesView({
                   setFilterValues({});
                   setSelected(new Set());
                   setCurrentPage(1);
-                  setViewAll(false);
                 }}
               />
             }
@@ -1118,20 +1101,12 @@ export default function OrganizationReferenceValuesView({
           </div>
 
           <HorizontalTableScrollbar scrollRef={tableScrollRef} />
-          <TablePagination
-            currentPage={viewAll ? 1 : currentPage}
+          <TablePagination scrollRef={tableScrollRef}
+            currentPage={currentPage}
             totalPages={subtypeTotalPages}
             itemCount={visibleSubtypeRecords.length}
-            itemsPerPage={
-              viewAll ? Math.max(1, visibleSubtypeRecords.length) : recordsPerPage
-            }
+            itemsPerPage={recordsPerPage}
             onPageChange={setCurrentPage}
-            onShowMore={() => {
-              setViewAll((current) => !current);
-              setCurrentPage(1);
-            }}
-            showMoreLabel={viewAll ? "Default" : "Show more"}
-            allItemsVisible={viewAll}
           />
 
           {showSubtypeColumns && (
@@ -1376,18 +1351,12 @@ export default function OrganizationReferenceValuesView({
 
       <HorizontalTableScrollbar scrollRef={tableScrollRef} />
       <div>
-        <TablePagination
-          currentPage={viewAll ? 1 : currentPage}
+        <TablePagination scrollRef={tableScrollRef}
+          currentPage={currentPage}
           totalPages={totalPages}
           itemCount={visibleRecords.length}
-          itemsPerPage={viewAll ? Math.max(1, visibleRecords.length) : recordsPerPage}
+          itemsPerPage={recordsPerPage}
           onPageChange={setCurrentPage}
-          onShowMore={() => {
-            setViewAll((current) => !current);
-            setCurrentPage(1);
-          }}
-          showMoreLabel={viewAll ? "Default" : "Show more"}
-          allItemsVisible={viewAll}
         />
       </div>
 

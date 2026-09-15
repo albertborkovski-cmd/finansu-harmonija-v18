@@ -12,6 +12,7 @@ import RefreshAllButton from "./RefreshAllButton";
 import { CancelButton, ColumnSettingsButton, SaveButton } from "./ScopedActionButtons";
 import SystemAddFilters from "./SystemAddFilters";
 import TablePagination from "./TablePagination";
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { ResizeHandle, useColumnResize } from "./useColumnResize";
 
 type OrganizationBankAccount = {
@@ -84,7 +85,6 @@ export default function CompanyBankAccountsView({ company, onCompanyUpdated }: {
   const [filterValues, setFilterValues] = useState<Record<string, string[]>>({});
   const [showColumns, setShowColumns] = useState(false);
   const [page, setPage] = useState(1);
-  const [showAll, setShowAll] = useState(false);
   const [syncingIds, setSyncingIds] = useState<string[]>([]);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -161,10 +161,12 @@ export default function CompanyBankAccountsView({ company, onCompanyUpdated }: {
   }, [filterKeys, filterValues, query, rows]);
 
   const { sortedRows, changeSort, directionFor } = useMultiColumnSort<BankAccountRow, BankAccountColumnKey>(filteredRows, (row, key) => row[key]);
-  const itemsPerPage = showAll ? Math.max(1, sortedRows.length) : 20;
+  const itemsPerPage = TABLE_BATCH_SIZE;
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / itemsPerPage));
   const currentPage = Math.min(page, totalPages);
-  const visibleRows = showAll ? sortedRows : sortedRows.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  const visibleRows = sortedRows.slice(0, currentPage * itemsPerPage);
+
+  useEffect(() => setPage(1), [company.id, filterKeys, filterValues, query]);
 
   const renderCell = (row: BankAccountRow, key: string) => {
     if (key === "primaryLabel") return <span className={`inline-flex rounded px-2 py-0.5 text-[11px] font-semibold ${row.primary ? "bg-[#E7F4F9] text-[#007EA7]" : "text-[#7288A3]"}`}>{row.primaryLabel}</span>;
@@ -216,7 +218,7 @@ export default function CompanyBankAccountsView({ company, onCompanyUpdated }: {
               const syncing = syncingIds.includes(row.id);
               return <div key={row.id} className={`flex h-10 items-center rounded-lg ${index % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} hover:bg-[#E7F4F9]`}>
                 {visibleColumns.map((column) => <div key={column.key} style={{ width: column.width }} className="flex-shrink-0 truncate px-3 font-montserrat text-[12px] font-normal text-[#10233A]">{renderCell(row, column.key)}</div>)}
-                <div className="flex w-[104px] flex-shrink-0 items-center justify-end gap-2 px-3">
+                <div className="system-table-row-actions flex w-[104px] flex-shrink-0 items-center justify-end gap-2 px-3">
                   <button type="button" aria-label={`Synchronize ${row.iban}`} title="SYNC NOW" disabled={syncing} onClick={() => void syncAccounts([row.id])} className="flex h-7 w-7 items-center justify-center rounded-md border border-[#C8D8E5] text-[#7288A3] transition-colors hover:border-[#007EA7] hover:bg-white hover:text-[#007EA7] disabled:opacity-50"><ArrowDownUp size={14} className={syncing ? "animate-pulse" : ""} /></button>
                   <button type="button" aria-label={`SETTINGS ${row.iban}`} title="SETTINGS" onClick={() => setEditing({ ...row })} className="flex h-7 w-7 items-center justify-center rounded-md border border-[#C8D8E5] text-[#7288A3] transition-colors hover:border-[#007EA7] hover:bg-white hover:text-[#007EA7]"><Settings2 size={14} /></button>
                 </div>
@@ -228,7 +230,7 @@ export default function CompanyBankAccountsView({ company, onCompanyUpdated }: {
       </div>
 
       <HorizontalTableScrollbar scrollRef={tableScrollRef} />
-      <TablePagination currentPage={currentPage} totalPages={totalPages} itemCount={sortedRows.length} itemsPerPage={itemsPerPage} onPageChange={setPage} onShowMore={() => { setShowAll((value) => !value); setPage(1); }} showMoreLabel={showAll ? "Default" : "Show more"} allItemsVisible={showAll} />
+      <TablePagination scrollRef={tableScrollRef} currentPage={currentPage} totalPages={totalPages} itemCount={sortedRows.length} itemsPerPage={itemsPerPage} onPageChange={setPage} />
 
       {showColumns && <ColumnSettingsPanel columns={columns} defaultColumns={DEFAULT_COLUMNS} onSave={(next) => { setColumns(next); setShowColumns(false); }} onClose={() => setShowColumns(false)} />}
 

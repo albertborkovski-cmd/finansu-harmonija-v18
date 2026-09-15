@@ -1,3 +1,4 @@
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Building2,
@@ -22,7 +23,7 @@ import {
   SETTINGS_DATA_CHANGED_EVENT,
 } from "../lib/linkedSettingsData";
 
-const ANALYTICS_ROWS_PER_PAGE = 20;
+const ANALYTICS_ROWS_PER_PAGE = TABLE_BATCH_SIZE;
 
 type DirectoryUser = {
   id: string;
@@ -442,7 +443,6 @@ export default function SettingsUserAnalyticsView() {
   const [period, setPeriod] = useState({ from: "", to: "" });
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
-  const [showAll, setShowAll] = useState(false);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const refresh = () => setRefreshKey((current) => current + 1);
@@ -498,12 +498,7 @@ export default function SettingsUserAnalyticsView() {
     Math.ceil(filtered.length / ANALYTICS_ROWS_PER_PAGE),
   );
   const safePage = Math.min(page, totalPages);
-  const visibleRows = showAll
-    ? filtered
-    : filtered.slice(
-        (safePage - 1) * ANALYTICS_ROWS_PER_PAGE,
-        safePage * ANALYTICS_ROWS_PER_PAGE,
-      );
+  const visibleRows = filtered.slice(0, safePage * ANALYTICS_ROWS_PER_PAGE);
 
   const exportAll = () => {
     const escapeCsv = (value: string | number) =>
@@ -598,7 +593,6 @@ export default function SettingsUserAnalyticsView() {
           onChange={(value) => {
             setQuery(value);
             setPage(1);
-            setShowAll(false);
           }}
         />
         <div className="flex h-7 flex-nowrap items-center gap-2">
@@ -674,7 +668,6 @@ export default function SettingsUserAnalyticsView() {
             onClick={() => {
               setPeriod(periodDraft);
               setPage(1);
-              setShowAll(false);
             }}
             className="flex h-7 flex-shrink-0 items-center justify-center rounded border border-[#D3E1EC] bg-white px-2.5 font-montserrat text-[11px] font-semibold text-[#7288A3] transition-colors hover:border-[#A1B6C6] active:border-[#007EA7] active:bg-[#007EA7] active:text-white"
           >
@@ -687,7 +680,6 @@ export default function SettingsUserAnalyticsView() {
                 setPeriodDraft({ from: "", to: "" });
                 setPeriod({ from: "", to: "" });
                 setPage(1);
-                setShowAll(false);
               }}
               className="flex h-7 flex-shrink-0 items-center justify-center rounded border border-[#D3E1EC] bg-white px-2.5 font-montserrat text-[11px] font-semibold text-[#7288A3] transition-colors hover:border-[#A1B6C6] active:border-[#007EA7] active:bg-[#007EA7] active:text-white"
             >
@@ -837,18 +829,12 @@ export default function SettingsUserAnalyticsView() {
         </div>
       </div>
       <HorizontalTableScrollbar scrollRef={tableScrollRef} />
-      <TablePagination
-        currentPage={showAll ? 1 : safePage}
-        totalPages={showAll ? 1 : totalPages}
+      <TablePagination scrollRef={tableScrollRef}
+        currentPage={safePage}
+        totalPages={totalPages}
         itemCount={filtered.length}
-        itemsPerPage={
-          showAll ? Math.max(1, filtered.length) : ANALYTICS_ROWS_PER_PAGE
-        }
-        onPageChange={showAll ? () => undefined : setPage}
-        onShowMore={() => {
-          setShowAll(true);
-          setPage(1);
-        }}
+        itemsPerPage={ANALYTICS_ROWS_PER_PAGE}
+        onPageChange={setPage}
       />
     </section>
   );

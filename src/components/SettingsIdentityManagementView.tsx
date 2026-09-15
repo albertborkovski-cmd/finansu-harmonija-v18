@@ -1,3 +1,4 @@
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
@@ -88,7 +89,7 @@ const INTERNAL_USER_COLUMNS: ColConfig[] = [
 ];
 
 const PERMISSIONS = ["CREATE", "READ", "UPDATE", "DELETE", "ACTION"];
-const DIRECTORY_ROWS_PER_PAGE = 20;
+const DIRECTORY_ROWS_PER_PAGE = TABLE_BATCH_SIZE;
 const INVITATION_TEMPLATES = [
   {
     id: "standard",
@@ -1644,7 +1645,7 @@ export default function SettingsIdentityManagementView({
     {},
   );
   const [page, setPage] = useState(1);
-  const [viewAll, setViewAll] = useState(false);
+  useEffect(() => setPage(1), [query, activeFilterKeys, filterValues, organizationScope?.id]);
   const { startResize } = useColumnResize(columns, setColumns);
   useEffect(() => {
     if (!addFilterOpen && openValueFilter === null) return;
@@ -1683,7 +1684,6 @@ export default function SettingsIdentityManagementView({
     setAddFilterOpen(false);
     setOpenValueFilter(null);
     setPage(1);
-    setViewAll(false);
   }, [audience, defaults, key, section]);
   useEffect(() => {
     const refreshRelationships = () => setRows(loadRows(audience, section));
@@ -1794,12 +1794,7 @@ export default function SettingsIdentityManagementView({
     Math.ceil(sortedRows.length / DIRECTORY_ROWS_PER_PAGE),
   );
   const safePage = Math.min(page, totalPages);
-  const displayedRows = viewAll
-    ? sortedRows
-    : sortedRows.slice(
-        (safePage - 1) * DIRECTORY_ROWS_PER_PAGE,
-        safePage * DIRECTORY_ROWS_PER_PAGE,
-      );
+  const displayedRows = sortedRows.slice(0, safePage * DIRECTORY_ROWS_PER_PAGE);
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
@@ -2113,7 +2108,6 @@ export default function SettingsIdentityManagementView({
               setAddFilterOpen(false);
               setOpenValueFilter(null);
               setPage(1);
-              setViewAll(false);
             }}
             className="flex h-7 flex-shrink-0 items-center gap-1 whitespace-nowrap rounded bg-[#E5EDF9] px-2 py-[5px] font-montserrat text-[12px] font-medium leading-[18px] text-[#7288A3] hover:bg-[#DCE7F6]"
           >
@@ -2165,15 +2159,12 @@ export default function SettingsIdentityManagementView({
             </div>
           </div>
           <HorizontalTableScrollbar scrollRef={tableScrollRef} />
-          <TablePagination
+          <TablePagination scrollRef={tableScrollRef}
             currentPage={1}
             totalPages={1}
             itemCount={0}
             itemsPerPage={DIRECTORY_ROWS_PER_PAGE}
             onPageChange={() => undefined}
-            onShowMore={() => setViewAll((current) => !current)}
-            showMoreLabel={viewAll ? "Default" : "Show more"}
-            allItemsVisible={viewAll}
           />
         </>
       ) : (
@@ -2229,7 +2220,7 @@ export default function SettingsIdentityManagementView({
                     </div>
                   );
                 })}
-                <div className="sticky right-0 z-20 h-full w-[72px] flex-shrink-0 bg-white" />
+                <div className="h-full w-[72px] flex-shrink-0 bg-white" />
               </div>
               <div className="flex flex-col gap-0.5">
                 {displayedRows.map((row, index) => (
@@ -2263,7 +2254,7 @@ export default function SettingsIdentityManagementView({
                       </div>
                     ))}
                     <div
-                      className={`sticky right-0 z-10 flex h-full w-[72px] flex-shrink-0 items-center justify-end gap-1 pr-1 ${index % 2 ? "bg-white" : "bg-[#F8FDFF]"} group-hover:bg-[#E7F4F9]`}
+                      className={`system-table-row-actions flex h-full w-[72px] flex-shrink-0 items-center justify-end gap-1 pr-1 ${index % 2 ? "bg-white" : "bg-[#F8FDFF]"} group-hover:bg-[#E7F4F9]`}
                     >
                       <button
                         type="button"
@@ -2304,22 +2295,12 @@ export default function SettingsIdentityManagementView({
           </div>
           <HorizontalTableScrollbar scrollRef={tableScrollRef} />
           <div className="contents">
-            <TablePagination
-              currentPage={viewAll ? 1 : safePage}
-              totalPages={viewAll ? 1 : totalPages}
+            <TablePagination scrollRef={tableScrollRef}
+              currentPage={safePage}
+              totalPages={totalPages}
               itemCount={filtered.length}
-              itemsPerPage={
-                viewAll
-                  ? Math.max(1, filtered.length)
-                  : DIRECTORY_ROWS_PER_PAGE
-              }
-              onPageChange={viewAll ? () => undefined : setPage}
-              onShowMore={() => {
-                setViewAll((current) => !current);
-                setPage(1);
-              }}
-              showMoreLabel={viewAll ? "Default" : "Show more"}
-              allItemsVisible={viewAll}
+              itemsPerPage={DIRECTORY_ROWS_PER_PAGE}
+              onPageChange={setPage}
             />
           </div>
         </>

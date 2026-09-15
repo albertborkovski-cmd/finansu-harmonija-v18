@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { usePersistentState } from '../hooks/usePersistentState';
 import { MoreVertical } from 'lucide-react';
 import { importMenuRecords } from '../lib/menuImport';
@@ -10,77 +10,13 @@ import { PageActionButton, PageHeader } from './PageHeader';
 import { ColumnSettingsButton, ImportDataButton } from './ScopedActionButtons';
 import RefreshAllButton from './RefreshAllButton';
 import TablePagination from './TablePagination';
+import { TABLE_BATCH_SIZE } from '../lib/tablePaging';
 import { ResizeHandle, useColumnResize } from './useColumnResize';
 import CompanyBreadcrumb from './CompanyBreadcrumb';
 import SystemAddFilters, { type SystemFilterColumn } from './SystemAddFilters';
+import RelatedObjectPreview from './RelatedObjectPreview';
 
-interface DebtRow {
-  id: string;
-  counterpartyCode: string;
-  counterpartyName: string;
-  counterpartyType: string;
-  documentReference: string;
-  documentType: string;
-  issueDate: string;
-  dueDate: string;
-  currency: string;
-  totalAmount: string;
-  paidAmount: string;
-  outstandingAmount: string;
-  daysOverdue: number;
-  debtStatus: string;
-  reminderStage: string;
-  lastReminderDate: string;
-  paymentPriority: string;
-  department: string;
-  notes: string;
-}
-
-const DEBT_ROWS: DebtRow[] = [
-  {
-    id: 'debt-1',
-    counterpartyCode: '123456',
-    counterpartyName: 'UAB Alfa',
-    counterpartyType: 'Buyer',
-    documentReference: 'INV-1025',
-    documentType: 'Sales invoice',
-    issueDate: '11.12.2025',
-    dueDate: '11.12.2025',
-    currency: 'EUR',
-    totalAmount: '1,200.00',
-    paidAmount: '900.00',
-    outstandingAmount: '300.00',
-    daysOverdue: 5,
-    debtStatus: 'Partially paid',
-    reminderStage: 'Final',
-    lastReminderDate: '11.12.2025',
-    paymentPriority: 'Low',
-    department: 'Project A',
-    notes: '—',
-  },
-  {
-    id: 'debt-2',
-    counterpartyCode: '123456',
-    counterpartyName: 'UAB Alfa',
-    counterpartyType: 'Buyer',
-    documentReference: 'INV-1025',
-    documentType: 'Sales invoice',
-    issueDate: '11.12.2025',
-    dueDate: '11.12.2025',
-    currency: 'EUR',
-    totalAmount: '1,200.00',
-    paidAmount: '900.00',
-    outstandingAmount: '300.00',
-    daysOverdue: 5,
-    debtStatus: 'Partially paid',
-    reminderStage: 'Final',
-    lastReminderDate: '11.12.2025',
-    paymentPriority: 'Low',
-    department: 'Project A',
-    notes: '—',
-  },
-];
-
+import { DEBT_ROWS, type DebtRow } from '../lib/companyRelatedObjectData';
 const DEFAULT_COLUMNS: ColConfig[] = [
   { key: 'counterpartyCode', label: 'Counterparty code', width: 136, visible: true },
   { key: 'counterpartyName', label: 'Counterparty name', width: 144, visible: true },
@@ -105,7 +41,8 @@ const DEFAULT_COLUMNS: ColConfig[] = [
 
 const TABS = ['Receivables', 'Payables', 'All', 'Overdue'];
 
-export default function CompanyDebtsView({ companyName = "" }: { companyName?: string }) {
+export default function CompanyDebtsView({ companyName = "", initialRecordId, onRelatedObjectBack }: { companyName?: string; initialRecordId?: string; onRelatedObjectBack?: () => void }) {
+  const [relatedObjectClosed, setRelatedObjectClosed] = useState(false);
   const [activeTab, setActiveTab] = useState('Payables');
   const [query, setQuery] = useState('');
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
@@ -116,7 +53,12 @@ export default function CompanyDebtsView({ companyName = "" }: { companyName?: s
   const [filterValues, setFilterValues] = useState<Record<string, string[]>>({});
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const { startResize } = useColumnResize(columns, setColumns);
-  const visibleColumns = columns.filter(column => column.visible);
+  const visibleColumns = [
+    ...columns.filter(column => column.visible && column.key !== 'actions'),
+    ...columns.filter(column => column.visible && column.key === 'actions'),
+  ];
+
+  useEffect(() => setCurrentPage(1), [activeTab, activeFilterKeys, filterValues, query, companyName]);
 
   const filterColumns = useMemo<SystemFilterColumn[]>(
     () =>
@@ -186,6 +128,13 @@ export default function CompanyDebtsView({ companyName = "" }: { companyName?: s
     }
     return String(row[key as keyof DebtRow] ?? '—');
   };
+
+  if (initialRecordId && !relatedObjectClosed) {
+    const record = DEBT_ROWS.find(row => row.id === initialRecordId);
+    return <RelatedObjectPreview companyName={companyName} section="Debts" title={record ? `Debt · ${record.documentReference}` : 'Debt'}
+      fields={record ? DEFAULT_COLUMNS.filter(column => column.key !== 'actions').map(column => ({ label: column.label, value: record[column.key as keyof DebtRow] })) : []}
+      unavailable={!record} onBack={onRelatedObjectBack ?? (() => setRelatedObjectClosed(true))} />;
+  }
 
   return (
     <div className="relative flex min-h-full min-w-0 flex-col gap-4 bg-white px-4 py-10 sm:px-8 lg:px-[56px]">
@@ -257,13 +206,13 @@ export default function CompanyDebtsView({ companyName = "" }: { companyName?: s
             })}
           </div>
 
-          {sortedRows.map((row, index) => (
+          {sortedRows.slice(0, currentPage * TABLE_BATCH_SIZE).map((row, index) => (
             <div key={row.id} className={`group flex h-9 items-center rounded-lg pl-3 pr-2 transition-colors hover:bg-[#EEF6FA] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
               <div className="flex w-[30px] flex-shrink-0 items-center">
                 <input type="checkbox" aria-label={`Select ${row.documentReference}`} checked={selectedRows.has(row.id)} onChange={() => toggleRow(row.id)} className="h-[18px] w-[18px] cursor-pointer rounded border border-[#A1B6C6] accent-[#007EA7]" />
               </div>
               {visibleColumns.map(column => (
-                <div key={column.key} style={{ width: column.width }} className="flex flex-shrink-0 items-center overflow-hidden pr-2 font-montserrat text-[11px] text-[#10233A]">
+                <div key={column.key} style={{ width: column.width }} className={`${column.key === 'actions' ? 'system-table-row-actions ' : ''}flex flex-shrink-0 items-center overflow-hidden pr-2 font-montserrat text-[11px] text-[#10233A]`}>
                   <div className="w-full min-w-0 truncate">{cell(row, column.key)}</div>
                 </div>
               ))}
@@ -275,10 +224,11 @@ export default function CompanyDebtsView({ companyName = "" }: { companyName?: s
       <HorizontalTableScrollbar scrollRef={tableScrollRef} />
       <div className="flex flex-shrink-0 items-center justify-between pt-2">
         <TablePagination
+          scrollRef={tableScrollRef}
           currentPage={currentPage}
-          totalPages={Math.max(1, Math.ceil(sortedRows.length / 20))}
+          totalPages={Math.max(1, Math.ceil(sortedRows.length / TABLE_BATCH_SIZE))}
           itemCount={sortedRows.length}
-          itemsPerPage={20}
+          itemsPerPage={TABLE_BATCH_SIZE}
           onPageChange={setCurrentPage}
         />
       </div>

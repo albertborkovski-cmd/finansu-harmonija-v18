@@ -75,7 +75,7 @@ export default function CompanySepaPaymentsView({ company }: { company: Company 
       </div>
 
       <HorizontalTableScrollbar scrollRef={tableScrollRef} />
-      <TablePagination currentPage={1} totalPages={1} itemCount={0} onPageChange={() => undefined} />
+      <TablePagination scrollRef={tableScrollRef} currentPage={1} totalPages={1} itemCount={0} onPageChange={() => undefined} />
       {showColumns && <ColumnSettingsPanel columns={columns} defaultColumns={DEFAULT_COLUMNS} onSave={(next) => { setColumns(next); setShowColumns(false); }} onClose={() => setShowColumns(false)} />}
     </div>
   );

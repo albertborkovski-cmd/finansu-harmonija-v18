@@ -3,6 +3,7 @@ import { Check, ChevronDown, Pencil, Trash2, X } from "lucide-react";
 import OcrSearchField from "./OcrSearchField";
 import HorizontalTableScrollbar from "./HorizontalTableScrollbar";
 import TablePagination from "./TablePagination";
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import SystemAddFilters, { type SystemFilterColumn } from "./SystemAddFilters";
 import ColumnSortButton, { useMultiColumnSort } from "./ColumnSortButton";
 import ColumnSettingsPanel, { type ColConfig } from "./ColumnSettingsPanel";
@@ -47,7 +48,7 @@ const INITIAL_COLUMNS: ColConfig[] = [
 ];
 
 const SELECTION_COLUMN_WIDTH = 40;
-const ACTION_COLUMN_WIDTH = 76;
+const ACTION_COLUMN_WIDTH = 84;
 
 type ValidationEditDraft = OcrFieldValidationRule & {
   description: string;
@@ -59,7 +60,6 @@ export default function OcrFieldValidationSettings() {
   const [rules, setRules] = useState<OcrFieldValidationRule[]>(() => loadOcrFieldValidationRules());
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
-  const [showAll, setShowAll] = useState(false);
   const [notice, setNotice] = useState("");
   const [openTrafficLight, setOpenTrafficLight] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<ValidationEditDraft | null>(null);
@@ -128,10 +128,10 @@ export default function OcrFieldValidationSettings() {
     return "";
   });
 
-  const pageSize = showAll ? Math.max(1, sortedRows.length) : 20;
+  const pageSize = TABLE_BATCH_SIZE;
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
   const safePage = Math.min(page, totalPages);
-  const displayedRules = showAll ? sortedRows : sortedRows.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const displayedRules = sortedRows.slice(0, safePage * pageSize);
   const visibleColumns = columns.filter((column) => column.visible);
   const tableWidth = visibleColumns.reduce(
     (total, column) => total + column.width,
@@ -290,7 +290,7 @@ export default function OcrFieldValidationSettings() {
               </div>
               );
             })}
-            <div aria-hidden="true" style={{ width: ACTION_COLUMN_WIDTH }} className="sticky right-0 z-20 h-9 flex-shrink-0 bg-white" />
+            <div aria-hidden="true" style={{ width: ACTION_COLUMN_WIDTH }} className="h-9 flex-shrink-0 bg-white" />
           </div>
 
           <div className="flex flex-col gap-0.5">
@@ -355,7 +355,7 @@ export default function OcrFieldValidationSettings() {
                     <span>{ocrConfidenceThreshold(rule)}%</span>
                   </div>}
                   {visibleColumns.some((column) => column.key === "rule") && <div style={{ width: columnWidth("rule") }} className="flex-shrink-0 overflow-hidden px-3"><span className="block truncate" title={description}>{description}</span></div>}
-                  <div style={{ width: ACTION_COLUMN_WIDTH }} className={`sticky right-0 z-10 flex min-h-10 flex-shrink-0 items-center justify-end gap-2 border-l border-[#E5EDF9] px-2 ${index % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} group-hover:bg-[#E7F4F9]`}>
+                  <div style={{ width: ACTION_COLUMN_WIDTH }} className={`system-table-row-actions flex min-h-10 flex-shrink-0 items-center justify-end gap-2 border-l border-[#E5EDF9] px-2 ${index % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} group-hover:bg-[#E7F4F9]`}>
                     <button
                       type="button"
                       title="EDIT"
@@ -389,9 +389,7 @@ export default function OcrFieldValidationSettings() {
         itemCount={sortedRows.length}
         itemsPerPage={pageSize}
         onPageChange={setPage}
-        onShowMore={() => { setShowAll((current) => !current); setPage(1); }}
-        showMoreLabel={showAll ? "Default" : "Show more"}
-        allItemsVisible={showAll}
+        scrollRef={tableScrollRef}
       />
 
       {showColumns && (

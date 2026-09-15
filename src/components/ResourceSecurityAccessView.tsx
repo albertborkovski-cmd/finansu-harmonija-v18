@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Check } from 'lucide-react';
 import { PageHeader } from './PageHeader';
 import OcrSearchField from './OcrSearchField';
@@ -48,6 +49,7 @@ export default function ResourceSecurityAccessView({ target, onBack }: { target:
   const tableRef = useRef<HTMLDivElement>(null);
   const [rules, setRules] = useState<SecurityRule[]>(() => loadRules(target));
   const [query, setQuery] = useState('');
+  useEffect(() => setTablePage(1), [query, target.id]);
   const groups = getAdministrationGroupNames();
 
   const filteredGroups = useMemo(() => {
@@ -115,7 +117,7 @@ export default function ResourceSecurityAccessView({ target, onBack }: { target:
               <span /><span className="text-[#10233A]">Group</span><span>Can view</span><span>Permissions for this record</span>
             </div>
 
-            {filteredGroups.slice((Math.min(tablePage, Math.max(1, Math.ceil(filteredGroups.length / 20))) - 1) * 20, Math.min(tablePage, Math.max(1, Math.ceil(filteredGroups.length / 20))) * 20).map((group, index) => {
+            {filteredGroups.slice(0, tablePage * TABLE_BATCH_SIZE).map((group, index) => {
               const rule = findRule(group);
               const assigned = Boolean(rule);
               return (
@@ -163,7 +165,7 @@ export default function ResourceSecurityAccessView({ target, onBack }: { target:
 
         <HorizontalTableScrollbar scrollRef={tableRef} />
         <div>
-          <TablePagination currentPage={tablePage} totalPages={Math.max(1, Math.ceil(filteredGroups.length / 20))} itemCount={filteredGroups.length} onPageChange={setTablePage} />
+          <TablePagination scrollRef={tableRef} currentPage={tablePage} totalPages={Math.max(1, Math.ceil(filteredGroups.length / TABLE_BATCH_SIZE))} itemCount={filteredGroups.length} onPageChange={setTablePage} />
         </div>
       </div>
     </div>

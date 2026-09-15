@@ -1,5 +1,6 @@
 import TablePagination from "./TablePagination";
-import { useMemo, useRef, useState } from "react";
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Download, X } from "lucide-react";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -412,6 +413,8 @@ export default function TrialBalanceReportView({
   const tableRef = useRef<HTMLDivElement>(null);
   const { startResize } = useColumnResize(columns, setColumns);
   const visibleColumns = columns.filter((column) => column.visible);
+
+  useEffect(() => setTablePage(1), [companyName, filterKeys, filterValues, query, from, to]);
   const filterColumns = useMemo(
     () =>
       TRIAL_BALANCE_COLUMNS.map((column) => ({
@@ -685,7 +688,7 @@ export default function TrialBalanceReportView({
           </div>
 
           <div className="flex flex-col gap-0.5">
-            {sortedRows.slice((Math.min(tablePage, Math.max(1, Math.ceil(sortedRows.length / 20))) - 1) * 20, Math.min(tablePage, Math.max(1, Math.ceil(sortedRows.length / 20))) * 20).map((item, index) => (
+            {sortedRows.slice(0, tablePage * TABLE_BATCH_SIZE).map((item, index) => (
               <div
                 key={`${item.code}-${item.name}`}
                 className={`flex min-h-10 items-center rounded-lg font-montserrat text-[12px] font-normal text-[#10233A] transition-colors hover:bg-[#E7F4F9] ${index % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"}`}
@@ -740,7 +743,7 @@ export default function TrialBalanceReportView({
         </div>
       </div>
       <HorizontalTableScrollbar scrollRef={tableRef} />
-      <TablePagination currentPage={tablePage} totalPages={Math.max(1, Math.ceil(sortedRows.length / 20))} itemCount={sortedRows.length} itemsPerPage={20} onPageChange={setTablePage} />
+      <TablePagination scrollRef={tableRef} currentPage={tablePage} totalPages={Math.max(1, Math.ceil(sortedRows.length / TABLE_BATCH_SIZE))} itemCount={sortedRows.length} itemsPerPage={TABLE_BATCH_SIZE} onPageChange={setTablePage} />
 
       {showColumns && (
         <ColumnSettingsPanel

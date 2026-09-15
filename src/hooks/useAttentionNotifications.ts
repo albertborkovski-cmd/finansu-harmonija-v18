@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getAttentionNotifications, SAMPLE_NOTIFICATIONS, SAMPLE_REMINDERS } from "../lib/notifications";
+import { startTaskReminderScheduler } from "../lib/taskReminderRuntime";
 
 const NOTIFICATIONS_KEY = "finansu-harmonija:v7:notifications";
 const REMINDERS_KEY = "finansu-harmonija:v7:reminders";
@@ -21,7 +22,7 @@ function readAttentionNotifications(includeInactive = false) {
   );
 }
 
-/** Read the same records as Notifications & Reminders without writing to them. */
+/** Shared records and one browser-local scheduler for explicitly configured task reminders. */
 export function useAttentionNotifications(includeInactive = false) {
   const [rows, setRows] = useState(() => readAttentionNotifications(includeInactive));
   useEffect(() => {
@@ -35,7 +36,10 @@ export function useAttentionNotifications(includeInactive = false) {
     };
     window.addEventListener("storage", refresh);
     window.addEventListener("finansu-harmonija:persistent-state-changed", refresh);
+    const stopReminders = startTaskReminderScheduler();
+    setRows(readAttentionNotifications(includeInactive));
     return () => {
+      stopReminders();
       window.removeEventListener("storage", refresh);
       window.removeEventListener("finansu-harmonija:persistent-state-changed", refresh);
     };

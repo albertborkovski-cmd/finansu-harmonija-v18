@@ -1,3 +1,4 @@
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Pencil, Trash2, X } from "lucide-react";
 import { supabase, type Company } from "../lib/supabase";
@@ -210,6 +211,7 @@ export default function OperationDateValidationView() {
   const [error, setError] = useState("");
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const { startResize } = useColumnResize(columns, setColumns);
+  useEffect(() => setFixedPage0(1), [search, activeFilterKeys, filterValues]);
 
   useEffect(() => {
     let active = true;
@@ -451,7 +453,7 @@ export default function OperationDateValidationView() {
               <span />
             </div>
             <div className="flex flex-col gap-0.5">
-            {displayedTemplates.slice((Math.min(fixedPage0, Math.max(1, Math.ceil(displayedTemplates.length / 20))) - 1) * 20, Math.min(fixedPage0, Math.max(1, Math.ceil(displayedTemplates.length / 20))) * 20).map((template) => {
+            {displayedTemplates.slice(0, fixedPage0 * TABLE_BATCH_SIZE).map((template) => {
               const assignedCount = Object.values(assignments).filter((id) => id === template.id).length;
               return (
                 <div key={template.id} style={{ gridTemplateColumns: tableGridTemplate }} className="grid h-10 items-center rounded-lg font-montserrat text-[12px] font-normal text-[#10233A] odd:bg-[#F8FDFF] hover:bg-[#E7F4F9]">
@@ -499,7 +501,7 @@ export default function OperationDateValidationView() {
 
       <HorizontalTableScrollbar scrollRef={tableScrollRef} />
       <div className="flex flex-shrink-0">
-        <TablePagination currentPage={fixedPage0} totalPages={Math.max(1, Math.ceil(displayedTemplates.length / 20))} itemCount={displayedTemplates.length} onPageChange={setFixedPage0} />
+        <TablePagination scrollRef={tableScrollRef} currentPage={fixedPage0} totalPages={Math.max(1, Math.ceil(displayedTemplates.length / TABLE_BATCH_SIZE))} itemCount={displayedTemplates.length} onPageChange={setFixedPage0} />
       </div>
 
       {showColumns && (

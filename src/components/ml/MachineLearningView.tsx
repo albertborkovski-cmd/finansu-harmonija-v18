@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { RefreshCw, Users, ArrowLeft, BrainCircuit } from 'lucide-react';
 import { useColumnResize, ResizeHandle } from '../useColumnResize';
 import ColumnSettingsPanel, { type ColConfig } from '../ColumnSettingsPanel';
@@ -6,6 +6,7 @@ import { PageActionButton, PageHeader } from '../PageHeader';
 import OcrBreadcrumb from '../OcrBreadcrumb';
 import HorizontalTableScrollbar from '../HorizontalTableScrollbar';
 import TablePagination from '../TablePagination';
+import { TABLE_BATCH_SIZE } from "../../lib/tablePaging";
 import OcrSearchField from '../OcrSearchField';
 import type { DocumentEntry, DocumentSet, DetailTab } from './types';
 import GeneralTab from './GeneralTab';
@@ -91,6 +92,7 @@ function GroupManagementView({ documentSet, onBack, onOpenDocumentSet }: { docum
   const [query, setQuery] = useState('');
   const [selectedMembers, setSelectedMembers] = useState<Set<string>>(new Set());
   const [groupPage, setGroupPage] = useState(1);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
   const [showGroupColumnSettings, setShowGroupColumnSettings] = useState(false);
   const [groupColumns, setGroupColumns] = usePersistentState<ColConfig[]>('finansu-harmonija:v7:ml-group-columns', GROUP_COLUMNS);
   const [groupMembers, setGroupMembers] = usePersistentState('finansu-harmonija:v7:ml-group-members', GROUP_MEMBERS);
@@ -117,7 +119,7 @@ function GroupManagementView({ documentSet, onBack, onOpenDocumentSet }: { docum
 
       <div className="flex min-h-0 flex-1 flex-col gap-6">
         <div className="flex items-center justify-between gap-2">
-          <OcrSearchField ariaLabel="Search group members" value={query} onChange={setQuery} />
+          <OcrSearchField ariaLabel="Search group members" value={query} onChange={(value) => { setQuery(value); setGroupPage(1); }} />
           <div className="flex h-7 items-center gap-4 rounded bg-white p-1.5 text-[#7288A3]">
             <BulkDeleteButton selectedCount={selectedMembers.size} onDelete={() => { setGroupMembers(current => current.filter(member => !selectedMembers.has(member.id))); setSelectedMembers(new Set()); }} label="Delete selected group members" />
             <ColumnSettingsButton onClick={() => setShowGroupColumnSettings(true)} />
@@ -126,7 +128,7 @@ function GroupManagementView({ documentSet, onBack, onOpenDocumentSet }: { docum
           </div>
         </div>
 
-        <div className="flex flex-1 flex-col justify-between gap-12 overflow-x-auto scrollbar-hide">
+        <div ref={tableScrollRef} className="flex flex-1 flex-col justify-between gap-12 overflow-x-auto scrollbar-hide">
           <div style={{ minWidth: Math.max(760, groupTableMinWidth) }}>
             <div className="flex h-5 items-center px-3 font-montserrat text-[12px] font-medium leading-[18px] text-[#7288A3]">
               {visibleGroupColumns.map((column) => (
@@ -139,7 +141,7 @@ function GroupManagementView({ documentSet, onBack, onOpenDocumentSet }: { docum
               <span className="w-9 flex-shrink-0" />
             </div>
             <div className="mt-4 flex flex-col">
-              {members.slice((Math.min(groupPage, Math.max(1, Math.ceil(members.length / 20))) - 1) * 20, Math.min(groupPage, Math.max(1, Math.ceil(members.length / 20))) * 20).map((member, index) => (
+              {members.slice(0, groupPage * TABLE_BATCH_SIZE).map((member, index) => (
                 <div key={member.id} className={`flex h-9 items-center rounded-lg font-montserrat text-[12px] leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
                   {visibleGroupColumns.map((column) => (
                     <div key={column.key} className="flex flex-shrink-0 items-center gap-3 truncate px-3" style={{ width: column.width }}>
@@ -160,7 +162,7 @@ function GroupManagementView({ documentSet, onBack, onOpenDocumentSet }: { docum
           <HorizontalTableScrollbar />
 
           <div className="flex items-center justify-between gap-4">
-            <TablePagination currentPage={groupPage} totalPages={9} itemCount={members.length} onPageChange={setGroupPage} />
+            <TablePagination currentPage={groupPage} totalPages={Math.max(1, Math.ceil(members.length / TABLE_BATCH_SIZE))} itemCount={members.length} onPageChange={setGroupPage} scrollRef={tableScrollRef} />
           </div>
         </div>
       </div>
@@ -186,6 +188,7 @@ export default function MachineLearningView({
 }) {
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
   const [detailSet, setDetailSet] = useState<DocumentSet | null>(() =>
     openInvoiceProcessingDocuments
       ? SAMPLE_SETS.find(documentSet => documentSet.name === 'Invoice Processing') ?? null
@@ -206,7 +209,7 @@ export default function MachineLearningView({
   const [query, setQuery] = useState('');
   const { startResize } = useColumnResize(columns, setColumns);
   const visibleColumns = columns.filter(column => column.visible);
-  const tableMinWidth = visibleColumns.reduce((total, column) => total + column.width, 68);
+  const tableMinWidth = visibleColumns.reduce((total, column) => total + column.width, 100);
   const filteredSets = useMemo(() => documentSets.filter(documentSet => matchesTextSearch(documentSet, query)), [documentSets, query]);
   const { sortedRows: sortedSets, changeSort, directionFor } = useMultiColumnSort(filteredSets, (documentSet, key) => documentSet[key as keyof DocumentSet] as string | number | undefined);
 
@@ -375,7 +378,7 @@ export default function MachineLearningView({
         <div className="flex-shrink-0">
           <div className="flex flex-row flex-wrap justify-between items-center gap-2">
             <div className="flex flex-row items-center gap-1 flex-1 min-w-0">
-              <OcrSearchField ariaLabel="Search document sets" value={query} onChange={setQuery} />
+              <OcrSearchField ariaLabel="Search document sets" value={query} onChange={(value) => { setQuery(value); setCurrentPage(1); }} />
             </div>
             <div className="flex flex-row items-center p-[6px] gap-4 bg-white rounded flex-shrink-0">
               <BulkDeleteButton selectedCount={selectedRows.size} onDelete={() => { setDocumentSets(current => current.filter(item => !selectedRows.has(item.id))); setSelectedRows(new Set()); }} />
@@ -390,7 +393,7 @@ export default function MachineLearningView({
 
         {/* Table */}
         <div className="flex flex-col gap-12 flex-1">
-          <div className="overflow-x-auto scrollbar-hide">
+          <div ref={tableScrollRef} className="overflow-x-auto scrollbar-hide">
             <div style={{ minWidth: Math.max(900, tableMinWidth) }}>
               {/* Column headers */}
               <div className="system-table-header-row flex flex-row items-center pl-3 gap-0 h-5 mb-4">
@@ -418,7 +421,7 @@ export default function MachineLearningView({
 
               {/* Rows */}
               <div className="flex flex-col">
-                {sortedSets.slice((Math.min(currentPage, Math.max(1, Math.ceil(sortedSets.length / 20))) - 1) * 20, Math.min(currentPage, Math.max(1, Math.ceil(sortedSets.length / 20))) * 20).map((set, i) => (
+                {sortedSets.slice(0, currentPage * TABLE_BATCH_SIZE).map((set, i) => (
                   <div
                     key={set.id}
                     className={`group flex h-9 w-full flex-row items-center rounded-lg ${i % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} transition-colors hover:bg-[#E7F4F9]`}
@@ -453,7 +456,7 @@ export default function MachineLearningView({
                       );
                     })}
 
-                    <div className="flex flex-row items-center p-1 gap-1 flex-shrink-0 h-9" onClick={e => e.stopPropagation()}>
+                    <div className="system-table-row-actions flex w-[100px] flex-row items-center p-1 gap-1 flex-shrink-0 h-9" onClick={e => e.stopPropagation()}>
                       <button
                         type="button"
                         title="Train model"
@@ -478,7 +481,7 @@ export default function MachineLearningView({
 
           {/* Footer / Pagination */}
           <div className="flex flex-row flex-wrap justify-between items-center gap-4 flex-shrink-0">
-            <TablePagination currentPage={currentPage} totalPages={Math.max(1, Math.ceil(sortedSets.length / 20))} itemCount={sortedSets.length} onPageChange={setCurrentPage} />
+            <TablePagination currentPage={currentPage} totalPages={Math.max(1, Math.ceil(sortedSets.length / TABLE_BATCH_SIZE))} itemCount={sortedSets.length} onPageChange={setCurrentPage} scrollRef={tableScrollRef} />
           </div>
         </div>
       </div>

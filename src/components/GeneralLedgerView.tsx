@@ -1,3 +1,4 @@
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
@@ -628,6 +629,10 @@ export default function GeneralLedgerView({
     useState<ColConfig[]>(ACCOUNT_COLUMNS);
   const [showTemplateColumns, setShowTemplateColumns] = useState(false);
   const [showAccountColumns, setShowAccountColumns] = useState(false);
+  useEffect(() => {
+    setFixedPage0(1);
+    setFixedPage1(1);
+  }, [query, templateFilterKeys, templateFilterValues, accountFilterKeys, accountFilterValues, selectedTemplateId, companyId]);
   const templateTableScrollRef = useRef<HTMLDivElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const { startResize: startTemplateResize } = useColumnResize(
@@ -1100,7 +1105,7 @@ export default function GeneralLedgerView({
               <span className="w-[108px] flex-shrink-0" aria-hidden="true" />
             </div>
             <div className="flex flex-col gap-0.5">
-              {treeAccounts.slice((Math.min(fixedPage0, Math.max(1, Math.ceil(treeAccounts.length / 20))) - 1) * 20, Math.min(fixedPage0, Math.max(1, Math.ceil(treeAccounts.length / 20))) * 20).map((account, index) => (
+              {treeAccounts.slice(0, fixedPage0 * TABLE_BATCH_SIZE).map((account, index) => (
                 <div
                   key={account.id}
                   className={`flex h-10 items-center rounded-lg font-montserrat text-[12px] text-[#10233A] transition-colors ${index % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} hover:bg-[#E7F4F9]`}
@@ -1225,13 +1230,12 @@ export default function GeneralLedgerView({
         </div>
         <HorizontalTableScrollbar scrollRef={templateTableScrollRef} />
         <div>
-          <TablePagination
+          <TablePagination scrollRef={templateTableScrollRef}
             currentPage={fixedPage0}
-            totalPages={Math.max(1, Math.ceil(treeAccounts.length / 20))}
+            totalPages={Math.max(1, Math.ceil(treeAccounts.length / TABLE_BATCH_SIZE))}
             itemCount={treeAccounts.length}
-            itemsPerPage={20}
+            itemsPerPage={TABLE_BATCH_SIZE}
             onPageChange={setFixedPage0}
-            onShowMore={() => undefined}
           />
         </div>
         {importMessage && (
@@ -1423,7 +1427,7 @@ export default function GeneralLedgerView({
             <div className="w-[72px] flex-shrink-0" />
           </div>
           <div className="flex flex-col gap-0.5">
-            {sortedTemplates.slice((Math.min(fixedPage1, Math.max(1, Math.ceil(sortedTemplates.length / 20))) - 1) * 20, Math.min(fixedPage1, Math.max(1, Math.ceil(sortedTemplates.length / 20))) * 20).map((template, index) => (
+            {sortedTemplates.slice(0, fixedPage1 * TABLE_BATCH_SIZE).map((template, index) => (
               <div
                 key={template.id}
                 role="button"
@@ -1515,13 +1519,12 @@ export default function GeneralLedgerView({
       </div>
       <HorizontalTableScrollbar scrollRef={templateTableScrollRef} />
       <div>
-        <TablePagination
+        <TablePagination scrollRef={templateTableScrollRef}
           currentPage={fixedPage1}
-          totalPages={Math.max(1, Math.ceil(sortedTemplates.length / 20))}
+          totalPages={Math.max(1, Math.ceil(sortedTemplates.length / TABLE_BATCH_SIZE))}
           itemCount={sortedTemplates.length}
-          itemsPerPage={20}
+          itemsPerPage={TABLE_BATCH_SIZE}
           onPageChange={setFixedPage1}
-          onShowMore={() => undefined}
         />
       </div>
       {showTemplateColumns && (

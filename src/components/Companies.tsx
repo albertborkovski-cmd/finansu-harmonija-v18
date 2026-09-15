@@ -23,6 +23,7 @@ import { useColumnResize, ResizeHandle } from "./useColumnResize";
 import ColumnSettingsPanel, { type ColConfig } from "./ColumnSettingsPanel";
 import HorizontalTableScrollbar from "./HorizontalTableScrollbar";
 import TablePagination from "./TablePagination";
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { CancelButton, ColumnSettingsButton, SaveButton } from "./ScopedActionButtons";
 import ColumnSortButton, { useMultiColumnSort } from "./ColumnSortButton";
 import { PageActionButton, PageHeader } from "./PageHeader";
@@ -31,13 +32,14 @@ import CreateableEmptyState from "./CreateableEmptyState";
 import ImportButton from "./ImportButton";
 import OcrSearchField from "./OcrSearchField";
 import { matchesTextSearch } from "../utils/textSearch";
-import { canEditMenu, parseSession } from "../lib/accessControl";
+import { canEditMenu, canViewMenu, parseSession } from "../lib/accessControl";
 import { AUTH_SESSION_KEY } from "../lib/currentUser";
 import { addAccountantToOrganizations, replaceAccountantInOrganizations, isAccountantAssigned, loadLinkedDirectoryUsers, organizationAccountantEntries, organizationAccountantNames } from "../lib/linkedSettingsData";
 import { canAccessAssignedOrganization, isMesoAccountant, setOrganizationSubstitution, loadOrganizationSubstitutions, hasOrganizationSubstitution, organizationAccessDate } from '../lib/linkedSettingsData';
 import { useOrganizationAccessRevision } from './useOrganizationAccessRevision';
+import { selectCompanySubstitutions } from '../lib/companySubstitutions';
 import { useAttentionNotifications } from '../hooks/useAttentionNotifications';
-import { getOrganizationRequiredActions } from '../lib/notifications';
+import { getOrganizationOpenTasks } from '../lib/notifications';
 import { createOrganization } from '../lib/organizationCreation';
 import OrganizationImportWizard from './OrganizationImportWizard';
 import { isSystemAdministratorRole } from '../lib/accessControl';
@@ -53,7 +55,7 @@ import { loadVatClassificationTemplateNames } from "./VatClassificationsView";
 import SearchableSelect from "./SearchableSelect";
 import ManageCompanyView from "./ManageCompanyView";
 
-const ROWS_PER_PAGE = 20;
+const ROWS_PER_PAGE = TABLE_BATCH_SIZE;
 
 const COUNTRY_CURRENCIES: Record<string, string> = {
   Lithuania: "EUR",
@@ -619,6 +621,42 @@ const DEFAULT_VISIBLE = new Set([
   "action_required",
 ]);
 
+const SUBSTITUTIONS_COLUMN: ColumnDef = { key: "substitutions", label: "Substitutions", width: 250 };
+
+const COMPANY_DEFAULT_COLUMN_KEYS = [
+  "company_status",
+  "assigned_accountant",
+  "name",
+  "company_code",
+  "vat_code",
+  "action_required",
+  "substitutions",
+];
+
+function entityColumnDefinitions(entityLabel: string, dataSource: string): ColumnDef[] {
+  return dataSource === "companies" && entityLabel === "company"
+    ? [...ALL_COLUMNS, SUBSTITUTIONS_COLUMN]
+    : ALL_COLUMNS;
+}
+
+function defaultEntityColumns(entityLabel: string, dataSource: string): ColConfig[] {
+  const isCompaniesList = dataSource === "companies" && entityLabel === "company";
+  const schemaColumns = entityColumnDefinitions(entityLabel, dataSource);
+  const visibleKeys = isCompaniesList ? new Set(COMPANY_DEFAULT_COLUMN_KEYS) : DEFAULT_VISIBLE;
+  const orderedColumns = isCompaniesList
+    ? [
+        ...COMPANY_DEFAULT_COLUMN_KEYS.map(key => schemaColumns.find(column => column.key === key)!),
+        ...schemaColumns.filter(column => !visibleKeys.has(column.key)),
+      ]
+    : schemaColumns;
+
+  return orderedColumns.map(column => ({
+    ...column,
+    label: entityColumnLabel(column.label, entityLabel),
+    visible: visibleKeys.has(column.key),
+  }));
+}
+
 const DEFAULT_FILTER_KEYS = [
   "company_status",
   "action_required",
@@ -654,6 +692,8 @@ function getCompanyCellText(key: string, row: Company): string {
       return row.company_status ?? "Active";
     case "assigned_accountant":
       return organizationAccountantNames(row);
+    case "substitutions":
+      return companySubstitutions(row).map(substitutionDescription).join('; ');
     case "company_type":
       return row.company_type ?? "UAB";
     case "service_scope":
@@ -663,15 +703,16 @@ function getCompanyCellText(key: string, row: Company): string {
   }
 }
 
-function activeSubstitutes(row: Company) {
-  const today = organizationAccessDate();
+function companySubstitutions(row: Company) {
   const users = loadLinkedDirectoryUsers('Internal users');
-  const untilByUser = new Map<string, string>();
-  for (const entry of loadOrganizationSubstitutions()) {
-    if (entry.organizationId !== row.id || entry.from > today || entry.to < today || !hasOrganizationSubstitution(row.id, entry.userId)) continue;
-    if ((untilByUser.get(entry.userId) || '') < entry.to) untilByUser.set(entry.userId, entry.to);
-  }
-  return [...untilByUser].map(([id, until]) => ({ id, label: users.find(user => user.id === id)?.fullName || users.find(user => user.id === id)?.username || 'Unnamed user', until }));
+  const eligibleUsers = users.filter((user, index) => users.findIndex(candidate => candidate.id === user.id) === index
+    && isMesoAccountant(user)
+    && (!user.status || ['enabled', 'active'].includes(user.status.toLowerCase())));
+  return selectCompanySubstitutions(row.id, loadOrganizationSubstitutions(), eligibleUsers, organizationAccessDate());
+}
+
+function substitutionDescription(entry: ReturnType<typeof companySubstitutions>[number]) {
+  return `${entry.label} · From ${entry.from} · To ${entry.to}`;
 }
 
 function renderDataCell(key: string, row: Company) {
@@ -700,19 +741,29 @@ function renderDataCell(key: string, row: Company) {
     case "action_required":
       return dotCell(row.action_required);
     case "assigned_accountant": {
-      const substitutes = activeSubstitutes(row);
-      const accountants = [...substitutes, ...organizationAccountantEntries(row).filter(entry => !substitutes.some(substitute => substitute.id === entry.id))];
-      const description = (entry: typeof accountants[number]) => `${entry.label}${'until' in entry ? ` · Substitute until ${entry.until}` : ''}`;
+      const accountants = organizationAccountantEntries(row);
       return accountants.length ? (
         <div className="flex min-w-0 items-center gap-1.5 font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A]">
-          <span title={description(accountants[0])} className="min-w-0 truncate">{accountants[0].label}{'until' in accountants[0] && <span className="block truncate text-[10px] leading-[14px] text-[#7288A3]">Substitute until {String(accountants[0].until)}</span>}</span>
+          <span title={accountants[0].label} className="min-w-0 truncate">{accountants[0].label}</span>
           {accountants.length > 1 && (
-            <span title={accountants.slice(1).map(description).join('\n')} aria-label={`${accountants.length - 1} additional assigned accountants`} className="flex-shrink-0 text-[#007EA7]">
+            <span title={accountants.slice(1).map(entry => entry.label).join('\n')} aria-label={`${accountants.length - 1} additional assigned accountants`} className="flex-shrink-0 text-[#007EA7]">
               +{accountants.length - 1}
             </span>
           )}
         </div>
       ) : text('Not assigned');
+    }
+    case "substitutions": {
+      const substitutions = companySubstitutions(row);
+      if (!substitutions.length) return text('—');
+      const first = substitutions[0];
+      return <div className="flex min-w-0 items-center gap-1.5 font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A]">
+        <span title={substitutionDescription(first)} className="min-w-0 truncate">
+          {first.label}
+          <span className="block truncate text-[10px] leading-[14px] text-[#7288A3]">From {first.from} · To {first.to}</span>
+        </span>
+        {substitutions.length > 1 && <span tabIndex={0} title={substitutions.slice(1).map(substitutionDescription).join('\n')} aria-label={substitutions.slice(1).map(substitutionDescription).join('; ')} className="flex-shrink-0 text-[#007EA7]">+{substitutions.length - 1}</span>}
+      </div>;
     }
     default: {
       const value = getCompanyCellText(key, row);
@@ -763,7 +814,6 @@ export default function Companies({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  const [viewAll, setViewAll] = useState(false);
   const [, setScrollRatio] = useState(0);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportFormat, setExportFormat] = useState("");
@@ -903,16 +953,15 @@ export default function Companies({
     null,
   );
   const [columns, setColumns] = useState<ColConfig[]>(
-    ALL_COLUMNS.map((c) => ({
-      key: c.key,
-      label: entityColumnLabel(c.label, entityLabel),
-      width: c.width,
-      visible: DEFAULT_VISIBLE.has(c.key),
-    })),
+    () => defaultEntityColumns(entityLabel, dataSource),
   );
   const visibleColumns = new Set(columns.filter(column => column.visible).map(column => column.key));
   const columnOrder = columns.map(column => column.key);
-  const { startResize } = useColumnResize(columns, setColumns, `${dataSource}:${entityLabel}`);
+  // Apply the revised Companies defaults once, then keep saving user customizations.
+  const columnLayoutScope = dataSource === "companies" && entityLabel === "company"
+    ? "companies:company:default-columns-v15-2"
+    : `${dataSource}:${entityLabel}`;
+  const { startResize } = useColumnResize(columns, setColumns, columnLayoutScope);
   const pageRootRef = useRef<HTMLDivElement>(null);
   const filterMenuRef = useRef<HTMLDivElement>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
@@ -956,7 +1005,7 @@ export default function Companies({
           visibleFilterKeys?: unknown;
           filterValues?: unknown;
         };
-        const availableKeys = new Set(ALL_COLUMNS.map((column) => column.key));
+        const availableKeys = new Set(entityColumnDefinitions(entityLabel, dataSource).map((column) => column.key));
         if (entityLabel === 'company') availableKeys.add('assignment_type');
         const restoredKeys = Array.isArray(parsed.visibleFilterKeys)
           ? parsed.visibleFilterKeys.filter(
@@ -1001,7 +1050,7 @@ export default function Companies({
       setFilterValues({});
     }
     setHydratedFilterKey(filterPersistenceKey);
-  }, [filterPersistenceKey, entityLabel]);
+  }, [filterPersistenceKey, entityLabel, dataSource]);
 
   useEffect(() => {
     if (hydratedFilterKey !== filterPersistenceKey) return;
@@ -1649,11 +1698,12 @@ export default function Companies({
 
   const actionSession = parseSession(window.localStorage.getItem(AUTH_SESSION_KEY));
   const assignmentUser = loadLinkedDirectoryUsers('Internal users').find(user => user.email?.toLowerCase() === actionSession?.email.toLowerCase());
-  const availableFilterColumns = entityLabel === 'company' ? [...ALL_COLUMNS, { key: 'assignment_type', label: 'Assignment type', width: 150 }] : ALL_COLUMNS;
-  const companiesWithActions = entityLabel === 'company' ? companies.map(company => ({ ...company, action_required: actionSession ? getOrganizationRequiredActions(attentionActions, company.id, actionSession).length : 0 })) : companies;
+  const baseColumns = entityColumnDefinitions(entityLabel, dataSource);
+  const availableFilterColumns = entityLabel === 'company' ? [...baseColumns, { key: 'assignment_type', label: 'Assignment type', width: 150 }] : baseColumns;
+  const companiesWithActions = entityLabel === 'company' ? companies.map(company => ({ ...company, action_required: actionSession && canViewMenu(actionSession, 'notifications') && canAccessAssignedOrganization(company, actionSession) ? getOrganizationOpenTasks(attentionActions, company.id, actionSession).length : 0 })) : companies;
   const filterOptions =
       Object.fromEntries(
-        ALL_COLUMNS.map((column) => [
+        baseColumns.map((column) => [
           column.key,
           Array.from(
             new Set(
@@ -1677,7 +1727,7 @@ export default function Companies({
         if (entityLabel === 'company' && !explicitStatusFilter && company.company_status === 'Archived') return false;
         if (
           !matchesTextSearch(
-            ALL_COLUMNS.map((column) =>
+            baseColumns.map((column) =>
               getCompanyCellText(column.key, company),
             ),
             query,
@@ -1703,9 +1753,10 @@ export default function Companies({
   );
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / ROWS_PER_PAGE));
-  const rows = viewAll
-    ? sorted
-    : sorted.slice((page - 1) * ROWS_PER_PAGE, page * ROWS_PER_PAGE);
+  const safePage = Math.min(page, totalPages);
+  const rows = sorted.slice(0, safePage * ROWS_PER_PAGE);
+
+  useEffect(() => setPage(1), [dataSource, entityLabel, query, visibleFilterKeys, filterValues]);
 
   const isSpinning = refreshing || loading;
   const colMap = new Map(columns.map((c) => [c.key, c]));
@@ -2247,7 +2298,7 @@ export default function Companies({
         </div>
 
         {/* Table */}
-        <div className="flex min-h-0 flex-1 flex-col gap-12">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-12">
           <div
             className={`scrollbar-hide ${dataSource === "counterparties" ? "min-h-0 flex-1 overflow-auto" : "overflow-x-auto"}`}
             ref={tableScrollRef}
@@ -2368,7 +2419,7 @@ export default function Companies({
                       key={row.id}
                       className={`group flex h-9 w-full flex-row items-center rounded-lg transition-colors hover:bg-[#E7F4F9] ${i % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"}`}
                     >
-                      <div className="flex flex-row items-center px-2 py-[9px] gap-3 flex-1 h-9 min-w-0">
+                      <div className="flex h-9 min-w-0 flex-shrink-0 flex-row items-center gap-3 px-2 py-[9px]">
                         {entityLabel === "company" && (
                           <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center">
                             <input
@@ -2402,7 +2453,7 @@ export default function Companies({
                       </div>
 
                       <div
-                        className={`${entityLabel === "company" ? "sticky right-0 z-10" : ""} flex h-9 flex-shrink-0 flex-row items-center justify-end gap-1 p-1 transition-colors ${i % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} group-hover:bg-[#E7F4F9]`}
+                        className={`system-table-row-actions flex h-9 flex-shrink-0 flex-row items-center justify-end gap-1 p-1 transition-colors ${i % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} group-hover:bg-[#E7F4F9]`}
                         style={{ width: actionColumnWidth }}
                       >
                         <button
@@ -2475,19 +2526,12 @@ export default function Companies({
           {/* Footer */}
           <div className="flex flex-row flex-wrap justify-between items-center gap-4 flex-shrink-0">
             <TablePagination
-              currentPage={viewAll ? 1 : page}
-              totalPages={viewAll ? 1 : totalPages}
+              scrollRef={tableScrollRef}
+              currentPage={safePage}
+              totalPages={totalPages}
               itemCount={sorted.length}
-              itemsPerPage={
-                viewAll ? Math.max(1, sorted.length) : ROWS_PER_PAGE
-              }
-              onPageChange={viewAll ? () => undefined : setPage}
-              onShowMore={() => {
-                setViewAll((current) => !current);
-                setPage(1);
-              }}
-              showMoreLabel={viewAll ? "Default" : "Show more"}
-              allItemsVisible={viewAll}
+              itemsPerPage={ROWS_PER_PAGE}
+              onPageChange={setPage}
             />
           </div>
         </div>
@@ -2503,11 +2547,7 @@ export default function Companies({
               ...column,
               visible: visibleColumns.has(column.key),
             }))}
-          defaultColumns={ALL_COLUMNS.map((column) => ({
-            ...column,
-            label: entityColumnLabel(column.label, entityLabel),
-            visible: DEFAULT_VISIBLE.has(column.key),
-          }))}
+          defaultColumns={defaultEntityColumns(entityLabel, dataSource)}
           onSave={saveColSettings}
           onClose={() => setColSettingsOpen(false)}
         />

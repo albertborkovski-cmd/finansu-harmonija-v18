@@ -5,6 +5,8 @@ export interface SystemFilterColumn {
   key: string;
   label: string;
   options: string[];
+  /** Optional display labels let filters retain stable record IDs as their values. */
+  optionLabels?: Record<string, string>;
 }
 
 export default function SystemAddFilters({
@@ -175,7 +177,7 @@ export default function SystemAddFilters({
                   {column.label}
                   {selectedValues.length > 0 && (
                     <span className="text-[#10233A]">
-                      : {selectedValues.join(", ")}
+                      : {selectedValues.map(value => column.optionLabels?.[value] ?? value).join(", ")}
                     </span>
                   )}
                 </span>
@@ -213,7 +215,7 @@ export default function SystemAddFilters({
                     </span>
                   </button>
                   <div className="max-h-60 overflow-y-auto">
-                    {column.options.filter((option) => option.toLocaleLowerCase().includes(optionQuery.trim().toLocaleLowerCase())).map((option) => {
+                    {column.options.filter((option) => (column.optionLabels?.[option] ?? option).toLocaleLowerCase().includes(optionQuery.trim().toLocaleLowerCase())).map((option) => {
                       const checked = selectedValues.includes(option);
                       return (
                         <button
@@ -232,7 +234,7 @@ export default function SystemAddFilters({
                         >
                           <FilterCheck checked={checked} />
                           <span className="font-montserrat text-[13px] font-medium text-[#10233A]">
-                            {option}
+                            {column.optionLabels?.[option] ?? option}
                           </span>
                         </button>
                       );

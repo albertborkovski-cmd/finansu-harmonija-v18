@@ -8,6 +8,7 @@ import {
 import ColumnSettingsPanel, { type ColConfig } from "./ColumnSettingsPanel";
 import { PageActionButton, PageHeader } from "./PageHeader";
 import TablePagination from "./TablePagination";
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import OcrSearchField from "./OcrSearchField";
 import { BulkDeleteButton, RowDeleteButton } from "./DeleteButtons";
 import { ColumnSettingsButton } from "./ScopedActionButtons";
@@ -72,7 +73,7 @@ function ConfigParamsTab() {
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
-  const totalPages = 10;
+  const tableScrollRef = useRef<HTMLDivElement>(null);
   const [showColumnSettings, setShowColumnSettings] = useState(false);
   const [columns, setColumns] = usePersistentState<ColConfig[]>(
     "finansu-harmonija:v7:ocr-configuration-columns",
@@ -87,6 +88,7 @@ function ConfigParamsTab() {
     {},
   );
   const { startResize } = useColumnResize(columns, setColumns);
+  useEffect(() => setPage(1), [search, activeFilterKeys, filterValues]);
   const visibleColumns = columns.filter((column) => column.visible);
 
   const searched = search
@@ -195,7 +197,7 @@ function ConfigParamsTab() {
       </div>
 
       {/* Table */}
-      <div className="flex flex-col gap-4">
+      <div ref={tableScrollRef} className="flex flex-col gap-4 overflow-x-auto">
         {/* Header */}
         <div className="flex flex-row items-center h-5 pl-3 gap-3">
           {visibleColumns.map((column) => {
@@ -235,7 +237,7 @@ function ConfigParamsTab() {
 
         {/* Rows */}
         <div className="flex flex-col">
-          {sortedRows.map((row, i) => (
+          {sortedRows.slice(0, page * TABLE_BATCH_SIZE).map((row, i) => (
             <div
               key={row.id}
               className={`group flex flex-row items-center w-full h-9 rounded-lg transition-colors ${i % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} hover:bg-[#E7F4F9]`}
@@ -287,9 +289,10 @@ function ConfigParamsTab() {
         {/* Pagination */}
         <TablePagination
           currentPage={page}
-          totalPages={totalPages}
+          totalPages={Math.max(1, Math.ceil(filtered.length / TABLE_BATCH_SIZE))}
           itemCount={filtered.length}
           onPageChange={setPage}
+          scrollRef={tableScrollRef}
         />
       </div>
       {showColumnSettings && (

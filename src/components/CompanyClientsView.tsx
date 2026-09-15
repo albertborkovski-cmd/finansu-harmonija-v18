@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Download, FileSpreadsheet, Trash2, X } from "lucide-react";
 import type { Company } from "../lib/supabase";
 import { usePersistentState } from "../hooks/usePersistentState";
@@ -9,18 +9,12 @@ import { ColumnSettingsButton, CancelButton, SaveButton } from "./ScopedActionBu
 import RefreshAllButton from "./RefreshAllButton";
 import HorizontalTableScrollbar from "./HorizontalTableScrollbar";
 import TablePagination from "./TablePagination";
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import ColumnSortButton, { useMultiColumnSort } from "./ColumnSortButton";
 import { ResizeHandle, useColumnResize } from "./useColumnResize";
+import RelatedObjectPreview from "./RelatedObjectPreview";
 
-type ClientRow = {
-  id: string;
-  registrationNumber: string;
-  companyCode: string;
-  vatCode: string;
-  name: string;
-  email: string;
-};
-
+import { seedClients, type ClientRow } from '../lib/companyRelatedObjectData';
 type ClientColumnKey =
   | "registrationNumber"
   | "companyCode"
@@ -48,30 +42,6 @@ const EMPTY_CLIENT: Omit<ClientRow, "id"> = {
   name: "",
   email: "",
 };
-
-function seedClients(company: Company): ClientRow[] {
-  if (company.name.toLocaleLowerCase() === "alice stone") {
-    return [
-      {
-        id: "alice-client-001",
-        registrationNumber: "305499987",
-        companyCode: "305499987",
-        vatCode: "—",
-        name: "Nord 1, UAB",
-        email: "—",
-      },
-      {
-        id: "alice-client-002",
-        registrationNumber: "305499987",
-        companyCode: "305499987",
-        vatCode: "—",
-        name: "Nord 1, UAB",
-        email: "—",
-      },
-    ];
-  }
-  return [];
-}
 
 function makeId() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -125,7 +95,28 @@ function parseCsv(text: string): ClientRow[] {
   }).filter((row) => row.name || row.companyCode || row.registrationNumber);
 }
 
-export default function CompanyClientsView({ company }: { company: Company }) {
+export default function CompanyClientsView({ company, initialRecordId, onRelatedObjectBack }: { company: Company; initialRecordId?: string; onRelatedObjectBack?: () => void }) {
+  const [relatedObjectClosed, setRelatedObjectClosed] = useState(false);
+  const [linkedClient] = useState(() => {
+    if (!initialRecordId) return null;
+    try {
+      const raw = window.localStorage.getItem(`finansu-harmonija:v12:company-clients:${company.id}`);
+      const records: unknown = raw === null ? seedClients(company) : JSON.parse(raw);
+      return Array.isArray(records) ? records.find((client: ClientRow) => client?.id === initialRecordId) as ClientRow | undefined : null;
+    } catch { return null; }
+  });
+
+  // Opening a read-only link must not mount the editor's persistence hook or
+  // populate the company's storage with fallback sample records.
+  if (initialRecordId && !relatedObjectClosed) {
+    return <RelatedObjectPreview companyName={company.name} section="Company/Client information / Clients" title={linkedClient ? `Counterparty · ${linkedClient.name}` : 'Counterparty'}
+      fields={linkedClient ? DEFAULT_COLUMNS.map(column => ({ label: column.label, value: linkedClient[column.key as ClientColumnKey] })) : []}
+      unavailable={!linkedClient} onBack={onRelatedObjectBack ?? (() => setRelatedObjectClosed(true))} />;
+  }
+  return <CompanyClientsTable company={company} />;
+}
+
+function CompanyClientsTable({ company }: { company: Company }) {
   const [clients, setClients] = usePersistentState<ClientRow[]>(
     `finansu-harmonija:v12:company-clients:${company.id}`,
     () => seedClients(company),
@@ -143,7 +134,7 @@ export default function CompanyClientsView({ company }: { company: Company }) {
   const [draft, setDraft] = useState(EMPTY_CLIENT);
   const [deleteClient, setDeleteClient] = useState<ClientRow | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(20);
+  const itemsPerPage = TABLE_BATCH_SIZE;
   const [refreshing, setRefreshing] = useState(false);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -187,9 +178,11 @@ export default function CompanyClientsView({ company }: { company: Company }) {
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / itemsPerPage));
   const safePage = Math.min(currentPage, totalPages);
   const pageRows = sortedRows.slice(
-    (safePage - 1) * itemsPerPage,
+    0,
     safePage * itemsPerPage,
   );
+
+  useEffect(() => setCurrentPage(1), [company.id, filterKeys, filterValues, query]);
 
   const startCreate = () => {
     setEditingId(null);
@@ -368,7 +361,7 @@ export default function CompanyClientsView({ company }: { company: Company }) {
                     <span className="truncate">{client[column.key as ClientColumnKey]}</span>
                   </div>
                 ))}
-                <div className="flex w-[100px] flex-shrink-0 items-center justify-end gap-1 px-2">
+                <div className="system-table-row-actions flex w-[100px] flex-shrink-0 items-center justify-end gap-1 px-2">
                   <button
                     type="button"
                     onClick={() => startEdit(client)}
@@ -408,19 +401,12 @@ export default function CompanyClientsView({ company }: { company: Company }) {
 
       <HorizontalTableScrollbar scrollRef={tableScrollRef} />
       <TablePagination
+        scrollRef={tableScrollRef}
         currentPage={safePage}
         totalPages={totalPages}
         itemCount={sortedRows.length}
         itemsPerPage={itemsPerPage}
         onPageChange={setCurrentPage}
-        onShowMore={() => {
-          setItemsPerPage((current) =>
-            current === 4 ? Math.max(4, sortedRows.length) : 4,
-          );
-          setCurrentPage(1);
-        }}
-        showMoreLabel={itemsPerPage === 4 ? "Show more" : "Default"}
-        allItemsVisible={itemsPerPage !== 4}
       />
 
       {showColumns && (

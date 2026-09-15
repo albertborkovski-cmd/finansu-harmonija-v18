@@ -1,5 +1,7 @@
 import {
   useEffect,
+  useLayoutEffect,
+  useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -52,11 +54,15 @@ import {
   canEditMenu,
   canViewMenu,
   moduleForMenu,
+  parseSession,
   type AppSession,
 } from "../lib/accessControl";
 import { userProfileStorageKey } from "../lib/currentUser";
 import { useAttentionNotifications } from "../hooks/useAttentionNotifications";
-import { getRelevantActions, requiresAction, type NotificationTab } from "../lib/notifications";
+import { useVisibleNotificationRecords } from '../hooks/useVisibleNotificationRecords';
+import { getDashboardAttentionNotifications } from '../lib/notificationAttention';
+import { type NotificationTab, type RelatedObject } from "../lib/notifications";
+import { resolveRelatedObject, loadRelatedObjectChats } from '../lib/relatedObjects';
 
 interface DashboardProps {
   onLogout: () => void;
@@ -122,8 +128,10 @@ function ReadOnlyBoundary({
 export default function Dashboard({ onLogout, session }: DashboardProps) {
   const organizationAccessRevision = useOrganizationAccessRevision();
   const notificationRecords = useAttentionNotifications(true);
-  const attentionNotifications = getRelevantActions(notificationRecords, session).filter(requiresAction);
-  const [notificationTarget, setNotificationTarget] = useState<{ tab: NotificationTab; query: string; organization?: { id: string; name: string } }>({ tab: "notifications", query: "" });
+  const visibleNotifications = useVisibleNotificationRecords(notificationRecords, session);
+  const attentionNotifications = visibleNotifications.session
+    ? getDashboardAttentionNotifications(visibleNotifications.records, visibleNotifications.session) : [];
+  const [notificationTarget, setNotificationTarget] = useState<{ tab: NotificationTab; query: string; organization?: { id: string; name: string }; requiresAction?: boolean; openTasksOnly?: boolean; returnCompany?: { company: Company; menu: string } }>({ tab: "notifications", query: "" });
   const [isMenuExpanded, setIsMenuExpanded] = useState(true);
   const [activeMenu, setActiveMenu] = useState(() => firstAccessibleMenu(session));
   const [uploadedDocumentsGroup, setUploadedDocumentsGroup] =
@@ -148,6 +156,11 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
   const [selectedCompanyMenu, setSelectedCompanyMenu] = useState("overview");
   const [selectedCompanyDocumentId, setSelectedCompanyDocumentId] = useState<string | null>(null);
   const [selectedCompanyDocumentMode, setSelectedCompanyDocumentMode] = useState<'view' | 'edit' | 'original-view'>('view');
+  const [selectedCompanyRelatedObject, setSelectedCompanyRelatedObject] = useState<RelatedObject | undefined>();
+  const [relatedChat, setRelatedChat] = useState<InvoiceChatContext | null>(null);
+  const displayedMenu = relatedChat ? 'messages' : activeMenu;
+  const mainContentRef = useRef<HTMLDivElement>(null);
+  const relatedChatReturnScroll = useRef<number | null>(null);
   const [selectedChat, setSelectedChat] = useState<InvoiceChatContext | null>(null);
   const [automationProcessFromNode, setAutomationProcessFromNode] =
     useState<OcrProcess | null>(null);
@@ -162,6 +175,14 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
   const [userDirectoryCreateRequest, setUserDirectoryCreateRequest] = useState<
     "Internal users" | "External users" | null
   >(null);
+
+  useLayoutEffect(() => {
+    if (relatedChatReturnScroll.current === null) return;
+    if (mainContentRef.current) {
+      mainContentRef.current.scrollTop = relatedChat ? 0 : relatedChatReturnScroll.current;
+    }
+    if (!relatedChat) relatedChatReturnScroll.current = null;
+  }, [relatedChat]);
 
   useEffect(() => {
     const showRefreshFeedback = (event: MouseEvent) => {
@@ -323,6 +344,8 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
   const handleMenuClick = (menu: string) => {
     if (menu === "notifications") setNotificationTarget({ tab: "notifications", query: "" });
     if (menu !== "profile" && !canViewMenu(session, menu)) return;
+    relatedChatReturnScroll.current = null;
+    setRelatedChat(null);
     const targetMenu =
       menu === "ocr"
         ? [
@@ -354,10 +377,40 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
   };
 
   const openCompany = (company: Company, menu = "overview", documentId: string | null = null, mode: 'view' | 'edit' | 'original-view' = 'view') => {
+    setSelectedCompanyRelatedObject(undefined);
     setSelectedCompanyDocumentMode(mode);
     setSelectedCompanyMenu(menu);
     setSelectedCompanyDocumentId(documentId);
     setSelectedCompany(company);
+  };
+
+  const openRelatedObject = async (object: RelatedObject) => {
+    let currentSession = parseSession(JSON.stringify(session));
+    if (!currentSession) throw new Error('Your session is no longer valid.');
+    const { data, error } = await supabase.from('companies').select('*');
+    const company = !error && (data as unknown as Company[] | null)?.find(candidate => candidate.id === object.organizationId);
+    if (!company || !canAccessAssignedOrganization(company, currentSession)) throw new Error('This organization is no longer accessible.');
+    const resolved = await resolveRelatedObject(object, company, currentSession);
+    if (!resolved) throw new Error('The related object was removed or is no longer accessible.');
+    currentSession = parseSession(JSON.stringify(session));
+    if (!currentSession?.access.companies.view || !canAccessAssignedOrganization(company, currentSession)) throw new Error('This organization is no longer accessible.');
+    if (resolved.type === 'Chat') {
+      const { data: documents, error: documentError } = await supabase.from('documents').select('*').eq('company_id', company.id);
+      if (documentError) throw new Error('This chat is no longer available.');
+      currentSession = parseSession(JSON.stringify(session));
+      if (!currentSession || !canViewMenu(currentSession, 'messages') || !canAccessAssignedOrganization(company, currentSession)) throw new Error('This chat is no longer accessible.');
+      const conversation = loadRelatedObjectChats(company, currentSession, (documents ?? []) as unknown as DbDocument[]).find(chat => chat.storageKey === resolved.recordId);
+      if (!conversation) throw new Error('This chat is no longer available.');
+      relatedChatReturnScroll.current = mainContentRef.current?.scrollTop ?? 0;
+      setRelatedChat({ ...conversation, organizationId: company.id, companyName: company.name });
+      return;
+    }
+    if (resolved.type === 'Document' || resolved.type === 'Invoice') {
+      openCompany(company, 'documents', resolved.recordId ?? resolved.id, 'view');
+      return;
+    }
+    openCompany(company);
+    setSelectedCompanyRelatedObject(resolved);
   };
 
   const openDocumentInOrganization = async (document: DbDocument, mode: 'view' | 'edit' | 'original-view' = 'view') => {
@@ -459,15 +512,27 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
   const companyContent = selectedCompany && canAccessAssignedOrganization(selectedCompany, session) ? (
       <ReadOnlyBoundary readOnly={!session.access.companies.edit}>
         <CompanyDetail
+          key={`${selectedCompany.id}:${selectedCompanyRelatedObject?.id ?? selectedCompanyDocumentId ?? selectedCompanyMenu}`}
           company={selectedCompany}
           initialMenu={selectedCompanyMenu}
           initialDocumentId={selectedCompanyDocumentId}
           initialDocumentMode={selectedCompanyDocumentMode}
+          initialRelatedObject={selectedCompanyRelatedObject}
+          onOpenNotifications={canViewMenu(session, 'notifications') ? (menu) => {
+            relatedChatReturnScroll.current = null;
+            setRelatedChat(null);
+            setNotificationTarget({ tab: 'notifications', query: '', organization: { id: selectedCompany.id, name: selectedCompany.name }, returnCompany: { company: selectedCompany, menu } });
+            setSelectedCompany(null);
+            setActiveMenu('notifications');
+          } : undefined}
           onLogout={onLogout}
           onOpenProfile={() => {
+            relatedChatReturnScroll.current = null;
+            setRelatedChat(null);
             setSelectedCompany(null);
             setSelectedCompanyMenu("overview");
             setSelectedCompanyDocumentId(null);
+            setSelectedCompanyRelatedObject(undefined);
             setSelectedChat(null);
             setAutomationProcessFromNode(null);
             setAutomationRunIdFromNode(null);
@@ -475,6 +540,8 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
             setActiveMenu("profile");
           }}
           onOpenChat={(context) => {
+            relatedChatReturnScroll.current = null;
+            setRelatedChat(null);
             setSelectedChat({ ...context, organizationId: selectedCompany.id });
             setSelectedCompany(null);
             setSelectedCompanyMenu("overview");
@@ -485,6 +552,7 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
             setSelectedCompany(null);
             setSelectedCompanyMenu("overview");
             setSelectedCompanyDocumentId(null);
+            setSelectedCompanyRelatedObject(undefined);
           }}
         />
       </ReadOnlyBoundary>
@@ -538,7 +606,8 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
         setUserDirectoryCreateRequest(audience);
         handleMenuClick(audience === 'Internal users' ? 'settings-internal-users' : 'settings-external-users');
       }} onViewCompany={(company) => openCompany(company)} onOpenRequiredActions={company => {
-        setNotificationTarget({ tab: 'notifications', query: '', organization: { id: company.id, name: company.name } });
+        if (!canViewMenu(session, 'notifications') || !visibleNotifications.canAccessOrganization(company.id)) return;
+        setNotificationTarget({ tab: 'reminders', query: '', organization: { id: company.id, name: company.name }, openTasksOnly: true });
         setActiveMenu('notifications');
       }} />;
     if (activeMenu === 'audit-history') return <CompanyActionHistoryView company={{ id: 'all', name: 'All organizations', company_code: '', vat_code: '', client_since: 0, action_required: 0 }} global />;
@@ -548,8 +617,8 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
           clientName="All companies"
           allCompanies
           attentionNotifications={canViewMenu(session, "notifications") ? attentionNotifications : undefined}
-          onOpenNotifications={canViewMenu(session, "notifications") ? (tab = "notifications", query = "") => {
-            setNotificationTarget({ tab, query });
+          onOpenNotifications={canViewMenu(session, "notifications") ? (tab = "reminders", query = "") => {
+            setNotificationTarget({ tab, query, openTasksOnly: tab === 'reminders' && !query });
             setActiveMenu("notifications");
           } : undefined}
           roleNames={session.roleNames}
@@ -570,7 +639,10 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
       );
     if (activeMenu === "messages")
       return <ChatsView currentUserName={currentUserName} conversation={selectedChat} onOpenDocument={openDocumentInOrganization} />;
-    if (activeMenu === "notifications") return <OrganizationRequiredActionsView key={`${notificationTarget.organization?.id ?? 'all'}:${notificationTarget.query}`} organization={notificationTarget.organization} session={session} initialQuery={notificationTarget.query} onBack={notificationTarget.organization ? () => setActiveMenu('dashboard') : undefined} />;
+    if (activeMenu === "notifications") return <OrganizationRequiredActionsView key={`${notificationTarget.organization?.id ?? 'all'}:${notificationTarget.tab}:${notificationTarget.query}:${Boolean(notificationTarget.requiresAction)}:${Boolean(notificationTarget.openTasksOnly)}`} organization={notificationTarget.organization} session={session} initialTab={notificationTarget.tab} initialQuery={notificationTarget.query} initialRequiresAction={notificationTarget.requiresAction} initialOpenTasksOnly={notificationTarget.openTasksOnly} onOpenRelatedObject={openRelatedObject} onBack={notificationTarget.organization ? () => {
+      setActiveMenu('dashboard');
+      if (notificationTarget.returnCompany) openCompany(notificationTarget.returnCompany.company, notificationTarget.returnCompany.menu);
+    } : undefined} />;
     if (activeMenu === "info") return <HelpFaqView />;
     const settingsSections = {
       "settings-internal-roles": {
@@ -735,7 +807,7 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
           notificationCount={attentionNotifications.length}
           isExpanded={isMenuExpanded}
           onToggle={() => setIsMenuExpanded(!isMenuExpanded)}
-          activeMenu={activeMenu}
+          activeMenu={displayedMenu}
           onMenuClick={handleMenuClick}
           clientName={currentUserName}
           onLogout={onLogout}
@@ -756,17 +828,21 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
         />
       </div>
       <div
+        ref={mainContentRef}
         data-app-main
-        data-active-menu={activeMenu}
+        data-active-menu={displayedMenu}
         className="relative min-w-0 flex-1 overflow-x-hidden overflow-y-auto"
       >
-        <OcrContextFilters contextKey={activeMenu} />
+        <OcrContextFilters contextKey={displayedMenu} />
         <ReadOnlyBoundary
           readOnly={
-            Boolean(moduleForMenu(activeMenu)) && !canEditMenu(session, activeMenu)
+            Boolean(moduleForMenu(displayedMenu)) && !canEditMenu(session, displayedMenu)
           }
         >
-          {renderContent()}
+          <div style={{ display: relatedChat ? 'none' : undefined }}>
+            {renderContent()}
+          </div>
+          {relatedChat && <ChatsView key={relatedChat.storageKey} preserveConversationMetadata currentUserName={currentUserName} conversation={relatedChat} onOpenDocument={openDocumentInOrganization} onBack={() => setRelatedChat(null)} />}
         </ReadOnlyBoundary>
       </div>
     </div>

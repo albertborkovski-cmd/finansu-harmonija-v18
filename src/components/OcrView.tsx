@@ -5,6 +5,7 @@ import { PageActionButton, PageHeader } from './PageHeader';
 import OcrBreadcrumb from './OcrBreadcrumb';
 import HorizontalTableScrollbar from './HorizontalTableScrollbar';
 import TablePagination from './TablePagination';
+import { TABLE_BATCH_SIZE } from '../lib/tablePaging';
 import OcrSearchField from './OcrSearchField';
 import { ColumnSettingsButton } from './ScopedActionButtons';
 import { useColumnResize, ResizeHandle } from './useColumnResize';
@@ -44,7 +45,7 @@ const INITIAL_COLUMNS: ColConfig[] = [
   { key: 'modifiedDate', label: 'Last update', width: 150, visible: false },
 ];
 
-const ROWS_PER_PAGE = 20;
+const ROWS_PER_PAGE = TABLE_BATCH_SIZE;
 const PROCESS_STORAGE_KEY = 'finansu-harmonija-v4:automation-processes';
 
 function Checkbox({ checked, onChange, label = 'Select record' }: { checked: boolean; onChange: () => void; label?: string }) {
@@ -79,7 +80,6 @@ function getCellValue(row: OcrProcess, key: string): string {
 export default function OcrView({ onNavigateToAdministration }: { onNavigateToAdministration?: (target: SecurityAccessTarget) => void }) {
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
-  const [viewAll, setViewAll] = useState(false);
   const [, setScrollRatio] = useState(0);
   const [showColumnSettings, setShowColumnSettings] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -107,7 +107,7 @@ export default function OcrView({ onNavigateToAdministration }: { onNavigateToAd
 
   const visibleColumns = columns.filter(c => c.visible);
   const totalPages = Math.max(1, Math.ceil(filteredProcesses.length / ROWS_PER_PAGE));
-  const rows = viewAll ? sortedRows : sortedRows.slice((page - 1) * ROWS_PER_PAGE, page * ROWS_PER_PAGE);
+  const rows = sortedRows.slice(0, page * ROWS_PER_PAGE);
 
   useEffect(() => {
     window.localStorage.setItem(PROCESS_STORAGE_KEY, JSON.stringify(processes));
@@ -158,7 +158,6 @@ export default function OcrView({ onNavigateToAdministration }: { onNavigateToAd
             modifiedDate: now,
           }, ...current]);
           setPage(1);
-          setViewAll(false);
           setShowDetail(false);
         }}
       />
@@ -248,7 +247,7 @@ export default function OcrView({ onNavigateToAdministration }: { onNavigateToAd
                       )}
                     </div>
 
-                    <div className="flex flex-row items-center px-[10px] py-[9px] gap-0 flex-1 h-9 min-w-0">
+                    <div className="flex flex-none flex-row items-center px-[10px] py-[9px] gap-0 h-9">
                       {visibleColumns.slice(1).map(col => col.key === 'name' ? (
                         <button
                           key={col.key}
@@ -267,7 +266,7 @@ export default function OcrView({ onNavigateToAdministration }: { onNavigateToAd
                       ))}
                     </div>
 
-                    <div className="flex flex-row items-center p-1 gap-1 flex-shrink-0 h-9">
+                    <div className="system-table-row-actions flex w-[68px] flex-row items-center p-1 gap-1 flex-shrink-0 h-9">
                       <button
                         type="button"
                         title="SECURITY ACCESS"
@@ -302,14 +301,12 @@ export default function OcrView({ onNavigateToAdministration }: { onNavigateToAd
           {/* Footer */}
           <div className="flex flex-row flex-wrap justify-between items-center gap-4 flex-shrink-0">
             <TablePagination
-              currentPage={viewAll ? 1 : page}
-              totalPages={viewAll ? 1 : totalPages}
+              currentPage={page}
+              totalPages={totalPages}
               itemCount={filteredProcesses.length}
-              itemsPerPage={viewAll ? Math.max(1, filteredProcesses.length) : ROWS_PER_PAGE}
-              onPageChange={viewAll ? () => undefined : setPage}
-              onShowMore={() => { setViewAll(v => !v); setPage(1); }}
-              showMoreLabel={viewAll ? 'Default' : 'Show more'}
-              allItemsVisible={viewAll}
+              itemsPerPage={ROWS_PER_PAGE}
+              onPageChange={setPage}
+              scrollRef={tableScrollRef}
             />
           </div>
         </div>

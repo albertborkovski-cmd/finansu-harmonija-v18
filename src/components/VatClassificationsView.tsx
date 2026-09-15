@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from "react";
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   FileText,
@@ -809,6 +810,10 @@ export default function VatClassificationsView() {
   const templateTableScrollRef = useRef<HTMLDivElement>(null);
   const classificationTableScrollRef = useRef<HTMLDivElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    setFixedPage0(1);
+    setFixedPage1(1);
+  }, [search, templateFilterKeys, templateFilterValues, classificationFilterKeys, classificationFilterValues, selectedTemplateId]);
   const { startResize: startTemplateResize } = useColumnResize(
     templateColumns,
     setTemplateColumns,
@@ -1156,7 +1161,7 @@ export default function VatClassificationsView() {
               <div className="w-[80px] flex-shrink-0" />
             </div>
             <div className="flex flex-col gap-0.5">
-              {visibleTemplates.slice((Math.min(fixedPage0, Math.max(1, Math.ceil(visibleTemplates.length / 20))) - 1) * 20, Math.min(fixedPage0, Math.max(1, Math.ceil(visibleTemplates.length / 20))) * 20).map((template, rowIndex) => (
+              {visibleTemplates.slice(0, fixedPage0 * TABLE_BATCH_SIZE).map((template, rowIndex) => (
                 <div
                   key={template.id}
                   role="button"
@@ -1255,13 +1260,12 @@ export default function VatClassificationsView() {
 
         <HorizontalTableScrollbar scrollRef={templateTableScrollRef} />
         <div>
-          <TablePagination
+          <TablePagination scrollRef={templateTableScrollRef}
             currentPage={fixedPage0}
-            totalPages={Math.max(1, Math.ceil(visibleTemplates.length / 20))}
+            totalPages={Math.max(1, Math.ceil(visibleTemplates.length / TABLE_BATCH_SIZE))}
             itemCount={visibleTemplates.length}
-            itemsPerPage={20}
+            itemsPerPage={TABLE_BATCH_SIZE}
             onPageChange={setFixedPage0}
-            onShowMore={() => undefined}
           />
         </div>
 
@@ -1423,7 +1427,7 @@ export default function VatClassificationsView() {
           </div>
 
           <div className="flex flex-col gap-0.5">
-            {visibleRows.slice((Math.min(fixedPage1, Math.max(1, Math.ceil(visibleRows.length / 20))) - 1) * 20, Math.min(fixedPage1, Math.max(1, Math.ceil(visibleRows.length / 20))) * 20).map((row, rowIndex) => (
+            {visibleRows.slice(0, fixedPage1 * TABLE_BATCH_SIZE).map((row, rowIndex) => (
               <div
                 key={row.id}
                 className={`group flex h-10 items-center rounded-lg font-montserrat text-[12px] text-[#10233A] transition-colors ${rowIndex % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} hover:bg-[#E7F4F9]`}
@@ -1522,13 +1526,12 @@ export default function VatClassificationsView() {
 
       <HorizontalTableScrollbar scrollRef={classificationTableScrollRef} />
       <div>
-        <TablePagination
+        <TablePagination scrollRef={classificationTableScrollRef}
           currentPage={fixedPage1}
-          totalPages={Math.max(1, Math.ceil(visibleRows.length / 20))}
+          totalPages={Math.max(1, Math.ceil(visibleRows.length / TABLE_BATCH_SIZE))}
           itemCount={visibleRows.length}
-          itemsPerPage={20}
+          itemsPerPage={TABLE_BATCH_SIZE}
           onPageChange={setFixedPage1}
-          onShowMore={() => undefined}
         />
       </div>
 

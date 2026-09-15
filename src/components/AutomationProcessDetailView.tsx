@@ -1,3 +1,4 @@
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { useState, useRef, useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, RefreshCw, Trash2, ChevronDown, ChevronLeft, ChevronRight, X, Download, Search, Map, AlignLeft, ArrowRight, Copy, Maximize2, Minimize2, Plus, FolderPlus, CheckCircle2, Clock3, ZoomOut, MoreVertical } from 'lucide-react';
@@ -691,7 +692,7 @@ export function RunsTab({ startSignal, refreshSignal = 0, bulkDeleteSignal, runs
   });
   const allSelected = filteredRuns.length > 0 && filteredRuns.every(run => selectedIds.has(getRunKey(run)));
   const visibleColumns = columns.filter(column => column.visible);
-  const gridTemplateColumns = `42px ${visibleColumns.map(column => `${column.width}px`).join(' ')} minmax(100px, 1fr)`;
+  const gridTemplateColumns = `42px ${visibleColumns.map(column => `${column.width}px`).join(' ')} 100px`;
   const tableMinWidth = visibleColumns.reduce((sum, column) => sum + column.width, 0) + 142;
 
   function toggleAll() {
@@ -752,10 +753,10 @@ export function RunsTab({ startSignal, refreshSignal = 0, bulkDeleteSignal, runs
                 </div>
               );
             })}
-            <span aria-hidden="true" className="sticky right-0 z-10 h-6 bg-white" />
+            <span aria-hidden="true" className="h-6 bg-white" />
           </div>
           <div className="flex flex-col">
-            {sortedRuns.slice((Math.min(page, Math.max(1, Math.ceil(sortedRuns.length / 20))) - 1) * 20, Math.min(page, Math.max(1, Math.ceil(sortedRuns.length / 20))) * 20).map((row, i) => {
+            {sortedRuns.slice(0, page * TABLE_BATCH_SIZE).map((row, i) => {
               const runKey = getRunKey(row);
               return (
               <div key={runKey} className={`system-table-row group grid h-10 w-full items-center rounded-lg ${i % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} hover:bg-[#E7F4F9] transition-colors`} style={{ gridTemplateColumns }}>
@@ -772,7 +773,7 @@ export function RunsTab({ startSignal, refreshSignal = 0, bulkDeleteSignal, runs
                     {column.key === 'creation_date' && <span className="truncate font-montserrat text-[12px] text-[#10233A]">{row.created}</span>}
                   </div>
                 ))}
-                <div className={`table-row-actions sticky right-0 z-10 flex h-10 items-center justify-end gap-1 pr-2 transition-colors group-hover:bg-[#E7F4F9] ${i % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`} onClick={event => event.stopPropagation()}>
+                <div className={`system-table-row-actions table-row-actions flex h-10 items-center justify-end gap-1 pr-2 transition-colors group-hover:bg-[#E7F4F9] ${i % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`} onClick={event => event.stopPropagation()}>
                   <StopButton
                     size={16}
                     stopped={row.status === 'Stopped' || row.status === 'Stopped Idle'}
@@ -802,7 +803,7 @@ export function RunsTab({ startSignal, refreshSignal = 0, bulkDeleteSignal, runs
       <HorizontalTableScrollbar scrollRef={tableScrollRef} />
       {/* Pagination Bar */}
       <div className="flex flex-row justify-between items-center h-8">
-        <TablePagination currentPage={page} totalPages={Math.max(1, Math.ceil(filteredRuns.length / 20))} itemCount={filteredRuns.length} onPageChange={setPage} />
+        <TablePagination scrollRef={tableScrollRef} currentPage={page} totalPages={Math.max(1, Math.ceil(filteredRuns.length / TABLE_BATCH_SIZE))} itemCount={filteredRuns.length} onPageChange={setPage} />
       </div>
     </div>
   );
@@ -895,7 +896,7 @@ export function NodesTab({ refreshSignal, createSignal, bulkDeleteSignal, onSele
   type ConfigurationColumnKey = 'key' | 'value';
   const { sortedRows: sortedNodes, changeSort, directionFor } = useMultiColumnSort(filteredNodes, (node, key: ConfigurationColumnKey) => key === 'key' ? node.name : node.value);
   const visibleColumns = columns.filter(column => column.visible);
-  const configurationGridTemplate = `42px ${visibleColumns.map(column => `${column.width}px`).join(' ')} minmax(48px, 1fr)`;
+  const configurationGridTemplate = `42px ${visibleColumns.map(column => `${column.width}px`).join(' ')} 48px`;
   const configurationTableMinWidth = visibleColumns.reduce((sum, column) => sum + column.width, 0) + 90;
   const allSelected = filteredNodes.length > 0 && filteredNodes.every(node => selected.has(node.id));
   const someSelected = selected.size > 0 && !allSelected;
@@ -992,10 +993,10 @@ export function NodesTab({ refreshSignal, createSignal, bulkDeleteSignal, onSele
                 <ResizeHandle onMouseDown={event => startResize(realIndex, event)} />
               </div>;
             })}
-            <span aria-hidden="true" className="sticky right-0 z-10 h-6 bg-white" />
+            <span aria-hidden="true" className="h-6 bg-white" />
           </div>
           <div className="flex flex-col">
-            {sortedNodes.slice((Math.min(page, Math.max(1, Math.ceil(sortedNodes.length / 20))) - 1) * 20, Math.min(page, Math.max(1, Math.ceil(sortedNodes.length / 20))) * 20).map((row, i) => (
+            {sortedNodes.slice(0, page * TABLE_BATCH_SIZE).map((row, i) => (
               <div key={row.id} className={`group grid h-10 w-full items-center rounded-lg ${i % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} hover:bg-[#E7F4F9] transition-colors`} style={{ gridTemplateColumns: configurationGridTemplate }}>
                 <div className="system-table-select-cell flex h-10 items-center px-3">
                   <Checkbox checked={selected.has(row.id)} onChange={() => toggleRow(row.id)} />
@@ -1004,7 +1005,7 @@ export function NodesTab({ refreshSignal, createSignal, bulkDeleteSignal, onSele
                   {column.key === 'key' && <button type="button" onClick={() => openEditNode(row)} className="truncate font-montserrat text-[12px] font-medium leading-[18px] text-[#007EA7] hover:underline focus:underline focus:outline-none" aria-label={`Edit configuration ${row.name}`}>{row.name}</button>}
                   {column.key === 'value' && <span className="truncate font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A]">{row.value}</span>}
                 </div>)}
-                <div className={`table-row-actions sticky right-0 z-10 flex h-10 items-center justify-end gap-1 pr-2 transition-colors group-hover:bg-[#E7F4F9] ${i % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
+                <div className={`system-table-row-actions table-row-actions flex h-10 items-center justify-end gap-1 pr-2 transition-colors group-hover:bg-[#E7F4F9] ${i % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
                   <RowDeleteButton label={`Delete ${row.name}`} onDelete={() => { setNodes(current => current.filter(node => node.id !== row.id)); setSelected(current => { const next = new Set(current); next.delete(row.id); return next; }); }} />
                 </div>
               </div>
@@ -1033,7 +1034,7 @@ export function NodesTab({ refreshSignal, createSignal, bulkDeleteSignal, onSele
 
       {/* Pagination footer — Frame 33631 */}
       <div className="flex flex-row justify-between items-center w-full" style={{ height: 32 }}>
-        <TablePagination currentPage={page} totalPages={Math.max(1, Math.ceil(filteredNodes.length / 20))} itemCount={filteredNodes.length} onPageChange={setPage} />
+        <TablePagination scrollRef={tableScrollRef} currentPage={page} totalPages={Math.max(1, Math.ceil(filteredNodes.length / TABLE_BATCH_SIZE))} itemCount={filteredNodes.length} onPageChange={setPage} />
       </div>
       {showCreate && (
         <div className="fixed inset-0 z-[120] flex justify-end bg-[#10233A]/20" onMouseDown={closeCreateNode}>
@@ -1667,7 +1668,7 @@ export function AlertsTab({ createSignal, alerts, setAlerts }: {
   const [columns, setColumns] = useState<ColConfig[]>(ALERT_COLUMNS);
   const { startResize } = useColumnResize(columns, setColumns);
   const visibleColumns = columns.filter(column => column.visible);
-  const notificationGridTemplate = `42px ${visibleColumns.map(column => `${column.width}px`).join(' ')} minmax(44px, 1fr)`;
+  const notificationGridTemplate = `42px ${visibleColumns.map(column => `${column.width}px`).join(' ')} 44px`;
   const notificationTableMinWidth = visibleColumns.reduce((total, column) => total + column.width, 0) + 86;
   const normalizedSearch = searchQuery.trim().toLowerCase();
   const filteredAlerts = normalizedSearch
@@ -1754,7 +1755,7 @@ export function AlertsTab({ createSignal, alerts, setAlerts }: {
           {/* Data rows */}
           {alerts.length > 0 && (
             <div className="mt-4 flex flex-col">
-              {sortedAlerts.slice((Math.min(page, Math.max(1, Math.ceil(sortedAlerts.length / 20))) - 1) * 20, Math.min(page, Math.max(1, Math.ceil(sortedAlerts.length / 20))) * 20).map((row, i) => (
+              {sortedAlerts.slice(0, page * TABLE_BATCH_SIZE).map((row, i) => (
                 <div
                   key={row.id}
                   className={`group grid h-9 w-full items-center rounded-lg transition-colors ${i % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} hover:bg-[#E7F4F9]`}
@@ -1767,7 +1768,7 @@ export function AlertsTab({ createSignal, alerts, setAlerts }: {
                     </button>
                   </div>
                   {visibleColumns.map((column) => <div key={column.key} className="flex h-9 items-center overflow-hidden px-3"><span className="truncate font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A]">{String(row[column.key as keyof AlertRecord] ?? '—')}</span></div>)}
-                  <div className="flex h-9 items-center justify-end pr-1">
+                  <div className="system-table-row-actions flex h-9 items-center justify-end pr-1">
                     <RowDeleteButton label={`Delete notification ${row.id}`} onDelete={() => { setAlerts(current => current.filter(alert => alert.id !== row.id)); setSelected(current => { const next = new Set(current); next.delete(row.id); return next; }); }} />
                   </div>
                 </div>
@@ -1798,7 +1799,7 @@ export function AlertsTab({ createSignal, alerts, setAlerts }: {
 
         {/* Pagination footer */}
         <div className="flex flex-row justify-between items-center w-full" style={{ height: 32 }}>
-          <TablePagination currentPage={page} totalPages={Math.max(1, Math.ceil(filteredAlerts.length / 20))} itemCount={filteredAlerts.length} onPageChange={setPage} />
+          <TablePagination scrollRef={tableScrollRef} currentPage={page} totalPages={Math.max(1, Math.ceil(filteredAlerts.length / TABLE_BATCH_SIZE))} itemCount={filteredAlerts.length} onPageChange={setPage} />
         </div>
       </div>
       {showColumnSettings && <ColumnSettingsPanel columns={columns} defaultColumns={ALERT_COLUMNS} onSave={setColumns} onClose={() => setShowColumnSettings(false)} />}

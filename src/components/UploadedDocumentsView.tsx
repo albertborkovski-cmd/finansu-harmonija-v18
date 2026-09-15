@@ -8,6 +8,7 @@ import type { ColConfig } from './ColumnSettingsPanel';
 import HorizontalTableScrollbar from './HorizontalTableScrollbar';
 import OcrSearchField from './OcrSearchField';
 import TablePagination from './TablePagination';
+import { TABLE_BATCH_SIZE } from '../lib/tablePaging';
 import SearchableSelect from './SearchableSelect';
 import { CancelButton, SaveButton } from './ScopedActionButtons';
 import { ResizeHandle, useColumnResize } from './useColumnResize';
@@ -28,7 +29,7 @@ export type { UploadedDocumentsGroup } from '../lib/uploadedDocuments';
 type StatusGroup = UploadedDocumentsGroup;
 type UploadedFilterKey = 'uploaded' | 'organization' | 'status' | 'sourceType' | 'sourceValue';
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = TABLE_BATCH_SIZE;
 
 type UploadedColumnKey = 'document' | 'organization' | 'status' | 'uploaded';
 
@@ -149,7 +150,6 @@ export default function UploadedDocumentsView({
   const [issueComment, setIssueComment] = useState('');
   const [notice, setNotice] = useState('');
   const [page, setPage] = useState(1);
-  const [showAll, setShowAll] = useState(false);
   const [columns, setColumns] = useState<ColConfig[]>(() => UPLOADED_DOCUMENT_COLUMNS.map((column) => ({ ...column })));
   const { startResize } = useColumnResize(columns, setColumns);
   const tableScrollRef = useRef<HTMLDivElement>(null);
@@ -268,10 +268,8 @@ export default function UploadedDocumentsView({
   useEffect(() => setPage(1), [activeGroup, dateFilter, documentFilter, organizationFilter, statusFilter, sourceTypeFilter, sourceValueFilter]);
 
   const pageCount = Math.max(1, Math.ceil(filteredDocuments.length / PAGE_SIZE));
-  const safePage = showAll ? 1 : Math.min(page, pageCount);
-  const pageDocuments = showAll
-    ? sortedDocuments
-    : sortedDocuments.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const safePage = Math.min(page, pageCount);
+  const pageDocuments = sortedDocuments.slice(0, safePage * PAGE_SIZE);
   const sourceTypes = [...new Set(documents.map((document) => document.source).filter(Boolean))];
   const filterOptions: Record<UploadedFilterKey, Array<{ label: string; value: string }>> = {
     uploaded: [
@@ -467,7 +465,6 @@ export default function UploadedDocumentsView({
     setOpenFilter(null);
     setSearchSuggestionsOpen(false);
     setHighlightedSuggestion(0);
-    setShowAll(false);
     setPage(1);
   };
 
@@ -973,17 +970,12 @@ export default function UploadedDocumentsView({
         <HorizontalTableScrollbar scrollRef={tableScrollRef} className="uploaded-documents-scrollbar" />
         <div className="flex flex-shrink-0 flex-row flex-wrap items-center justify-between gap-4">
           <TablePagination
+            scrollRef={tableScrollRef}
             currentPage={safePage}
-            totalPages={showAll ? 1 : pageCount}
+            totalPages={pageCount}
             itemCount={filteredDocuments.length}
-            itemsPerPage={showAll ? Math.max(1, filteredDocuments.length) : PAGE_SIZE}
-            onPageChange={showAll ? () => undefined : setPage}
-            onShowMore={() => {
-              setShowAll((current) => !current);
-              setPage(1);
-            }}
-            showMoreLabel={showAll ? 'Default' : 'Show more'}
-            allItemsVisible={showAll}
+            itemsPerPage={PAGE_SIZE}
+            onPageChange={setPage}
           />
         </div>
         </section>

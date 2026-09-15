@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from "react";
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw, ChevronDown, X, Check, Pencil, Trash2 } from "lucide-react";
 import ColumnSettingsPanel, { type ColConfig } from "./ColumnSettingsPanel";
 import { PageActionButton, PageHeader } from "./PageHeader";
@@ -82,6 +83,8 @@ export default function NotificationsView({ initialTab = "notifications", initia
     [reminderRows, query, additionalFilters],
   );
   const [currentPage, setCurrentPage] = useState(1);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => setCurrentPage(1), [activeTab, query, additionalFilters]);
 
   const [panelMode, setPanelMode] = useState<PanelMode>(null);
   const [editId, setEditId] = useState<string | null>(null);
@@ -411,7 +414,7 @@ export default function NotificationsView({ initialTab = "notifications", initia
 
         {/* Table */}
         <div className="flex flex-col flex-1">
-          <div className="overflow-x-auto scrollbar-hide">
+          <div ref={tableScrollRef} className="overflow-x-auto scrollbar-hide">
             {activeTab === "notifications" ? (
               <NotificationsTable
                 page={currentPage}
@@ -441,13 +444,13 @@ export default function NotificationsView({ initialTab = "notifications", initia
             )}
           </div>
 
-          <HorizontalTableScrollbar />
+          <HorizontalTableScrollbar scrollRef={tableScrollRef} />
 
           {/* Pagination */}
           <div className="mt-6 flex flex-row items-center justify-between pt-4">
-            <TablePagination
+            <TablePagination scrollRef={tableScrollRef}
               currentPage={currentPage}
-              totalPages={Math.max(1, Math.ceil((activeTab === 'notifications' ? filteredNotificationRows.length : filteredReminderRows.length) / 20))}
+              totalPages={Math.max(1, Math.ceil((activeTab === 'notifications' ? filteredNotificationRows.length : filteredReminderRows.length) / TABLE_BATCH_SIZE))}
               itemCount={
                 activeTab === "notifications"
                   ? filteredNotificationRows.length
@@ -829,7 +832,7 @@ function NotificationsTable({
 
       {/* Rows */}
       <div className="flex flex-col">
-        {sortedRows.slice((Math.min(page, Math.max(1, Math.ceil(sortedRows.length / 20))) - 1) * 20, Math.min(page, Math.max(1, Math.ceil(sortedRows.length / 20))) * 20).map((row, rowIndex) => (
+        {sortedRows.slice(0, page * TABLE_BATCH_SIZE).map((row, rowIndex) => (
           <div
             key={row.id}
             className={`flex h-9 flex-row items-center rounded-lg ${
@@ -858,7 +861,7 @@ function NotificationsTable({
 
             {/* Row action */}
             <div
-              className={`sticky right-0 z-10 ml-auto flex w-[76px] flex-shrink-0 items-center justify-center gap-1 ${rowIndex % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} group-hover:bg-[#E7F4F9]`}
+              className={`system-table-row-actions flex w-[76px] flex-shrink-0 items-center justify-center gap-1 ${rowIndex % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} group-hover:bg-[#E7F4F9]`}
             >
               <button
                 type="button"
@@ -942,7 +945,7 @@ function RemindersTable({
 
       {/* Rows */}
       <div className="flex flex-col">
-        {sortedRows.slice((Math.min(page, Math.max(1, Math.ceil(sortedRows.length / 20))) - 1) * 20, Math.min(page, Math.max(1, Math.ceil(sortedRows.length / 20))) * 20).map((row, rowIndex) => (
+        {sortedRows.slice(0, page * TABLE_BATCH_SIZE).map((row, rowIndex) => (
           <div
             key={row.id}
             className={`flex h-9 flex-row items-center rounded-lg ${
@@ -971,7 +974,7 @@ function RemindersTable({
 
             {/* Row action */}
             <div
-              className={`sticky right-0 z-10 ml-auto flex w-[76px] flex-shrink-0 items-center justify-center gap-1 ${rowIndex % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} group-hover:bg-[#E7F4F9]`}
+              className={`system-table-row-actions flex w-[76px] flex-shrink-0 items-center justify-center gap-1 ${rowIndex % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} group-hover:bg-[#E7F4F9]`}
             >
               <button
                 type="button"

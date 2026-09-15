@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { AlignLeft, Check, ChevronDown, ChevronRight, Copy, Map, Maximize2, Minimize2, MoreVertical, Search, Target, X } from 'lucide-react';
 import TablePagination from '../TablePagination';
+import { TABLE_BATCH_SIZE } from "../../lib/tablePaging";
 import { getAutomationProcesses } from '../automationRunsStore';
 import { SystemCopyToast, useSystemCopyFeedback } from '../SystemCopyFeedback';
 import { useModelCatalog, type ModelRecord } from './modelCatalogStore';
@@ -53,6 +54,7 @@ const EXECUTION_MODEL_OPTIONS = Array.from({ length: 10 }, (_, index) => ({
 function TrainingModelOptionsModal({ onClose, onSelect, models }: { onClose: () => void; onSelect: (name: string) => void; models: ModelRecord[] }) {
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
   const normalizedQuery = query.trim().toLowerCase();
   const options = models.filter((option) => !normalizedQuery || `${option.name} ${option.description}`.toLowerCase().includes(normalizedQuery));
 
@@ -66,7 +68,7 @@ function TrainingModelOptionsModal({ onClose, onSelect, models }: { onClose: () 
 
         <div className="flex h-[504px] w-full flex-col gap-6">
           <label className="flex h-7 w-[260px] items-center justify-between rounded bg-[#E5EDF9] px-2">
-            <input aria-label="Search train model options" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search" className="min-w-0 flex-1 bg-transparent font-montserrat text-[12px] font-medium leading-[18px] text-[#10233A] outline-none placeholder:text-[#7288A3]" />
+            <input aria-label="Search train model options" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="Search" className="min-w-0 flex-1 bg-transparent font-montserrat text-[12px] font-medium leading-[18px] text-[#10233A] outline-none placeholder:text-[#7288A3]" />
             <Search size={16} className="text-[#7288A3]" />
           </label>
 
@@ -75,20 +77,19 @@ function TrainingModelOptionsModal({ onClose, onSelect, models }: { onClose: () 
               <div className="grid h-5 grid-cols-[minmax(180px,278px)_minmax(220px,1fr)_36px] items-center px-3 font-montserrat text-[12px] font-medium leading-[18px] text-[#7288A3]">
                 <span className="text-[#10233A]">Name</span><span>Description</span><span />
               </div>
-              <div className="flex h-[360px] flex-col overflow-hidden">
-                {options.slice((Math.min(page, Math.max(1, Math.ceil(options.length / 20))) - 1) * 20, Math.min(page, Math.max(1, Math.ceil(options.length / 20))) * 20).map((option, index) => (
+              <div ref={tableScrollRef} className="flex h-[360px] flex-col overflow-y-auto">
+                {options.slice(0, page * TABLE_BATCH_SIZE).map((option, index) => (
                   <div key={option.id} className={`grid h-9 flex-shrink-0 grid-cols-[minmax(180px,278px)_minmax(220px,1fr)_36px] items-center rounded-lg font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
                     <span className="truncate px-3">{option.name}</span>
                     <span className="truncate px-[10px]">{option.description}</span>
-                    <span className="flex h-9 items-center p-1"><button type="button" aria-label={`Select training model option ${index + 1}`} onClick={() => onSelect(option.name)} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] hover:border-[#007EA7] hover:text-[#007EA7]"><Target size={16} /></button></span>
+                    <span className="system-table-row-actions flex h-9 items-center p-1"><button type="button" aria-label={`Select training model option ${index + 1}`} onClick={() => onSelect(option.name)} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] hover:border-[#007EA7] hover:text-[#007EA7]"><Target size={16} /></button></span>
                   </div>
                 ))}
               </div>
             </div>
 
             <div className="flex h-8 items-center justify-between gap-4">
-              <TablePagination currentPage={page} totalPages={5} itemCount={options.length} onPageChange={setPage} />
-              <span className="font-montserrat text-[12px] font-normal leading-[18px] text-[#7288A3]">14 from 15,000 items</span>
+              <TablePagination currentPage={page} totalPages={Math.max(1, Math.ceil(options.length / TABLE_BATCH_SIZE))} itemCount={options.length} onPageChange={setPage} scrollRef={tableScrollRef} />
             </div>
           </div>
         </div>
@@ -100,6 +101,7 @@ function TrainingModelOptionsModal({ onClose, onSelect, models }: { onClose: () 
 function ExecutionModelOptionsModal({ onClose, onSelect }: { onClose: () => void; onSelect: (name: string) => void }) {
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
   const normalizedQuery = query.trim().toLowerCase();
   const options = EXECUTION_MODEL_OPTIONS.filter((option) => !normalizedQuery || `${option.name} ${option.version} ${option.description} ${option.status}`.toLowerCase().includes(normalizedQuery));
 
@@ -113,7 +115,7 @@ function ExecutionModelOptionsModal({ onClose, onSelect }: { onClose: () => void
 
         <div className="flex h-[504px] w-full flex-col gap-6">
           <label className="flex h-7 w-[260px] items-center justify-between rounded bg-[#E5EDF9] px-2">
-            <input aria-label="Search execution model options" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search" className="min-w-0 flex-1 bg-transparent font-montserrat text-[12px] font-medium leading-[18px] text-[#10233A] outline-none placeholder:text-[#7288A3]" />
+            <input aria-label="Search execution model options" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="Search" className="min-w-0 flex-1 bg-transparent font-montserrat text-[12px] font-medium leading-[18px] text-[#10233A] outline-none placeholder:text-[#7288A3]" />
             <Search size={16} className="text-[#7288A3]" />
           </label>
 
@@ -122,8 +124,8 @@ function ExecutionModelOptionsModal({ onClose, onSelect }: { onClose: () => void
               <div className="grid h-5 grid-cols-[minmax(150px,278px)_84px_minmax(150px,250px)_minmax(90px,140px)_36px] items-center px-3 font-montserrat text-[12px] font-medium leading-[18px] text-[#7288A3]">
                 <span className="text-[#10233A]">Name</span><span>Version</span><span>Description</span><span>Status</span><span />
               </div>
-              <div className="flex h-[360px] flex-col overflow-hidden">
-                {options.slice((Math.min(page, Math.max(1, Math.ceil(options.length / 20))) - 1) * 20, Math.min(page, Math.max(1, Math.ceil(options.length / 20))) * 20).map((option, index) => (
+              <div ref={tableScrollRef} className="flex h-[360px] flex-col overflow-y-auto">
+                {options.slice(0, page * TABLE_BATCH_SIZE).map((option, index) => (
                   <div key={option.id} className={`grid h-9 flex-shrink-0 grid-cols-[minmax(150px,278px)_84px_minmax(150px,250px)_minmax(90px,140px)_36px] items-center rounded-lg font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
                     <span className="truncate px-3">{option.name}</span>
                     <span className="truncate px-[10px]">{option.version}</span>
@@ -136,8 +138,7 @@ function ExecutionModelOptionsModal({ onClose, onSelect }: { onClose: () => void
             </div>
 
             <div className="flex h-8 items-center justify-between gap-4">
-              <TablePagination currentPage={page} totalPages={5} itemCount={options.length} onPageChange={setPage} />
-              <span className="font-montserrat text-[12px] font-normal leading-[18px] text-[#7288A3]">14 from 15,000 items</span>
+              <TablePagination currentPage={page} totalPages={Math.max(1, Math.ceil(options.length / TABLE_BATCH_SIZE))} itemCount={options.length} onPageChange={setPage} scrollRef={tableScrollRef} />
             </div>
           </div>
         </div>

@@ -1,3 +1,4 @@
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import TablePagination from "./TablePagination";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ExternalLink, Eye, MailCheck, RotateCcw, Send, X } from "lucide-react";
@@ -59,6 +60,7 @@ export default function OrganizationEmailHistoryView({ organizationId, organizat
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const { startResize } = useColumnResize(columns, setColumns);
   const { sortedRows, changeSort, directionFor } = useMultiColumnSort(history, historySortValue);
+  useEffect(() => setTablePage(1), [organizationId]);
 
   useEffect(() => {
     const refresh = () => setHistory(loadOrganizationEmailHistoryForOrganization(organizationId, organizationName));
@@ -121,7 +123,7 @@ export default function OrganizationEmailHistoryView({ organizationId, organizat
               <div style={{ width: ACTIONS_WIDTH }} className="flex-shrink-0" />
             </div>
 
-            {sortedRows.slice((Math.min(tablePage, Math.max(1, Math.ceil(sortedRows.length / 20))) - 1) * 20, Math.min(tablePage, Math.max(1, Math.ceil(sortedRows.length / 20))) * 20).map((entry, index) => (
+            {sortedRows.slice(0, tablePage * TABLE_BATCH_SIZE).map((entry, index) => (
               <div key={entry.id} className={`flex min-h-12 items-center font-montserrat text-[12px] font-medium text-[#10233A] transition-colors hover:bg-[#E7F4F9] ${index % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"}`}>
                 {visibleColumns.map((column) => {
                   const key = column.key as HistoryColumnKey;
@@ -133,7 +135,7 @@ export default function OrganizationEmailHistoryView({ organizationId, organizat
                     </div>
                   );
                 })}
-                <div style={{ width: ACTIONS_WIDTH }} className="flex flex-shrink-0 items-center justify-end gap-2 pr-3">
+                <div style={{ width: ACTIONS_WIDTH }} className="system-table-row-actions flex flex-shrink-0 items-center justify-end gap-2 pr-3">
                   <button type="button" title="View email" aria-label={`View email sent to ${entry.recipientEmail}`} onClick={() => setViewing(entry)} className="flex h-7 items-center gap-1.5 rounded border-2 border-[#D3E1EC] bg-white px-2 font-montserrat text-[11px] font-semibold text-[#7288A3] transition-colors hover:border-[#007EA7] hover:text-[#007EA7]">
                     <Eye size={13} /> View
                   </button>
@@ -160,7 +162,7 @@ export default function OrganizationEmailHistoryView({ organizationId, organizat
       </div>
 
       <HorizontalTableScrollbar scrollRef={tableScrollRef} fixed={false} />
-      <TablePagination currentPage={tablePage} totalPages={Math.max(1, Math.ceil(sortedRows.length / 20))} itemCount={sortedRows.length} itemsPerPage={20} onPageChange={setTablePage} />
+      <TablePagination scrollRef={tableScrollRef} currentPage={tablePage} totalPages={Math.max(1, Math.ceil(sortedRows.length / TABLE_BATCH_SIZE))} itemCount={sortedRows.length} itemsPerPage={TABLE_BATCH_SIZE} onPageChange={setTablePage} />
 
       {showColumns ? (
         <ColumnSettingsPanel columns={columns} defaultColumns={HISTORY_COLUMNS} onSave={(next) => { setColumns(next); setShowColumns(false); }} onClose={() => setShowColumns(false)} />

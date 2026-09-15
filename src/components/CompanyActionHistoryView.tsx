@@ -15,6 +15,7 @@ import { ColumnSettingsButton } from "./ScopedActionButtons";
 import RefreshAllButton from "./RefreshAllButton";
 import HorizontalTableScrollbar from "./HorizontalTableScrollbar";
 import TablePagination from "./TablePagination";
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import ColumnSortButton, { useMultiColumnSort } from "./ColumnSortButton";
 import { ResizeHandle, useColumnResize } from "./useColumnResize";
 import { getCurrentUserName } from "../lib/currentUser";
@@ -129,7 +130,7 @@ export default function CompanyActionHistoryView({ company, administrativeOnly =
   const [selectedAction, setSelectedAction] = useState<ActionHistoryRow | null>(null);
   const [copied, setCopied] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(20);
+  const itemsPerPage = TABLE_BATCH_SIZE;
   const [refreshingText, setRefreshingText] = useState(false);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const { startResize } = useColumnResize(columns, setColumns);
@@ -271,9 +272,11 @@ export default function CompanyActionHistoryView({ company, administrativeOnly =
   const totalPages = Math.max(1, Math.ceil(sortedRows.length / itemsPerPage));
   const safePage = Math.min(currentPage, totalPages);
   const pageRows = sortedRows.slice(
-    (safePage - 1) * itemsPerPage,
+    0,
     safePage * itemsPerPage,
   );
+
+  useEffect(() => setCurrentPage(1), [company.id, global]);
 
   const exportHistory = () => {
     const headers = visibleColumns.map((column) => column.label);
@@ -421,7 +424,7 @@ export default function CompanyActionHistoryView({ company, administrativeOnly =
                       )}
                     </div>
                   ))}
-                  <div className="flex w-11 flex-shrink-0 justify-center">
+                  <div className="system-table-row-actions flex w-11 flex-shrink-0 justify-center">
                     <button
                       type="button"
                       title="VIEW"
@@ -454,19 +457,12 @@ export default function CompanyActionHistoryView({ company, administrativeOnly =
 
       <HorizontalTableScrollbar scrollRef={tableScrollRef} />
       <TablePagination
+        scrollRef={tableScrollRef}
         currentPage={safePage}
         totalPages={totalPages}
         itemCount={sortedRows.length}
         itemsPerPage={itemsPerPage}
         onPageChange={setCurrentPage}
-        onShowMore={() => {
-          setItemsPerPage((current) =>
-            current === 4 ? Math.max(4, sortedRows.length) : 4,
-          );
-          setCurrentPage(1);
-        }}
-        showMoreLabel={itemsPerPage === 4 ? "Show more" : "Default"}
-        allItemsVisible={itemsPerPage !== 4}
       />
 
       {showColumns && (

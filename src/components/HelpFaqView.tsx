@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from "react";
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   RefreshCw,
   X,
@@ -116,6 +117,7 @@ export default function HelpFaqView() {
     SAMPLE_ROWS,
   );
   const [currentPage, setCurrentPage] = useState(1);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
   const [selectedRow, setSelectedRow] = useState<ActionRow | null>(null);
   const [showColumnSettings, setShowColumnSettings] = useState(false);
   const [columns, setColumns] = usePersistentState<ColConfig[]>(
@@ -129,6 +131,7 @@ export default function HelpFaqView() {
     {},
   );
   const { startResize } = useColumnResize(columns, setColumns);
+  useEffect(() => setCurrentPage(1), [query, visibleFilterIds, filterValues]);
   const filteredRows = useMemo(
     () =>
       rows.filter(
@@ -210,7 +213,7 @@ export default function HelpFaqView() {
 
         {/* Table */}
         <div className="flex flex-col flex-1 gap-12">
-          <div className="flex flex-col gap-0 overflow-x-auto scrollbar-hide">
+          <div ref={tableScrollRef} className="flex flex-col gap-0 overflow-x-auto scrollbar-hide">
             {/* Column headers */}
             <div className="flex flex-row items-center pl-3 gap-3 h-5 mb-2 min-w-fit">
               {columns
@@ -248,7 +251,7 @@ export default function HelpFaqView() {
 
             {/* Rows */}
             <div className="flex flex-col">
-              {sortedRows.slice((Math.min(currentPage, Math.max(1, Math.ceil(sortedRows.length / 20))) - 1) * 20, Math.min(currentPage, Math.max(1, Math.ceil(sortedRows.length / 20))) * 20).map((row, rowIndex) => (
+              {sortedRows.slice(0, currentPage * TABLE_BATCH_SIZE).map((row, rowIndex) => (
                 <div
                   key={row.id}
                   className={`flex flex-row items-center pl-3 gap-3 h-9 rounded-lg min-w-fit ${
@@ -280,7 +283,7 @@ export default function HelpFaqView() {
                     ))}
 
                   {/* Row action buttons */}
-                  <div className="ml-auto flex flex-shrink-0 flex-row items-center gap-1 px-1">
+                  <div className="system-table-row-actions flex flex-shrink-0 flex-row items-center gap-1 px-1">
                     <button
                       onClick={() => setSelectedRow(row)}
                       title="VIEW"
@@ -311,13 +314,13 @@ export default function HelpFaqView() {
             </div>
           </div>
 
-          <HorizontalTableScrollbar />
+          <HorizontalTableScrollbar scrollRef={tableScrollRef} />
 
           {/* Bottom bar */}
           <div className="flex flex-row items-center gap-4">
-            <TablePagination
+            <TablePagination scrollRef={tableScrollRef}
               currentPage={currentPage}
-              totalPages={Math.max(1, Math.ceil(sortedRows.length / 20))}
+              totalPages={Math.max(1, Math.ceil(sortedRows.length / TABLE_BATCH_SIZE))}
               itemCount={sortedRows.length}
               onPageChange={setCurrentPage}
             />

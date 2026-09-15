@@ -7,6 +7,8 @@ export type InvoiceChatMessage = {
   authorEmail?: string;
   authorType?: 'Client' | 'MESO accountant' | 'FH AI';
   sentAt?: string;
+  /** How the original message arrived; email ingestion is distinct from chat delivery. */
+  channel?: 'email' | 'chat';
   systemEvent?: 'accountant-handoff';
   actorEmail?: string;
   recipientEmail?: string;
@@ -32,7 +34,7 @@ export type InvoiceChatContext = {
   relatedObject?: { id: string; organizationId: string; type: 'Document' | 'Invoice' | 'Bank operation' | 'Reconciliation' | 'Debt' | 'Other'; label: string };
 };
 
-const CHAT_CONVERSATIONS_KEY = 'finansu-harmonija:v12:chat:conversations';
+export const CHAT_CONVERSATIONS_KEY = 'finansu-harmonija:v12:chat:conversations';
 
 export function invoiceChatPersistenceKey(storageKey: string) {
   if (storageKey === '__general__') return 'finansu-harmonija:v7:chat:messages';

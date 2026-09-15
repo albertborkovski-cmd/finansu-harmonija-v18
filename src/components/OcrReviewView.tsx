@@ -12,6 +12,7 @@ import RefreshAllButton from "./RefreshAllButton";
 import SystemAddFilters, { type SystemFilterColumn } from "./SystemAddFilters";
 import HorizontalTableScrollbar from "./HorizontalTableScrollbar";
 import TablePagination from "./TablePagination";
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import type { ColConfig } from "./ColumnSettingsPanel";
 import ColumnSortButton, { useMultiColumnSort } from "./ColumnSortButton";
 import { ResizeHandle, useColumnResize } from "./useColumnResize";
@@ -318,10 +319,10 @@ function ReviewAnalyticsView() {
   const analyticsGridTemplate = `42px ${visibleAnalyticsColumns.map((column) => `${column.width}px`).join(" ")}`;
   const analyticsTableWidth = 42 + visibleAnalyticsColumns.reduce((sum, column) => sum + column.width, 0);
 
-  const pageSize = 20;
+  const pageSize = TABLE_BATCH_SIZE;
   const totalPages = Math.max(1, Math.ceil(sortedAnalytics.length / pageSize));
   const safePage = Math.min(page, totalPages);
-  const displayedWorkers = sortedAnalytics.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const displayedWorkers = sortedAnalytics.slice(0, safePage * pageSize);
 
   const toggleWorker = (id: string) => setExpandedWorkers((current) => {
     const next = new Set(current);
@@ -462,7 +463,7 @@ function ReviewAnalyticsView() {
       </div>
 
       <HorizontalTableScrollbar scrollRef={tableScrollRef} />
-      <TablePagination currentPage={safePage} totalPages={totalPages} itemCount={sortedAnalytics.length} itemsPerPage={pageSize} onPageChange={setPage} />
+      <TablePagination currentPage={safePage} totalPages={totalPages} itemCount={sortedAnalytics.length} itemsPerPage={pageSize} onPageChange={setPage} scrollRef={tableScrollRef} />
     </div>
   );
 }

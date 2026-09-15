@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   RefreshCw,
   Trash2,
@@ -7,6 +7,7 @@ import {
 import ColumnSettingsPanel, { type ColConfig } from '../ColumnSettingsPanel';
 import HorizontalTableScrollbar from '../HorizontalTableScrollbar';
 import TablePagination from '../TablePagination';
+import { TABLE_BATCH_SIZE } from "../../lib/tablePaging";
 import OcrSearchField from '../OcrSearchField';
 import { ResizeHandle, useColumnResize } from '../useColumnResize';
 import { ColumnSettingsButton } from '../ScopedActionButtons';
@@ -87,6 +88,8 @@ export default function LogsTab({
   const [runs, setRuns] = useState<RunEntry[]>(readRuns);
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => setCurrentPage(1), [query]);
   const [showColumnSettings, setShowColumnSettings] = useState(false);
   const [columns, setColumns] = useState<ColConfig[]>(INITIAL_COLUMNS);
   const { startResize } = useColumnResize(columns, setColumns);
@@ -174,7 +177,7 @@ export default function LogsTab({
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col gap-4 overflow-x-auto scrollbar-hide">
+      <div ref={tableScrollRef} className="flex flex-1 flex-col gap-4 overflow-x-auto scrollbar-hide">
         <div style={{ minWidth: tableMinWidth }}>
           <div aria-label="Runs table columns" className="grid min-h-9 items-center" style={{ gridTemplateColumns }}>
             <div data-table-header-select="true" className="flex h-9 items-center px-3">
@@ -193,7 +196,7 @@ export default function LogsTab({
           </div>
 
           <div className="mt-3 flex flex-col">
-            {sortedRows.slice((Math.min(currentPage, Math.max(1, Math.ceil(sortedRows.length / 20))) - 1) * 20, Math.min(currentPage, Math.max(1, Math.ceil(sortedRows.length / 20))) * 20).map((run, rowIndex) => (
+            {sortedRows.slice(0, currentPage * TABLE_BATCH_SIZE).map((run, rowIndex) => (
               <div key={run.id} className={`grid h-9 w-full items-center rounded-lg ${rowIndex % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} transition-colors hover:bg-[#E7F4F9]`} style={{ gridTemplateColumns }}>
                 <div className="flex h-9 items-center px-3">
                   <Checkbox checked={selectedRows.has(run.id)} onChange={() => toggleRow(run.id)} label={`Select run ${run.id}`} />
@@ -223,9 +226,7 @@ export default function LogsTab({
       <HorizontalTableScrollbar />
 
       <div className="flex flex-shrink-0 flex-row items-center justify-between pt-2">
-        <span className="font-montserrat text-[12px] font-normal leading-[18px] text-[#7288A3]">14 from 15,000 items</span>
-        <TablePagination currentPage={currentPage} totalPages={8} itemCount={filteredRuns.length} onPageChange={setCurrentPage} />
-        <button type="button" className="flex h-8 items-center justify-center rounded-md border-2 border-[#D3E1EC] px-3 py-[6px] font-montserrat text-[14px] font-semibold leading-5 text-[#7288A3] transition-colors hover:border-[#007EA7]">View all</button>
+        <TablePagination currentPage={currentPage} totalPages={Math.max(1, Math.ceil(filteredRuns.length / TABLE_BATCH_SIZE))} itemCount={filteredRuns.length} onPageChange={setCurrentPage} scrollRef={tableScrollRef} />
       </div>
 
       {showColumnSettings && (

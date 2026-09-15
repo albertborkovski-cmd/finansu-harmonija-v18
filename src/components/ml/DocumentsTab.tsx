@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { usePersistentState } from '../../hooks/usePersistentState';
 import { RefreshCw, ExternalLink, Play, Settings, X, RotateCcw, ArrowLeftRight, ClipboardList, BarChart3, ClipboardCheck, Brush } from 'lucide-react';
 import type { DocumentEntry } from './types';
 import ColumnSettingsPanel, { type ColConfig } from '../ColumnSettingsPanel';
 import HorizontalTableScrollbar from '../HorizontalTableScrollbar';
 import TablePagination from '../TablePagination';
+import { TABLE_BATCH_SIZE } from "../../lib/tablePaging";
 import OcrSearchField from '../OcrSearchField';
 import { useColumnResize, ResizeHandle } from '../useColumnResize';
 import ColumnSortButton, { useMultiColumnSort } from '../ColumnSortButton';
@@ -65,6 +66,7 @@ export default function DocumentsTab({
   const [query, setQuery] = useState('');
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
   const [showColumnSettings, setShowColumnSettings] = useState(false);
   const [showRunPanel, setShowRunPanel] = useState(false);
   const [selectedRunActions, setSelectedRunActions] = useState<Set<string>>(new Set());
@@ -135,7 +137,7 @@ export default function DocumentsTab({
       {/* Toolbar */}
       <div className="flex flex-row flex-wrap justify-between items-center gap-2 flex-shrink-0">
         <div className="flex flex-row items-center gap-1 flex-1 min-w-0">
-          <OcrSearchField ariaLabel="Search documents" value={query} onChange={setQuery} />
+          <OcrSearchField ariaLabel="Search documents" value={query} onChange={(value) => { setQuery(value); setCurrentPage(1); }} />
         </div>
         <div className="flex flex-row items-center p-[6px] gap-4 bg-white rounded flex-shrink-0">
           <BulkDeleteButton selectedCount={selectedRows.size} onDelete={() => { setDocuments(current => current.filter(document => !selectedRows.has(document.id))); setSelectedRows(new Set()); }} />
@@ -154,7 +156,7 @@ export default function DocumentsTab({
       </div>
 
       {/* Table */}
-      <div className="flex flex-col gap-4 flex-1 overflow-x-auto scrollbar-hide">
+      <div ref={tableScrollRef} className="flex flex-col gap-4 flex-1 overflow-x-auto scrollbar-hide">
         {/* Headers */}
         <div className="flex min-w-max flex-row items-center gap-3 pl-3 h-5">
           {visibleColumns.map((column) => {
@@ -173,7 +175,7 @@ export default function DocumentsTab({
 
         {/* Rows */}
         <div className="flex flex-col">
-          {sortedRows.slice((Math.min(currentPage, Math.max(1, Math.ceil(sortedRows.length / 20))) - 1) * 20, Math.min(currentPage, Math.max(1, Math.ceil(sortedRows.length / 20))) * 20).map((doc, idx) => (
+          {sortedRows.slice(0, currentPage * TABLE_BATCH_SIZE).map((doc, idx) => (
             <div
               key={doc.id}
               className={`flex min-w-max flex-row items-center gap-3 h-9 rounded-lg px-3 transition-colors group ${
@@ -199,8 +201,7 @@ export default function DocumentsTab({
 
       {/* Pagination */}
       <div className="flex flex-row items-center justify-between gap-4 flex-shrink-0 pt-2">
-        <TablePagination currentPage={currentPage} totalPages={Math.max(1, Math.ceil(sortedRows.length / 20))} itemCount={sortedRows.length} onPageChange={setCurrentPage} />
-        <div className="flex items-center gap-[14px]"><span className="whitespace-nowrap font-montserrat font-normal text-[12px] leading-[18px] text-[#7288A3]">14 from 15,000 items</span><button className="flex items-center justify-center px-3 py-[6px] gap-1 border-2 border-[#D3E1EC] rounded-md h-8 hover:border-[#007EA7] transition-colors"><span className="font-montserrat font-semibold text-[14px] leading-5 text-[#7288A3]">View all</span></button></div>
+        <TablePagination currentPage={currentPage} totalPages={Math.max(1, Math.ceil(sortedRows.length / TABLE_BATCH_SIZE))} itemCount={sortedRows.length} onPageChange={setCurrentPage} scrollRef={tableScrollRef} />
       </div>
 
       {showColumnSettings && (

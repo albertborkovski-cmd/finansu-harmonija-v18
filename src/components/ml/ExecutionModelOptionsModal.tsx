@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Columns2, RefreshCw, Search, Target, Trash2, X } from 'lucide-react';
 import TablePagination from '../TablePagination';
+import { TABLE_BATCH_SIZE } from "../../lib/tablePaging";
 import ImportButton from '../ImportButton';
 
 export interface ExecutionModelOption {
@@ -22,6 +23,7 @@ const OPTIONS: ExecutionModelOption[] = Array.from({ length: 10 }, (_, index) =>
 export default function ExecutionModelOptionsModal({ onClose, onSelect }: { onClose: () => void; onSelect: (option: ExecutionModelOption) => void }) {
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
   const normalizedQuery = query.trim().toLowerCase();
   const filteredOptions = useMemo(() => OPTIONS.filter(option => !normalizedQuery || `${option.name} ${option.version} ${option.description} ${option.status}`.toLowerCase().includes(normalizedQuery)), [normalizedQuery]);
 
@@ -36,7 +38,7 @@ export default function ExecutionModelOptionsModal({ onClose, onSelect }: { onCl
         <div className="flex h-[504px] min-h-0 flex-col gap-6">
           <div className="flex h-7 flex-shrink-0 items-center justify-between gap-4">
             <label className="flex h-7 w-[260px] max-w-full items-center justify-between rounded bg-[#E5EDF9] px-2">
-              <input aria-label="Search execution model options" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search" className="min-w-0 flex-1 bg-transparent font-montserrat text-[12px] font-medium leading-[18px] text-[#10233A] outline-none placeholder:text-[#7288A3]" />
+              <input aria-label="Search execution model options" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder="Search" className="min-w-0 flex-1 bg-transparent font-montserrat text-[12px] font-medium leading-[18px] text-[#10233A] outline-none placeholder:text-[#7288A3]" />
               <Search size={16} className="text-[#7288A3]" />
             </label>
             <div className="flex h-7 items-center gap-4 rounded bg-white p-1.5 text-[#7288A3]">
@@ -52,8 +54,8 @@ export default function ExecutionModelOptionsModal({ onClose, onSelect }: { onCl
               <div className="grid h-5 grid-cols-[minmax(170px,278px)_84px_minmax(180px,250px)_minmax(90px,140px)_36px] items-center px-3 font-montserrat text-[12px] font-medium leading-[18px] text-[#7288A3]">
                 <span className="flex items-center gap-1.5 text-[#10233A]">Name</span><span>Version</span><span>Description</span><span>Status</span><span />
               </div>
-              <div className="flex h-[360px] flex-col overflow-hidden">
-                {filteredOptions.slice((Math.min(page, Math.max(1, Math.ceil(filteredOptions.length / 20))) - 1) * 20, Math.min(page, Math.max(1, Math.ceil(filteredOptions.length / 20))) * 20).map((option, index) => (
+              <div ref={tableScrollRef} className="flex h-[360px] flex-col overflow-y-auto">
+                {filteredOptions.slice(0, page * TABLE_BATCH_SIZE).map((option, index) => (
                   <div key={option.id} className={`grid h-9 flex-shrink-0 grid-cols-[minmax(170px,278px)_84px_minmax(180px,250px)_minmax(90px,140px)_36px] items-center rounded-lg font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
                     <span className="truncate px-3">{option.name}</span>
                     <span className="truncate px-[10px]">{option.version}</span>
@@ -67,8 +69,7 @@ export default function ExecutionModelOptionsModal({ onClose, onSelect }: { onCl
             </div>
 
             <div className="flex h-8 flex-shrink-0 items-center justify-between gap-4">
-              <TablePagination currentPage={page} totalPages={5} itemCount={filteredOptions.length} onPageChange={setPage} />
-              <div className="flex items-center gap-[14px]"><span className="font-montserrat text-[12px] font-normal leading-[18px] text-[#7288A3]">14 from 15,000 items</span><button type="button" className="flex h-8 items-center justify-center rounded-md border-2 border-[#D3E1EC] bg-white px-3 font-montserrat text-[14px] font-semibold leading-5 text-[#7288A3] hover:border-[#007EA7]">View all</button></div>
+              <TablePagination currentPage={page} totalPages={Math.max(1, Math.ceil(filteredOptions.length / TABLE_BATCH_SIZE))} itemCount={filteredOptions.length} onPageChange={setPage} scrollRef={tableScrollRef} />
             </div>
           </div>
         </div>

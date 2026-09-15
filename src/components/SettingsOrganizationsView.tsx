@@ -79,6 +79,7 @@ export default function SettingsOrganizationsView({
 
   return (
     <Companies
+      key={companiesMode ? 'company' : 'organization'}
       title={companiesMode ? 'Companies' : 'Organizations'}
       entityLabel={companiesMode ? 'company' : 'organization'}
       allowCreate

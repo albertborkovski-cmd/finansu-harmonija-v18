@@ -1,3 +1,4 @@
+import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Trash2, UsersRound, X } from 'lucide-react';
 import { PageActionButton, PageHeader } from './PageHeader';
@@ -125,6 +126,7 @@ function RoleDetails({ role, onBack }: { role: RoleRecord; onBack: () => void })
   const permissionStorageKey = `finansu-harmonija-v6:group-permissions:${role.id}`;
   const [activeTab, setActiveTab] = useState<'roles' | 'users' | 'third-party'>('roles');
   const [query, setQuery] = useState('');
+  useEffect(() => setTablePage(1), [query, activeTab, role.id]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showColumns, setShowColumns] = useState(false);
   const [showAddRole, setShowAddRole] = useState(false);
@@ -276,7 +278,7 @@ function RoleDetails({ role, onBack }: { role: RoleRecord; onBack: () => void })
               <div className="w-[46px] flex-shrink-0" />
             </div>
 
-            {visibleDetails.slice((Math.min(tablePage, Math.max(1, Math.ceil(visibleDetails.length / 20))) - 1) * 20, Math.min(tablePage, Math.max(1, Math.ceil(visibleDetails.length / 20))) * 20).map(detailRow => (
+            {visibleDetails.slice(0, tablePage * TABLE_BATCH_SIZE).map(detailRow => (
               <div key={detailRow.id} className="flex h-11 items-center border-b border-[#E5EDF9] bg-white transition-colors hover:bg-[#F8FDFF]">
                 <div className="flex w-[42px] flex-shrink-0 items-center px-3">
                   <RoleCheckbox
@@ -337,7 +339,7 @@ function RoleDetails({ role, onBack }: { role: RoleRecord; onBack: () => void })
               <div className="w-[46px] flex-shrink-0" />
             </div>
 
-            {assignedUsers.slice((Math.min(tablePage, Math.max(1, Math.ceil(assignedUsers.length / 20))) - 1) * 20, Math.min(tablePage, Math.max(1, Math.ceil(assignedUsers.length / 20))) * 20).map((user, index) => (
+            {assignedUsers.slice(0, tablePage * TABLE_BATCH_SIZE).map((user, index) => (
               <div key={user.id} className={`flex h-11 items-center border-b border-[#E5EDF9] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
                 <div className="flex w-[42px] flex-shrink-0 items-center px-3">
                   <RoleCheckbox checked={selected.has(user.id)} onChange={() => setSelected(current => { const next = new Set(current); if (next.has(user.id)) next.delete(user.id); else next.add(user.id); return next; })} label={`Select ${user.username}`} />
@@ -357,7 +359,7 @@ function RoleDetails({ role, onBack }: { role: RoleRecord; onBack: () => void })
 
         <HorizontalTableScrollbar scrollRef={tableScrollRef} />
         <div className="flex h-8 items-center justify-between">
-          <TablePagination currentPage={tablePage} totalPages={Math.max(1, Math.ceil(currentRows.length / 20))} itemCount={currentRows.length} onPageChange={setTablePage} />
+          <TablePagination scrollRef={tableScrollRef} currentPage={tablePage} totalPages={Math.max(1, Math.ceil(currentRows.length / TABLE_BATCH_SIZE))} itemCount={currentRows.length} onPageChange={setTablePage} />
         </div>
       </div>
 
@@ -519,7 +521,7 @@ export default function AutomationSecurityAccessView() {
             </div>
 
             <div className="flex flex-col">
-              {displayedRoles.slice((Math.min(page, Math.max(1, Math.ceil(displayedRoles.length / 20))) - 1) * 20, Math.min(page, Math.max(1, Math.ceil(displayedRoles.length / 20))) * 20).map((role, index) => (
+              {displayedRoles.slice(0, page * TABLE_BATCH_SIZE).map((role, index) => (
                 <div
                   key={role.id}
                   role="button"
@@ -551,7 +553,7 @@ export default function AutomationSecurityAccessView() {
 
         <HorizontalTableScrollbar scrollRef={tableScrollRef} />
         <div className="flex h-8 items-center justify-between">
-          <TablePagination currentPage={page} totalPages={1} itemCount={displayedRoles.length} onPageChange={setPage} />
+          <TablePagination scrollRef={tableScrollRef} currentPage={page} totalPages={Math.max(1, Math.ceil(displayedRoles.length / TABLE_BATCH_SIZE))} itemCount={displayedRoles.length} onPageChange={setPage} />
         </div>
       </div>
 

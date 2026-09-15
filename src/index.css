@@ -548,13 +548,20 @@ button.h-4.w-4 :where(svg) {
 }
 
 /*
- * Row actions are independent from resizable data columns. Keep their group
- * anchored at the table edge when users make any data column narrower or
- * wider. The direct-child selector avoids affecting dialogs and bulk tools.
+ * Row actions are the final, non-resizable column in the table's normal flow.
+ * They follow visible data columns, including when columns are hidden, resized
+ * or reordered; they never pin to the viewport or consume leftover row space.
+ * The legacy selector keeps shared DeleteButton consumers on the same contract.
  */
+.system-table-row-actions,
 :where(div, span):has(> button[data-button-family="row-delete"]) {
-  margin-left: auto !important;
+  position: static !important;
+  inset: auto !important;
+  margin-left: 0 !important;
   flex-shrink: 0 !important;
+}
+
+:where(div, span):has(> button[data-button-family="row-delete"]) {
   justify-content: flex-end !important;
 }
 

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, User, Menu, LogOut, ChevronDown, LayoutDashboard, Files, HandCoins, Scale, BarChart3, Building2, Headphones, HelpCircle, BookOpenText, Landmark } from 'lucide-react';
+import { ArrowLeft, User, Menu, LogOut, ChevronDown, LayoutDashboard, Files, HandCoins, Scale, BarChart3, Building2, Headphones, HelpCircle, BookOpenText, Landmark, Bell } from 'lucide-react';
 import type { Company } from '../lib/supabase';
 import Documents from './Documents';
 import DashboardView from './DashboardView';
 import InvoicesView from './invoices';
 import CompanyClientInformation from './CompanyClientInformation';
+import CompanyClientsView from './CompanyClientsView';
 import CompanyDebts from './CompanyDebts';
 import CompanyDebtsView from './CompanyDebtsView';
 import CompanyReconciliationView from './CompanyReconciliationView';
@@ -17,6 +18,7 @@ import CompanyBankView from './CompanyBankView';
 import CompanyBankAccountsView from './CompanyBankAccountsView';
 import CompanySepaPaymentsView from './CompanySepaPaymentsView';
 import type { InvoiceChatContext } from './invoices/invoiceChat';
+import type { RelatedObject } from '../lib/notifications';
 
 interface CompanyDetailProps {
   company: Company;
@@ -26,12 +28,16 @@ interface CompanyDetailProps {
   initialMenu?: string;
   initialDocumentId?: string | null;
   initialDocumentMode?: 'view' | 'edit' | 'original-view';
+  initialRelatedObject?: RelatedObject | null;
+  onInitialRelatedObjectBack?: () => void;
   onOpenChat?: (context: InvoiceChatContext) => void;
+  onOpenNotifications?: (returnMenu: string) => void;
 }
 
 const mainMenuItems = [
   { id: 'overview',      label: 'Dashboard', icon: LayoutDashboard },
   { id: 'documents',     label: 'All documents', icon: Files },
+  { id: 'notifications', label: 'Notifications & Tasks', icon: Bell },
   { id: 'gl-journal',    label: 'GL journal', icon: BookOpenText },
   { id: 'bank',          label: 'Bank', icon: Landmark },
   { id: 'reports',       label: 'Debts', icon: HandCoins },
@@ -80,15 +86,22 @@ function SubmenuStepperDot({ isActive, isFirst, isLast }: { isActive: boolean; i
   );
 }
 
-export default function CompanyDetail({ company, onBack, onLogout, onOpenProfile, initialMenu = 'overview', initialDocumentId = null, initialDocumentMode = 'view', onOpenChat }: CompanyDetailProps) {
+export default function CompanyDetail({ company, onBack, onLogout, onOpenProfile, initialMenu = 'overview', initialDocumentId = null, initialDocumentMode = 'view', initialRelatedObject = null, onInitialRelatedObjectBack, onOpenChat, onOpenNotifications }: CompanyDetailProps) {
+  const relatedObject = initialRelatedObject?.organizationId === company.id ? initialRelatedObject : null;
+  const relatedRecordId = relatedObject?.recordId || relatedObject?.id;
+  const relatedMenu = relatedObject?.type === 'Bank operation' ? 'bank'
+    : relatedObject?.type === 'Debt' ? 'reports'
+      : relatedObject?.type === 'Reconciliation' ? 'services'
+        : relatedObject?.type === 'Counterparty' ? 'activity' : null;
+  const backFromRelatedObject = onInitialRelatedObjectBack ?? onBack;
   const [currentCompany, setCurrentCompany] = useState(company);
   const [isExpanded, setIsExpanded] = useState(true);
-  const [activeMenu, setActiveMenu] = useState(initialMenu === 'invoices' ? 'documents' : initialMenu);
+  const [activeMenu, setActiveMenu] = useState(relatedMenu ?? (initialMenu === 'invoices' ? 'documents' : initialMenu));
   const [activeDocumentsMenu, setActiveDocumentsMenu] = useState<'documents' | 'invoices' | 'processed'>(initialMenu === 'invoices' ? 'invoices' : 'documents');
   const [dashboardDocumentId, setDashboardDocumentId] = useState<string | null>(initialDocumentId);
   const [activeDebtsMenu, setActiveDebtsMenu] = useState<'list' | 'information'>('list');
   const [activeBankMenu, setActiveBankMenu] = useState<'transactions' | 'accounts' | 'sepa'>('transactions');
-  const [activeCompanyInformationMenu, setActiveCompanyInformationMenu] = useState<(typeof companyInformationMenuItems)[number]>('Client information');
+  const [activeCompanyInformationMenu, setActiveCompanyInformationMenu] = useState<(typeof companyInformationMenuItems)[number]>(relatedObject?.type === 'Counterparty' ? 'Clients' : 'Client information');
   const fallbackMenuLabel = [...mainMenuItems, ...contactMenuItems].find(
     (item) => item.id === activeMenu,
   )?.label ?? "Company overview";
@@ -188,13 +201,14 @@ export default function CompanyDetail({ company, onBack, onLogout, onOpenProfile
 
           {/* Main menu — grows to fill space */}
           <nav className="flex flex-col gap-0 flex-1 overflow-y-auto">
-            {mainMenuItems.map((item) => {
+            {mainMenuItems.filter(item => item.id !== 'notifications' || onOpenNotifications).map((item) => {
               const isActive = activeMenu === item.id;
               const Icon = item.icon;
               return (
                 <div key={item.id} className="flex flex-col">
                   <button
                     onClick={() => {
+                      if (item.id === 'notifications') { onOpenNotifications?.(activeMenu); return; }
                       setActiveMenu(item.id);
                       if (item.id === 'activity') {
                         setActiveCompanyInformationMenu('Client information');
@@ -344,18 +358,20 @@ export default function CompanyDetail({ company, onBack, onLogout, onOpenProfile
           <CompanyGlJournalView company={currentCompany} />
         ) : activeMenu === 'bank' ? (
           activeBankMenu === 'transactions'
-            ? <CompanyBankView company={currentCompany} />
+            ? <CompanyBankView company={currentCompany} initialRecordId={relatedObject?.type === 'Bank operation' ? relatedRecordId : undefined} onRelatedObjectBack={backFromRelatedObject} />
             : activeBankMenu === 'accounts'
               ? <CompanyBankAccountsView company={currentCompany} onCompanyUpdated={setCurrentCompany} />
               : <CompanySepaPaymentsView company={currentCompany} />
         ) : activeMenu === 'reports' ? (
-          activeDebtsMenu === 'list' ? <CompanyDebtsView companyName={currentCompany.name} /> : <CompanyDebts company={currentCompany} onCompanyUpdated={setCurrentCompany} />
+          activeDebtsMenu === 'list' ? <CompanyDebtsView companyName={currentCompany.name} initialRecordId={relatedObject?.type === 'Debt' ? relatedRecordId : undefined} onRelatedObjectBack={backFromRelatedObject} /> : <CompanyDebts company={currentCompany} onCompanyUpdated={setCurrentCompany} />
         ) : activeMenu === 'activity' ? (
           activeCompanyInformationMenu === 'GL account'
             ? <GeneralLedgerView assignedTemplateName={currentCompany.general_ledger ?? ''} companyName={currentCompany.name} companyId={currentCompany.id} />
-            : <CompanyClientInformation company={currentCompany} activeTab={activeCompanyInformationMenu} organizationDesign onCompanyUpdated={setCurrentCompany} />
+            : activeCompanyInformationMenu === 'Clients' && relatedObject?.type === 'Counterparty'
+              ? <CompanyClientsView company={currentCompany} initialRecordId={relatedRecordId} onRelatedObjectBack={backFromRelatedObject} />
+              : <CompanyClientInformation company={currentCompany} activeTab={activeCompanyInformationMenu} organizationDesign onCompanyUpdated={setCurrentCompany} />
         ) : activeMenu === 'services' ? (
-          <CompanyReconciliationView companyName={currentCompany.name} />
+          <CompanyReconciliationView key={currentCompany.id + ':examples-v2'} companyId={currentCompany.id} companyName={currentCompany.name} initialRecordId={relatedObject?.type === 'Reconciliation' ? relatedRecordId : undefined} onRelatedObjectBack={backFromRelatedObject} />
         ) : activeMenu === 'settings' ? (
           <CompanyReportsView company={currentCompany} />
         ) : (
