@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   Check,
@@ -14,6 +14,7 @@ import {
 import { supabase, type Company } from "../lib/supabase";
 import { PageActionButton, PageHeader } from "./PageHeader";
 import CompanyBreadcrumb from "./CompanyBreadcrumb";
+import { HeaderBackButton, SystemBreadcrumb } from './SystemNavigation';
 import DepartmentCodesEditor from "./DepartmentCodesEditor";
 import OrganizationCounterpartiesSettings from "./OrganizationCounterpartiesSettings";
 import {
@@ -184,7 +185,6 @@ const DIGITIZATION_SETTINGS_FIELDS: Record<string, keyof Company> = {
   documentSplitting: 'document_splitting',
   rejectNonInvoices: 'reject_non_invoices',
   primaryExportFormat: 'primary_export_format',
-  twoFactorAuthentication: 'two_factor_authentication',
 };
 
 type DimensionItem = { code: string; name?: string };
@@ -872,7 +872,7 @@ export default function CompanyClientInformation({
   const organizationInformationDesign = organizationMode || organizationDesign;
   const scopedSettingsOnly = additionalSettingsOnly || digitizationSettingsOnly;
   const scopedSettingsFields = digitizationSettingsOnly ? DIGITIZATION_SETTINGS_FIELDS : ADDITIONAL_SETTINGS_FIELDS;
-  const scopedSettingsTitle = digitizationSettingsOnly ? 'Document digitization settings' : 'Additional settings';
+  const scopedSettingsTitle = digitizationSettingsOnly ? 'Documents & digitization setup' : 'Accounting setup';
   const [companyLogo, setCompanyLogo] = useState(() =>
     company.logo_url || loadCompanyLogo(company.id),
   );
@@ -883,6 +883,7 @@ export default function CompanyClientInformation({
   const [saveError, setSaveError] = useState("");
   const [organizationFormSection, setOrganizationFormSection] = useState<
     | "general"
+    | "accounting"
     | "banking"
     | "digitization"
     | "sharepoint"
@@ -1297,15 +1298,15 @@ export default function CompanyClientInformation({
   );
 
   return (
-    <div className={`relative flex min-w-0 flex-col items-start gap-6 bg-white ${bankInformationOnly ? 'w-full' : 'min-h-full px-[72px] py-14'}`}>
+    <div className={`relative flex min-w-0 flex-col bg-white ${createMode ? 'min-h-full gap-8 px-4 py-14 sm:px-8 lg:px-[72px]' : `items-start gap-6 ${bankInformationOnly ? 'w-full' : 'min-h-full px-[72px] py-14'}`}`}>
       {!bankInformationOnly && <PageHeader
-        title={createMode ? "Create organization" : company.name}
-        className="max-w-[1440px]"
+        title={createMode ? "Create company" : company.name}
+        className={createMode ? undefined : 'max-w-[1440px]'}
         leading={
-          onBack ? (
+          onBack && !createMode ? (
             <button
               type="button"
-              aria-label="Back to organizations"
+              aria-label="Back to companies"
               onClick={onBack}
               className="flex h-9 w-9 items-center justify-center rounded-md text-[#7288A3] hover:bg-[#F0F7FA] hover:text-[#007EA7]"
             >
@@ -1314,17 +1315,17 @@ export default function CompanyClientInformation({
           ) : undefined
         }
         actions={
-          (activeTab === "Client information" &&
+          !createMode && ((activeTab === "Client information" &&
             (!organizationInformationDesign ||
               organizationFormSection !== "email-history")) ||
-          (!organizationMode && activeTab === "Contacts") ? (
+          (!organizationMode && activeTab === "Contacts")) ? (
             <>
               {!createMode && onOpenSetupIntegration && <PageActionButton onClick={onOpenSetupIntegration}>Setup & integration</PageActionButton>}
               <PageActionButton onClick={saveClientInformation}>
                 {saving
                   ? "Saving..."
                   : createMode
-                    ? "Create organization"
+                    ? "Create company"
                     : activeTab === "Contacts"
                       ? "Update contacts"
                       : organizationInformationDesign &&
@@ -1336,6 +1337,16 @@ export default function CompanyClientInformation({
           ) : undefined
         }
       />}
+      {createMode && <>
+        <SystemBreadcrumb items={['Companies', 'Create company', organizationFormSection === 'general' ? 'General & status' : organizationFormSection === 'accounting' ? 'Accounting setup' : organizationFormSection === 'banking' ? 'Bank setup' : organizationFormSection === 'digitization' ? 'Documents & digitization setup' : organizationFormSection === 'users' ? 'Accountants & access' : organizationFormSection === 'sharepoint' ? 'Setup & integration' : organizationFormSection === 'email-history' ? 'Sent mail history' : 'Counterparties']} />
+        <div className="flex items-center gap-3">
+          {onBack && <HeaderBackButton onClick={onBack} label="Back to companies" />}
+          <div className="min-w-0">
+            <h2 className="truncate font-montserrat text-[18px] font-semibold leading-[26px] text-[#10233A]">{fields.find(field => field.key === 'legalName')?.value || 'New company'}</h2>
+            <p className="font-montserrat text-[12px] leading-[18px] text-[#7288A3]">Company code: {fields.find(field => field.key === 'companyCode')?.value || '—'}</p>
+          </div>
+        </div>
+      </>}
       {!organizationMode && !createMode && (
         <CompanyBreadcrumb
           companyName={company.name}
@@ -1343,7 +1354,7 @@ export default function CompanyClientInformation({
         />
       )}
 
-      <div className="flex w-full max-w-[1440px] flex-col gap-6">
+      <div className={`flex w-full flex-col gap-6 ${createMode ? '' : 'max-w-[1440px]'}`}>
         {activeTab === "Stats" ? (
           <StatsView
             activeTab={activeStatsTab}
@@ -1352,7 +1363,7 @@ export default function CompanyClientInformation({
         ) : activeTab === "Client information" ? (
           <div
             className={`flex w-full flex-col gap-6 ${
-              organizationInformationDesign &&
+              createMode ? '' : organizationInformationDesign &&
               organizationFormSection === "counterparties"
                 ? "max-w-[1440px]"
                 : organizationInformationDesign &&
@@ -1375,18 +1386,26 @@ export default function CompanyClientInformation({
             {organizationInformationDesign && !bankInformationOnly && (
               <div
                 role="tablist"
-                aria-label="Organization settings sections"
-                className="flex w-full overflow-x-auto border-b border-[#DDE7F0]"
+                aria-label="Company settings sections"
+                className={createMode ? 'flex min-w-0 flex-wrap border-b border-[#D3E1EC]' : 'flex w-full overflow-x-auto border-b border-[#DDE7F0]'}
               >
-                {[
-                  ["general", "Organization information"],
+                {(createMode ? [
+                  ['general', 'General & status'],
+                  ['accounting', 'Accounting setup'],
+                  ['banking', 'Bank setup'],
+                  ['digitization', 'Documents & digitization setup'],
+                  ['users', 'Accountants & access'],
+                  ['sharepoint', 'Setup & integration'],
+                  ['counterparties', 'Counterparties'],
+                ] : [
+                  ["general", "Company information"],
                   ["banking", "Bank information"],
                   ["digitization", "Document digitization settings"],
                   ["sharepoint", "SharePoint settings"],
                   ["counterparties", "Counterparties Settings"],
                   ["users", "Users"],
                   ["email-history", "Sent email history"],
-                ].map(([section, label]) => {
+                ]).map(([section, label]) => {
                   const selected = organizationFormSection === section;
                   return (
                     <button
@@ -1398,6 +1417,7 @@ export default function CompanyClientInformation({
                         setOrganizationFormSection(
                           section as
                             | "general"
+                            | "accounting"
                             | "banking"
                             | "digitization"
                             | "sharepoint"
@@ -1406,7 +1426,7 @@ export default function CompanyClientInformation({
                             | "email-history",
                         )
                       }
-                      className={`border-b-2 px-5 py-3 font-montserrat text-[14px] font-semibold transition-colors ${
+                      className={`${createMode ? 'h-[42px] px-4 text-[13px] leading-5' : 'px-5 py-3 text-[14px]'} border-b-2 font-montserrat font-semibold transition-colors ${
                         selected
                           ? "border-[#007EA7] text-[#007EA7]"
                           : "border-transparent text-[#7288A3] hover:text-[#10233A]"
@@ -1420,7 +1440,9 @@ export default function CompanyClientInformation({
             )}
             <div
               className={`max-w-full ${
-                organizationInformationDesign &&
+                createMode && ['general', 'accounting', 'digitization', 'sharepoint'].includes(organizationFormSection)
+                  ? `grid w-full grid-cols-1 gap-4 rounded-lg border border-[#D3E1EC] bg-white p-5 ${organizationFormSection === 'general' ? 'md:grid-cols-2 xl:grid-cols-3' : 'xl:grid-cols-2'}`
+                  : organizationInformationDesign &&
                 organizationFormSection === "counterparties"
                   ? "flex w-full flex-col gap-6"
                   : organizationInformationDesign &&
@@ -1440,9 +1462,13 @@ export default function CompanyClientInformation({
                       : "flex w-[560px] flex-col gap-6"
               }`}
             >
+              {createMode && ['general', 'accounting', 'digitization', 'sharepoint'].includes(organizationFormSection) && <div className="col-span-full mb-1">
+                <h3 className="font-montserrat text-[16px] font-semibold leading-6 text-[#10233A]">{organizationFormSection === 'general' ? 'Company details' : organizationFormSection === 'accounting' ? 'Accounting setup' : organizationFormSection === 'digitization' ? 'Documents & digitization setup' : 'Setup & integration'}</h3>
+                {organizationFormSection === 'general' && <p className="mt-1 font-montserrat text-[12px] leading-[18px] text-[#7288A3]">Primary identification and registration information.</p>}
+              </div>}
               {organizationInformationDesign &&
                 organizationFormSection === "general" && (
-                  <div className="flex items-center gap-4 rounded-lg border border-[#E3ECF3] bg-[#F8FAFC] p-4 lg:col-span-2">
+                  <div className={`flex items-center gap-4 rounded-lg border border-[#E3ECF3] bg-[#F8FAFC] p-4 ${createMode ? 'col-span-full' : 'lg:col-span-2'}`}>
                     <div className="flex h-16 w-24 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border border-[#D3E1EC] bg-white">
                       {companyLogo ? (
                         <img
@@ -1668,8 +1694,10 @@ export default function CompanyClientInformation({
                     const isCounterpartiesField =
                       ORGANIZATION_COUNTERPARTIES_FIELD_KEYS.has(field.key);
                     if (organizationFormSection === "digitization") {
-                      return isDigitizationField;
+                      return isDigitizationField && (!createMode || field.key !== 'twoFactorAuthentication');
                     }
+                    if (createMode && organizationFormSection === 'accounting') return field.key in ADDITIONAL_SETTINGS_FIELDS;
+                    if (createMode && organizationFormSection === 'general' && field.key in ADDITIONAL_SETTINGS_FIELDS) return false;
                     if (organizationFormSection === "sharepoint") {
                       return (
                         isSharePointField &&
@@ -1702,7 +1730,7 @@ export default function CompanyClientInformation({
                         onChange={(value) => updateField(field.key, value)}
                       />
                     ) : organizationInformationDesign && dimension ? (
-                      <div key={field.key} className="lg:col-span-2">
+                      <div key={field.key} className={createMode ? 'min-w-0' : 'lg:col-span-2'}>
                         <DepartmentCodesEditor
                           value={field.value}
                           onChange={(value) => updateField(field.key, value)}
@@ -1717,11 +1745,13 @@ export default function CompanyClientInformation({
                         />
                       </div>
                     ) : (
-                      <ClientField
-                        key={field.key}
-                        field={field}
-                        onChange={(value) => updateField(field.key, value)}
-                      />
+                      <Fragment key={field.key}>
+                        {createMode && organizationFormSection === 'general' && field.key === 'address' && <h4 className="col-span-full mt-2 border-t border-[#E5EDF4] pt-5 font-montserrat text-[14px] font-semibold leading-5 text-[#10233A]">Company address</h4>}
+                        <ClientField
+                          field={field}
+                          onChange={(value) => updateField(field.key, value)}
+                        />
+                      </Fragment>
                     );
                   })
               )}
@@ -1746,6 +1776,7 @@ export default function CompanyClientInformation({
               )}
               {bankInformationOnly && <div className="flex justify-end"><PageActionButton disabled={saving} onClick={() => void saveClientInformation()}>{saving ? 'Saving…' : 'Save'}</PageActionButton></div>}
             </div>
+            {createMode && <div className="flex justify-end"><PageActionButton disabled={saving} onClick={() => void saveClientInformation()}>{saving ? 'Saving…' : 'Create company'}</PageActionButton></div>}
           </div>
         ) : activeTab === "Contacts" ? (
           <div className="grid w-full max-w-[1180px] grid-cols-1 gap-x-5 gap-y-4 rounded-xl border border-[#DDE7F0] bg-[#FBFDFE] p-5 lg:grid-cols-2">

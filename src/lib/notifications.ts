@@ -191,7 +191,26 @@ export function getTaskStatus(row: OrganizationActionMetadata & { status: string
 
 export function isNotificationRead(row: OrganizationActionMetadata, email: string): boolean {
   const identity = email.trim().toLowerCase();
-  return Boolean(identity) && Object.entries(row.readAtByEmail ?? {}).some(([recipient, readAt]) => recipient.trim().toLowerCase() === identity && Boolean(readAt));
+  if (!identity) return false;
+  if (Object.entries(row.readAtByEmail ?? {}).some(([recipient, readAt]) => recipient.trim().toLowerCase() === identity && Boolean(readAt))) return true;
+  const signal = row as OrganizationActionMetadata & Partial<Pick<NotificationRow, 'sourceChatId' | 'sourceMessageId' | 'createdAt'>>;
+  const chatId = signal.sourceChatId || (row.relatedObject?.type === 'Chat' ? row.relatedObject.recordId || row.relatedObject.id.replace(/^chat:/, '') : '');
+  if (!chatId || typeof window === 'undefined') return false;
+  try {
+    const lastReadId = window.localStorage.getItem(`finansu-harmonija:v14:chat-read:${encodeURIComponent(identity)}:${chatId}`);
+    if (!lastReadId) return false;
+    const messages = JSON.parse(window.localStorage.getItem(`finansu-harmonija:v12:invoice-chat:${chatId}`) || '[]') as Array<{ id: string; sentAt?: string; timestamp?: string; date?: string }>;
+    if (!Array.isArray(messages)) return false;
+    const readIndex = messages.findIndex(message => message.id === lastReadId);
+    if (readIndex < 0) return false;
+    if (signal.sourceMessageId) {
+      const index = messages.findIndex(message => message.id === signal.sourceMessageId);
+      return index >= 0 && index <= readIndex;
+    }
+    // Legacy thread-level signals have no message ID. Never dismiss a newer signal.
+    const readAt = Date.parse(messages[readIndex].sentAt || messages[readIndex].timestamp || messages[readIndex].date || '');
+    return readIndex === messages.length - 1 && (!signal.createdAt || Date.parse(signal.createdAt) <= readAt);
+  } catch { return false; }
 }
 
 export function setNotificationRead<T extends OrganizationActionMetadata>(row: T, email: string, read: boolean, now = new Date().toISOString()): T {

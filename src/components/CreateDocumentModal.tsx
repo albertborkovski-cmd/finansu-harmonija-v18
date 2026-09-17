@@ -956,7 +956,7 @@ export default function CreateDocumentModal({ companyId, companyName = '', secti
       if (!form.documentDate) { setError('Date is required.'); return; }
       if (!form.number.trim()) { setError('Document number is required.'); return; }
       if (!form.currency.trim()) { setError('Currency is required.'); return; }
-      if (!form.clientCounterparty.trim()) { setError('Client is required.'); return; }
+      if (!form.clientCounterparty.trim()) { setError('Counterparty is required.'); return; }
       if (!form.expenseAccount.trim()) { setError('GL account is required.'); return; }
       if (!(Number(form.debit) > 0) && !(Number(form.credit) > 0)) {
         setError('Enter a Debit or Credit amount.');
@@ -1435,7 +1435,7 @@ export default function CreateDocumentModal({ companyId, companyName = '', secti
                       className="document-value-control min-h-[72px] w-full resize-y rounded border border-[#D3E1EC] bg-white px-2 py-2 font-montserrat text-[12px] font-medium text-[#10233A] outline-none placeholder:text-[#A1B6C6] focus:border-[#007EA7]"
                     />
                   </Field>
-                  <Field label="Client" required>
+                  <Field label="Counterparty" required>
                     <ManagedSelect
                       value={form.clientCounterparty}
                       options={counterparties.map((counterparty) => counterparty.name)}

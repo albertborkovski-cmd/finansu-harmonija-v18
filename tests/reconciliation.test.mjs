@@ -14,6 +14,10 @@ const {
   reverseReconciliation,
   createDemoReconciliationState,
   parseReconciliationState,
+  getReconciliationRoute,
+  hasReconciliationClient,
+  isClientReconciliationItem,
+  assignReconciliationGlAccount,
 } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
 
 const organizationId = 'organization-1';
@@ -786,4 +790,232 @@ test('parser round-trips demo, applied, undone, and reapplied states with reused
   assert.deepEqual(reapplied.batches[0].proposalIds, reapplied.batches[1].proposalIds);
   assert.equal(reapplied.batches[0].reversedAt, reversedAt);
   assert.equal(reapplied.batches[1].reversedAt, undefined);
+});
+
+test('deposits are manual-only even with exact references, unique amounts or multiple covered invoices', () => {
+  for (const patch of [
+    { reference: 'INV-1' },
+    { reference: '' },
+    { reference: 'INV-1 INV-2', originalMinor: 20000, remainingMinor: 20000 },
+  ]) {
+    const deposit = funding('deposit-1', { kind: 'Deposit', ...patch });
+    const rows = [invoice(), invoice('invoice-2', { documentNumber: 'INV-2' }), deposit];
+    const result = suggestReconciliation(deepFreeze(rows));
+    assert.equal(result.proposals.length, 0);
+    assert.match(result.unmatched.find(entry => entry.itemId === deposit.id).reason, /Deposits require manual allocation/);
+  }
+  const deposit = funding('deposit-1', { kind: 'Deposit' });
+  const withBank = suggestReconciliation([invoice(), funding(), deposit]);
+  assert.equal(withBank.proposals.length, 1);
+  assert.equal(withBank.proposals[0].fundingId, 'payment-1');
+  assert.match(withBank.unmatched.find(entry => entry.itemId === deposit.id).reason, /manual allocation/);
+  const settled = suggestReconciliation([deposit].map(row => ({ ...row, remainingMinor: 0 })));
+  assert.equal(settled.unmatched[0].reason, 'No remaining balance.');
+});
+
+test('manual deposit allocations apply partially, parse and reverse without losing contract history', () => {
+  for (const side of ['Receivable', 'Payable']) {
+    const input = deepFreeze(state([
+      invoice('invoice-1', { side }),
+      funding('deposit-1', { kind: 'Deposit', side, originalMinor: 25000, remainingMinor: 25000, reference: 'Contract LT-2026-001' }),
+    ]));
+    const proposal = {
+      id: 'manual-deposit', organizationId, fundingId: 'deposit-1',
+      allocations: [{ invoiceId: 'invoice-1', amountMinor: 2517 }],
+      confidence: 'Review required', rule: 'Manual selection', reason: 'Approved partial contract release',
+      expectedRemaining: { 'deposit-1': 25000, 'invoice-1': 10000 },
+    };
+    const applied = applyReconciliation(input, [proposal], batch);
+    assert.deepEqual(remaining(applied), { 'invoice-1': 7483, 'deposit-1': 22483 });
+    assert.deepEqual(applied.batches[0].allocations, [{ fundingId: 'deposit-1', invoiceId: 'invoice-1', amountMinor: 2517 }]);
+    const parsed = parseReconciliationState(JSON.stringify(applied), organizationId);
+    assert.deepEqual(parsed, applied);
+    assert.equal(parsed.items[1].reference, 'Contract LT-2026-001');
+    const reversed = reverseReconciliation(parsed, batch.id, reversedAt);
+    assert.deepEqual(reversed.items, input.items);
+    assert.deepEqual(parseReconciliationState(JSON.stringify(reversed), organizationId), reversed);
+    assert.throws(() => reverseReconciliation(reversed, batch.id, reversedAt), /already been reversed/);
+  }
+});
+
+test('deposit funding cannot bypass scope, safe-cent or stale-balance validation', () => {
+  const initial = state([invoice(), funding('deposit-1', { kind: 'Deposit' })]);
+  const proposal = {
+    id: 'manual-deposit', organizationId, fundingId: 'deposit-1',
+    allocations: [{ invoiceId: 'invoice-1', amountMinor: 2500 }],
+    confidence: 'Review required', rule: 'Manual selection', reason: 'Partial release',
+    expectedRemaining: { 'deposit-1': 10000, 'invoice-1': 10000 },
+  };
+  for (const patch of [{ organizationId: 'another-company' }, { counterpartyId: 'another-client' }, { currency: 'USD' }, { side: 'Payable' }]) {
+    const incompatible = deepFreeze({ ...initial, items: initial.items.map(row => row.kind === 'Deposit' ? { ...row, ...patch } : row) });
+    assert.throws(() => applyReconciliation(incompatible, [proposal], batch), /organization|counterparty|currency|side/i);
+  }
+  for (const amountMinor of [0, -1, 1.25, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, 10001]) {
+    assert.throws(() => applyReconciliation(deepFreeze(initial), [{ ...proposal, allocations: [{ invoiceId: 'invoice-1', amountMinor }] }], batch));
+  }
+  const stale = { ...proposal, expectedRemaining: { 'deposit-1': 9999, 'invoice-1': 10000 } };
+  assert.throws(() => applyReconciliation(initial, [stale], batch), /Stale/);
+  for (const originalMinor of [-1, 1.1, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => parseReconciliationState(JSON.stringify({ ...initial, items: initial.items.map(row => row.kind === 'Deposit' ? { ...row, originalMinor } : row) }), organizationId), /safe integer/);
+  }
+});
+
+test('explicit payment purposes route to accounting with or without an assigned client', () => {
+  const categories = [
+    ['Tax authority', ['VMI', 'Valstybinė mokesčių inspekcija', 'Tax authority', 'State tax inspectorate']],
+    ['Social insurance', ['Sodra', 'Social insurance contributions', 'Valstybinio socialinio draudimo fondo valdyba']],
+    ['Payroll', ['PAYROLL 2026-09', 'salary', 'salaries', 'Darbo užmokestis', 'Darbo uzmokescio avansas']],
+    ['Bank fees', ['Bank fee', 'bank fees', 'Bank service fee', 'bank commission', 'Bank charges', 'Banko komisinis mokestis', 'banko mokesčiai']],
+  ];
+  for (const [category, signals] of categories) for (const signal of signals) {
+    for (const field of ['payeeName', 'counterpartyName', 'reference']) {
+      const identified = funding('accounting', { [field]: signal });
+      const route = getReconciliationRoute(identified);
+      assert.equal(route.kind, 'accounting', `${field}: ${signal}`);
+      assert.equal(route.category, category, signal);
+      assert.ok(route.reason.length > 0);
+      assert.equal(hasReconciliationClient(identified), true);
+      assert.equal(isClientReconciliationItem(identified), false);
+      if (field !== 'counterpartyName') {
+        const unassigned = { ...identified, counterpartyId: '', counterpartyName: '' };
+        assert.equal(getReconciliationRoute(unassigned).category, category);
+        assert.equal(hasReconciliationClient(unassigned), false);
+      }
+    }
+  }
+});
+
+test('recognition avoids substrings, generic VAT invoices and ordinary commissions', () => {
+  for (const reference of ['VAT invoice INV-1', 'PVM sąskaita faktūra INV-1', 'Tax consulting invoice', 'Sales commission INV-1', 'Invoice settlement', 'XVMIX', 'VMI123', 'Sodralita UAB', 'salary123', 'payrolls', 'bank feesXYZ', 'x_bank fee', 'VMI_service']) {
+    const identified = funding('ordinary', { reference });
+    assert.equal(getReconciliationRoute(identified).kind, 'client', reference);
+    assert.equal(isClientReconciliationItem(identified), true);
+    const missing = { ...identified, counterpartyId: '', counterpartyName: '' };
+    assert.equal(getReconciliationRoute(missing).kind, 'unidentified', reference);
+  }
+  for (const kind of ['Invoice', 'Advance', 'Deposit', 'Credit note']) {
+    assert.equal(getReconciliationRoute(item('nonpayment', { kind, reference: 'VMI salary bank fee Sodra' })).kind, 'client');
+  }
+});
+
+test('parser permits exactly empty client fields only for payments and preserves optional metadata', () => {
+  const valid = state([funding('tax', { counterpartyId: '', counterpartyName: '', payeeName: 'VMI', glAccountCode: '4484' })]);
+  assert.deepEqual(parseReconciliationState(JSON.stringify(valid), organizationId), valid);
+  assert.deepEqual(parseReconciliationState(JSON.stringify(state()), organizationId), state());
+  assert.equal(Object.hasOwn(parseReconciliationState(JSON.stringify(state()), organizationId), 'glAssignments'), false);
+  for (const patch of [
+    { counterpartyId: '' }, { counterpartyName: '' }, { counterpartyId: ' ', counterpartyName: ' ' },
+    { counterpartyId: null, counterpartyName: null }, { counterpartyId: undefined, counterpartyName: undefined },
+  ]) assertInvalidPersisted(state([funding('invalid', patch)]));
+  for (const kind of ['Invoice', 'Advance', 'Deposit', 'Credit note']) {
+    assertInvalidPersisted(state([item('invalid', { kind, counterpartyId: '', counterpartyName: '' })]));
+  }
+  for (const key of ['payeeName', 'glAccountCode']) for (const value of [null, '', ' ', 42, [], {}]) {
+    assertInvalidPersisted(state([funding('bad-meta', { [key]: value })]));
+  }
+  assertInvalidPersisted(state([funding('bad-account', { glAccountCode: ' 4484 ' })]));
+});
+
+test('non-client routes never produce suggestions or apply new invoice allocations', () => {
+  const original = state();
+  const proposals = suggestReconciliation(original.items).proposals;
+  for (const patch of [
+    { reference: 'INV-1; VMI' }, { payeeName: 'Sodra' }, { reference: 'Payroll INV-1' },
+    { reference: 'Bank fee INV-1' }, { counterpartyId: '', counterpartyName: '' },
+  ]) {
+    const input = deepFreeze({ ...original, items: original.items.map(row => row.kind === 'Payment' ? { ...row, ...patch } : row) });
+    const before = JSON.stringify(input);
+    assertNoProposals(input.items);
+    assert.ok(suggestReconciliation(input.items).unmatched.find(entry => entry.itemId === 'payment-1')?.reason);
+    assert.throws(() => applyReconciliation(input, proposals, batch));
+    assert.equal(JSON.stringify(input), before);
+  }
+});
+
+test('recognized payment purposes do not invalidate existing allocation history or its reversal', () => {
+  const original = state();
+  const applied = applyReconciliation(original, suggestReconciliation(original.items).proposals, batch);
+  const historical = { ...applied, items: applied.items.map(row => row.kind === 'Payment' ? { ...row, reference: 'Bank commission; INV-1' } : row) };
+  const parsed = deepFreeze(parseReconciliationState(JSON.stringify(historical), organizationId));
+  assert.deepEqual(parsed, historical);
+  const reversed = reverseReconciliation(parsed, batch.id, reversedAt);
+  assert.deepEqual(remaining(reversed), remaining(original));
+  assert.deepEqual(parseReconciliationState(JSON.stringify(reversed), organizationId), reversed);
+  assertNoProposals(reversed.items);
+});
+
+const glMeta = { id: 'gl-1', at: '2026-09-16T10:00:00.000Z', actor: 'Accountant', note: '' };
+const accountingState = () => state([invoice(), funding('accounting', { counterpartyId: '', counterpartyName: '', payeeName: 'VMI', reference: 'PVM įmoka' })]);
+
+test('GL account assignment appends immutable audit metadata without changing money or batches', () => {
+  const input = deepFreeze(accountingState());
+  const before = JSON.stringify(input);
+  const changed = assignReconciliationGlAccount(input, 'accounting', '4484', ['4484', '271'], glMeta);
+  assert.equal(JSON.stringify(input), before);
+  assert.strictEqual(changed.batches, input.batches);
+  assert.strictEqual(changed.items[0], input.items[0]);
+  assert.deepEqual(remaining(changed), remaining(input));
+  assert.deepEqual(changed.items.map(row => row.originalMinor), input.items.map(row => row.originalMinor));
+  assert.deepEqual(changed.glAssignments, [{ ...glMeta, itemId: 'accounting', fromAccount: '', toAccount: '4484' }]);
+  assert.equal(changed.items[1].glAccountCode, '4484');
+  const twice = assignReconciliationGlAccount(deepFreeze(changed), 'accounting', '271', ['271'], { ...glMeta, id: 'gl-2', at: '2026-09-16T11:00:00Z', note: 'Correction after review' });
+  assert.deepEqual(twice.glAssignments[1], { id: 'gl-2', at: '2026-09-16T11:00:00Z', actor: 'Accountant', note: 'Correction after review', itemId: 'accounting', fromAccount: '4484', toAccount: '271' });
+  assert.deepEqual(parseReconciliationState(JSON.stringify(twice), organizationId), twice);
+  assert.equal(getReconciliationRoute(twice.items[1]).kind, 'accounting');
+});
+
+test('GL edits support unidentified and identified accounting payments, including historical balances', () => {
+  for (const patch of [
+    { counterpartyId: '', counterpartyName: '', reference: 'Unrecognized transfer' },
+    { reference: 'Bank service fee' },
+  ]) {
+    const input = state([funding('accounting', patch)]);
+    const changed = assignReconciliationGlAccount(input, 'accounting', '6118', ['6118'], glMeta);
+    assert.deepEqual(remaining(changed), remaining(input));
+    assert.deepEqual(parseReconciliationState(JSON.stringify(changed), organizationId), changed);
+  }
+  const historical = persistedHistory();
+  historical.items[1].reference = 'Bank fee';
+  const changed = assignReconciliationGlAccount(deepFreeze(historical), 'payment-1', '6118', ['6118'], glMeta);
+  assert.deepEqual(changed.batches, historical.batches);
+  assert.deepEqual(remaining(changed), remaining(historical));
+  const reversed = reverseReconciliation(changed, batch.id, reversedAt);
+  assert.deepEqual(reversed.glAssignments, changed.glAssignments);
+  assert.deepEqual(parseReconciliationState(JSON.stringify(reversed), organizationId), reversed);
+});
+
+test('GL assignment rejects invalid items, company scope, inactive accounts and invalid metadata atomically', () => {
+  const input = deepFreeze(accountingState());
+  const before = JSON.stringify(input);
+  for (const itemId of ['missing', 'invoice-1']) assert.throws(() => assignReconciliationGlAccount(input, itemId, '4484', ['4484'], glMeta));
+  assert.throws(() => assignReconciliationGlAccount(state(), 'payment-1', '4484', ['4484'], glMeta));
+  for (const code of ['', ' ', ' 4484 ', 'inactive', null, 4484]) assert.throws(() => assignReconciliationGlAccount(input, 'accounting', code, ['4484'], glMeta));
+  for (const allowed of [[], null, {}, ['4484', null]]) assert.throws(() => assignReconciliationGlAccount(input, 'accounting', '4484', allowed, glMeta));
+  for (const patch of [{ id: '' }, { actor: ' ' }, { note: null }, { note: undefined }, { at: '2026-09-16' }, { at: '2026-02-30T10:00:00Z' }]) {
+    assert.throws(() => assignReconciliationGlAccount(input, 'accounting', '4484', ['4484'], { ...glMeta, ...patch }));
+  }
+  assert.throws(() => assignReconciliationGlAccount({ ...input, organizationId: 'other' }, 'accounting', '4484', ['4484'], glMeta));
+  assert.throws(() => assignReconciliationGlAccount({ ...input, items: [...input.items, input.items[1]] }, 'accounting', '4484', ['4484'], glMeta));
+  const once = assignReconciliationGlAccount(input, 'accounting', '4484', ['4484'], glMeta);
+  assert.throws(() => assignReconciliationGlAccount(once, 'accounting', '4484', ['4484'], { ...glMeta, id: 'gl-2' }), /different/);
+  assert.throws(() => assignReconciliationGlAccount(once, 'accounting', '271', ['271'], glMeta), /already exists/);
+  assert.throws(() => assignReconciliationGlAccount(once, 'accounting', '271', ['271'], { ...glMeta, id: 'gl-2', at: '2026-09-15T10:00:00Z' }), /precedes/);
+  assert.equal(JSON.stringify(input), before);
+});
+
+test('parser strictly validates GL audit records and their final account and edit chain', () => {
+  const once = assignReconciliationGlAccount(accountingState(), 'accounting', '4484', ['4484'], glMeta);
+  for (const glAssignments of [null, {}, '', [null], [{}], [once.glAssignments[0], once.glAssignments[0]]]) assertInvalidPersisted({ ...once, glAssignments });
+  for (const patch of [
+    { id: '' }, { itemId: 'missing' }, { itemId: 'invoice-1' }, { fromAccount: null }, { fromAccount: ' ' },
+    { toAccount: '' }, { toAccount: ' 4484' }, { fromAccount: '4484' }, { actor: '' }, { note: null },
+    { at: 'yesterday' }, { at: '2026-02-30T00:00:00Z' },
+  ]) assertInvalidPersisted({ ...once, glAssignments: [{ ...once.glAssignments[0], ...patch }] });
+  assertInvalidPersisted({ ...once, items: once.items.map(row => row.id === 'accounting' ? { ...row, glAccountCode: '271' } : row) });
+  const twice = assignReconciliationGlAccount(once, 'accounting', '271', ['271'], { ...glMeta, id: 'gl-2', at: '2026-09-16T11:00:00Z' });
+  for (const patch of [{ fromAccount: '' }, { fromAccount: '6118' }, { at: '2026-09-15T10:00:00Z' }]) {
+    assertInvalidPersisted({ ...twice, glAssignments: [twice.glAssignments[0], { ...twice.glAssignments[1], ...patch }] });
+  }
+  const emptyAudit = { ...state(), glAssignments: [] };
+  assert.deepEqual(parseReconciliationState(JSON.stringify(emptyAudit), organizationId), emptyAudit);
 });

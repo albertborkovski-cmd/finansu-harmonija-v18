@@ -62,12 +62,14 @@ function isIncoming(message: StoredChatMessage, email: string) {
 
 function chatPartner(context: InvoiceChatContext, email: string, messages: StoredChatMessage[]) {
   const isCreator = context.createdByEmail?.toLowerCase() === email.toLowerCase();
-  const partnerEmail = isCreator ? context.recipientEmail : context.createdByEmail;
+  const incoming = [...messages].reverse().find(message => isIncoming(message, email));
+  const partnerEmail = (isCreator ? context.recipientEmail : context.createdByEmail) || incoming?.authorEmail;
   const external = loadLinkedDirectoryUsers('External users').find(user => partnerEmail && user.email?.toLowerCase() === partnerEmail.toLowerCase());
   const internal = loadLinkedDirectoryUsers('Internal users').find(user => partnerEmail && user.email?.toLowerCase() === partnerEmail.toLowerCase());
-  const incoming = [...messages].reverse().find(message => isIncoming(message, email));
   const name = external?.fullName || internal?.fullName || (isCreator ? context.recipientName : context.createdByName) || incoming?.author || context.recipientName || 'Participant not assigned';
-  const type = external ? 'Client' : internal ? 'MESO accountant' : isCreator ? context.participantType : undefined;
+  const recordedType = isCreator ? context.participantType : undefined;
+  const type = external ? 'External User' : internal ? 'Internal User'
+    : recordedType === 'Client' ? 'External User' : recordedType === 'MESO accountant' ? 'Internal User' : recordedType;
   return { name, type: type || (name === 'FH AI' ? 'FH AI' : undefined) };
 }
 
@@ -144,7 +146,17 @@ export default function ChatsView({
   const [recipientId, setRecipientId] = useState('');
   const [talkTo, setTalkTo] = useState('');
   const [subject, setSubject] = useState('');
+  const [chatSubject, setChatSubject] = useState('');
+  const [relatedModule, setRelatedModule] = useState('');
+  const relatedModules = [
+    { value: 'Document', label: 'Documents' },
+    { value: 'Invoice', label: 'Invoices' },
+    { value: 'Bank operation', label: 'Bank' },
+    { value: 'Reconciliation', label: 'Reconciliation' },
+    { value: 'Debt', label: 'Debts' },
+  ];
   const [relatedObjects, setRelatedObjects] = useState<NonNullable<InvoiceChatContext['relatedObject']>[]>([]);
+  const effectiveChatSubject = chatSubject || relatedObjects.find(object => object.id === subject)?.label || '';
   const [creatingChat, setCreatingChat] = useState(false);
   const [linkedDocument, setLinkedDocument] = useState<DbDocument | null>(null);
   const [handoffOpen, setHandoffOpen] = useState(false);
@@ -154,18 +166,25 @@ export default function ChatsView({
   useOrganizationAccessRevision();
   const session = parseSession(window.localStorage.getItem(AUTH_SESSION_KEY));
   const currentEmail = session?.email ?? '';
+  const selectedPartner = selected ? chatPartner(selected, currentEmail, messages) : null;
+  const selectedSubject = selected ? conversationSubject(selected) : '';
+  const showSelectedSubject = Boolean(selected && (selected.relatedObject || ![
+    selected.recipientName, selected.createdByName, selectedPartner?.name, session?.fullName, currentUserName,
+  ].some(name => name?.trim().toLowerCase() === selectedSubject.trim().toLowerCase())));
   const canStartChat = Boolean(session && canEditMenu(session, 'messages'));
   const availableCompanies = companies.filter(company => session && canAccessAssignedOrganization(company, session));
   const defaultOrganizationId = availableCompanies.find(company => company.id === conversation?.organizationId)?.id
     ?? (availableCompanies.length === 1 ? availableCompanies[0].id : '');
   const effectiveOrganizationId = organizationId || defaultOrganizationId;
   const organization = availableCompanies.find(company => company.id === effectiveOrganizationId);
-  const recipients = organization ? chatRecipients(organization, currentEmail) : [];
+  const recipients = organization ? chatRecipients(organization, currentEmail).filter(user => user.audience === talkTo) : [];
   const handoffOrganization = availableCompanies.find(company => company.id === selected?.organizationId);
   const accountants = handoffOrganization ? handoffAccountants(handoffOrganization, currentEmail) : [];
   const targetAudience = chatTargetAudience(currentEmail);
+  const isExternalDemo = Boolean(session?.roleNames.includes('External demo user'));
+  const canChooseAudience = (audience: string) => Boolean((isExternalDemo && ['Internal users', 'External users'].includes(audience)) || (targetAudience && (audience === targetAudience || audience === 'Internal users')));
   const aiActive = Boolean(selected && !selected.handedOffAt && selected.aiEnabled !== false && (selected.participantType === 'FH AI' || selected.recipientId === 'fh-ai'));
-  const effectiveRecipientId = talkTo === 'AI' ? 'fh-ai' : talkTo === targetAudience ? (recipientId || (recipients.length === 1 ? recipients[0].id : '')) : '';
+  const effectiveRecipientId = talkTo === 'AI' ? 'fh-ai' : canChooseAudience(talkTo) ? (recipientId || (recipients.length === 1 ? recipients[0].id : '')) : '';
 
   useEffect(() => {
     let cancelled = false;
@@ -188,6 +207,8 @@ export default function ChatsView({
     let cancelled = false;
     setRelatedObjects([]);
     setSubject('');
+    setChatSubject('');
+    setRelatedModule('');
     if (newChatOpen && organization) {
       void chatRelatedObjects(organization).then(objects => { if (!cancelled) setRelatedObjects(objects); }).catch(() => {
         if (!cancelled) setNewChatError('Unable to load related objects.');
@@ -295,7 +316,10 @@ export default function ChatsView({
       if (selected && currentEmail && next.length && canRead && document.visibilityState === 'visible' && viewRef.current?.getClientRects().length) {
         const key = readReceiptKey(selected, currentEmail);
         const lastId = next[next.length - 1].id;
-        if (window.localStorage.getItem(key) !== lastId) window.localStorage.setItem(key, lastId);
+        if (window.localStorage.getItem(key) !== lastId) {
+          window.localStorage.setItem(key, lastId);
+          window.dispatchEvent(new CustomEvent('finansu-harmonija:persistent-state-changed', { detail: { storageKey: 'finansu-harmonija:v7:notifications' } }));
+        }
         try { markChatNotificationsRead(selected, next.filter(message => isIncoming(message, currentEmail)).map(message => message.id), currentEmail); }
         catch (error) { console.error('Unable to update chat notification reading status.', error); }
       }
@@ -426,16 +450,17 @@ export default function ChatsView({
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="flex items-center justify-between gap-2">
-                            <span className="truncate text-[13px] font-semibold text-[#10233A]">{conversationSubject(item)}</span>
+                            <span title={partner.name} className="truncate text-[13px] font-semibold text-[#10233A]">{partner.name}</span>
                             <span className="flex shrink-0 items-center gap-1.5">
-                              <span className="text-[9px] font-semibold uppercase text-[#007EA7]">{sourceType}</span>
+                              {partner.type && <span className="shrink-0 rounded bg-[#E6F2F6] px-2 py-0.5 text-[10px] font-semibold text-[#007EA7]">{partner.type}</span>}
+                              {sourceType !== 'Topic' && <span className="text-[9px] font-semibold uppercase text-[#007EA7]">{sourceType}</span>}
                               {unreadCount > 0 && <span aria-label={`${unreadCount} unread messages`} title={`${unreadCount} unread messages`} className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[#E45858] px-1.5 text-[11px] font-semibold leading-none text-white">{unreadCount}</span>}
                             </span>
                           </span>
                           <span className="mt-1 flex min-w-0 items-center justify-between gap-2">
-                            <span title={partner.name} className="truncate text-[11px] font-medium text-[#7288A3]">{partner.name}</span>
-                            {partner.type && <span className="shrink-0 text-[10px] text-[#007EA7]">{partner.type}</span>}
+                            <span title={conversationSubject(item)} className="truncate text-[11px] font-medium text-[#7288A3]">{conversationSubject(item)}</span>
                           </span>
+                          <span title={currentEmail} className="mt-1 block truncate text-[11px] text-[#7288A3]">You: {session?.fullName || currentUserName} · {currentEmail}</span>
                           <span title={lastMessage?.text} className="mt-1 block truncate text-[11px] font-medium text-[#7288A3]">{lastMessage?.text || lastMessage?.attachments?.map(file => file.name).join(', ') || 'No messages yet'}</span>
                           <span className="mt-1.5 flex items-center justify-between gap-2 text-[10px]">
                             <span title="Your reading status" className={`inline-flex items-center gap-1 ${unread ? 'font-semibold text-[#007EA7]' : 'text-[#8FA6B8]'}`}><span className={`h-1.5 w-1.5 rounded-full ${unread ? 'bg-[#007EA7]' : 'bg-[#A1B6C6]'}`} />{lastMessage ? (unread ? 'Unread' : 'Read') : 'No messages'}</span>
@@ -459,8 +484,9 @@ export default function ChatsView({
                   <ArrowLeft size={17} />
                 </button>
                 <div className="min-w-0">
-                  <h2 className="truncate text-[16px] font-semibold text-[#10233A]">{conversationSubject(selected)}</h2>
-                  <p className="mt-0.5 text-[11px] font-medium text-[#7288A3]">{conversationCompany(selected)} · {selected.recipientName || selected.sourceType || 'Document'}</p>
+                  <h2 className="truncate text-[16px] font-semibold text-[#10233A]">{selectedPartner?.name}{selectedPartner?.type && <span className="ml-2 text-[11px] font-medium text-[#007EA7]">{selectedPartner.type}</span>}</h2>
+                  <p className="mt-0.5 text-[11px] font-medium text-[#7288A3]">You: {session?.fullName || currentUserName} · {currentEmail}</p>
+                  <p className="mt-0.5 text-[11px] font-medium text-[#7288A3]">{conversationCompany(selected)}{showSelectedSubject && <> · {selectedSubject}</>}</p>
                   {linkedDocument && onOpenDocument && <p className="mt-1 text-[12px] text-[#7288A3]">Related object: <button type="button" onClick={() => onOpenDocument(linkedDocument)} className="text-[#007EA7] hover:underline">{linkedDocument.file_case || linkedDocument.number}</button></p>}
                   {selected.relatedObject && !linkedDocument && <p className="mt-1 text-[12px] text-[#7288A3]">Related object: {selected.relatedObject.label} · Unavailable</p>}
                   {aiActive && <p className="mt-1 text-[11px] text-[#7288A3]">AI service is not connected yet. Messages are saved, but automatic replies are unavailable.</p>}
@@ -520,7 +546,7 @@ export default function ChatsView({
                 <label htmlFor="chat-message" className="sr-only">Type a message</label>
                 <div className="relative min-w-0 flex-1">
                   <input disabled={sending} id="chat-message" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Type a message..." autoComplete="off" className="h-10 w-full min-w-0 rounded-lg border border-[#CEDDE8] bg-white py-2 pl-10 pr-3.5 text-[12px] font-normal text-[#183047] outline-none placeholder:text-[#A8BCCB] focus:border-[#007EA7] focus:ring-2 focus:ring-[#DDF1F6]" />
-                  <button type="button" aria-label="Attach document" title="Attach document" disabled={sending || !session?.access.companies.edit || !selected.companyName && !selected.organizationId} onClick={() => attachmentInput.current?.click()} className="absolute inset-y-0 left-1 flex w-8 items-center justify-center rounded-md text-[#7288A3] hover:text-[#007EA7] disabled:cursor-not-allowed disabled:opacity-40"><Plus size={19} strokeWidth={1.7} /></button>
+                  <button type="button" aria-label="Attach document" title="Attach document" disabled={sending || !canStartChat || (!session?.access.companies.edit && !isExternalDemo) || !selected.companyName && !selected.organizationId} onClick={() => attachmentInput.current?.click()} className="absolute inset-y-0 left-1 flex w-8 items-center justify-center rounded-md text-[#7288A3] hover:text-[#007EA7] disabled:cursor-not-allowed disabled:opacity-40"><Plus size={19} strokeWidth={1.7} /></button>
                 </div>
                 <button type="submit" disabled={sending || (!draft.trim() && !pendingAttachment)} aria-label={sending ? 'Sending message' : 'Send message'} title="Send message" className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-[#CEDDE8] bg-white text-[#7288A3] transition-colors hover:border-[#9EB5C6] hover:bg-[#F7FAFC] hover:text-[#007EA7] active:border-[#007EA7] active:bg-[#007EA7] active:text-white disabled:cursor-not-allowed disabled:opacity-45">
                   <Send aria-hidden="true" size={17} strokeWidth={1.7} />
@@ -571,8 +597,9 @@ export default function ChatsView({
           if (creatingChat) return;
           setCreatingChat(true);
           try {
-            if (!talkTo || (talkTo !== 'AI' && talkTo !== targetAudience)) throw new Error('Select who you want to talk to.');
-            const context = await createContextChat(organization, effectiveRecipientId, subject);
+            if (!talkTo || (talkTo !== 'AI' && !canChooseAudience(talkTo))) throw new Error('Select who you want to talk to.');
+            if (!effectiveChatSubject.trim()) { setNewChatError('Enter a Subject or select a related record.'); return; }
+            const context = await createContextChat(organization, effectiveRecipientId, subject, chatSubject);
             setSelected(context); setSearch(''); setNewChatOpen(false);
           } catch (error) { setNewChatError(error instanceof Error ? error.message : 'Unable to create chat.'); }
           finally { setCreatingChat(false); }
@@ -584,9 +611,9 @@ export default function ChatsView({
           </div>
           {organization && <div className="flex min-w-0 flex-col gap-2 font-montserrat text-[14px] font-semibold text-[#10233A]">
             <span>Talk to <span className="text-red-600">*</span></span>
-            <SearchableSelect selectionIndicator="checkbox" ariaLabel="Talk to" value={talkTo} options={[{ value: 'AI', label: 'AI (Artificial intelligence)' }, ...(targetAudience ? [{ value: targetAudience, label: targetAudience === 'External users' ? 'Client' : 'Internal users' }] : [])]} onChange={value => { setTalkTo(value); setRecipientId(''); }} />
+            <SearchableSelect selectionIndicator="checkbox" ariaLabel="Talk to" value={talkTo} options={[{ value: 'AI', label: 'AI (Artificial intelligence)' }, ...(canChooseAudience('External users') ? [{ value: 'External users', label: 'Client' }] : []), ...(canChooseAudience('Internal users') ? [{ value: 'Internal users', label: 'FH accountant' }] : [])]} onChange={value => { setTalkTo(value); setRecipientId(''); }} />
           </div>}
-          {organization && talkTo === targetAudience && <div className="flex min-w-0 flex-col gap-2 font-montserrat text-[14px] font-semibold text-[#10233A]">
+          {organization && canChooseAudience(talkTo) && <div className="flex min-w-0 flex-col gap-2 font-montserrat text-[14px] font-semibold text-[#10233A]">
             <span>Participant <span className="text-red-600">*</span></span>
             <SearchableSelect selectionIndicator="checkbox" ariaLabel="Chat participant" value={effectiveRecipientId} options={recipients.map(user => ({ value: user.id, label: `${user.name} (${user.email})` }))} onChange={setRecipientId} emptyMessage="No eligible participants assigned to this organization" />
           </div>}
@@ -594,15 +621,28 @@ export default function ChatsView({
             <span>Related object <span className="text-[#7288A3]">(optional)</span></span>
             <SearchableSelect
               selectionIndicator="checkbox"
-              ariaLabel="Related object"
+              ariaLabel="Related object module"
               disabled={!organization || creatingChat}
-              value={subject}
-              onChange={setSubject}
-              placeholder="Select"
+              value={relatedModule}
+              onChange={value => { setRelatedModule(value); setSubject(''); }}
+              placeholder="Select module"
               menuClassName="!top-auto bottom-[calc(100%+4px)] !max-h-[min(260px,40vh)]"
-              options={[{ value: '', label: 'No related object' }, ...relatedObjects.map(object => ({ value: object.id, label: `${object.type} · ${object.label}` }))]}
+              options={[{ value: '', label: 'No related object' }, ...relatedModules]}
             />
           </div>
+          {relatedModule && <div className="flex min-w-0 flex-col gap-2 font-montserrat text-[14px] font-semibold text-[#10233A]">
+            <span>Record <span className="text-[#7288A3]">(optional)</span></span>
+            <SearchableSelect selectionIndicator="checkbox" ariaLabel="Related object record"
+              disabled={!organization || creatingChat} value={subject} onChange={setSubject}
+              placeholder="Select record"
+              menuClassName="!top-auto bottom-[calc(100%+4px)] !max-h-[min(260px,40vh)]"
+              options={[{ value: '', label: 'No specific record' }, ...relatedObjects.filter(object => object.type === relatedModule).map(object => ({ value: object.id, label: object.label }))]}
+              emptyMessage="No available records in this module" />
+          </div>}
+          <label className="flex min-w-0 flex-col gap-2 font-montserrat text-[14px] font-semibold text-[#10233A]">
+            <span>Subject <span className="font-normal text-[#7288A3]">(optional with a related record)</span></span>
+            <input aria-label="Subject" value={effectiveChatSubject} onChange={event => { setChatSubject(event.target.value); setNewChatError(''); }} placeholder="Enter conversation subject" className="h-[42px] w-full rounded-lg border border-[#D3E1EC] bg-white px-[14px] text-[14px] font-medium outline-none focus:border-[#007EA7]" />
+          </label>
           {newChatError && <p role="alert" className="text-red-600">{newChatError}</p>}
           <footer className="flex justify-end gap-2"><PageActionButton onClick={() => setNewChatOpen(false)}>Cancel</PageActionButton><button type="submit" disabled={creatingChat || !canStartChat || !organization || (talkTo !== 'AI' && !recipients.some(user => user.id === effectiveRecipientId))} className="h-[34px] rounded border-2 border-[#D3E1EC] px-3 font-semibold text-[#7288A3] hover:border-[#007EA7] disabled:opacity-40">Start chat</button></footer>
         </form>

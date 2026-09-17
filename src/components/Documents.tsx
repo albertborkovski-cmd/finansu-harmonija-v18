@@ -379,7 +379,7 @@ export const DOCUMENT_BASE_COLUMNS: ColConfig[] = [
   { key: "receiveDate", label: "Receive date", width: 110, visible: true },
   {
     key: "clientCounterparty",
-    label: "Client/Counterparty",
+    label: "Counterparty",
     width: 170,
     visible: true,
   },
@@ -763,7 +763,7 @@ const FIXED_FILTER_KEYS = new Set(["status", "clientCounterparty", "currency"]);
 
 const PRIMARY_FILTER_COLUMNS = [
   { key: "period", label: "Period" },
-  { key: "clientCounterparty", label: "Client/Counterparty" },
+  { key: "clientCounterparty", label: "Counterparty" },
   { key: "currency", label: "Currency" },
   { key: "rangeAmount", label: "Range amount" },
   { key: "status", label: "Status" },
@@ -2259,11 +2259,11 @@ export default function Documents({
               />
             </div>
           )}
-          {/* Client/Counterparty filter */}
+          {/* Counterparty filter */}
           {activePrimaryFilterKeys.includes("clientCounterparty") && (
             <div ref={counterpartyRef}>
               <SystemDocumentFilterDropdown
-                label="Client/Counterparty"
+                label="Counterparty"
                 value={selectedCounterparty ?? ""}
                 options={Array.from(
                   new Set(

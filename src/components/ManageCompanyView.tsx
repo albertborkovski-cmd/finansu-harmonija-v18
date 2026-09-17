@@ -14,13 +14,13 @@ import { loadCompanyLogo, saveCompanyLogo } from '../lib/companyBranding';
 
 const SECTIONS = [
   'General & status',
-  'Additional settings',
-  'Bank information',
-  'Document digitization settings',
+  'Accounting setup',
+  'Bank setup',
+  'Documents & digitization setup',
   'Accountants & access',
   'Services',
   'Setup & integration',
-  'Sent mail history',
+  'Sent documents history',
   'Audit',
 ] as const;
 
@@ -167,7 +167,7 @@ export default function ManageCompanyView({
           <div className="rounded-lg border border-[#D3E1EC] p-5">
             <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h3 className="font-montserrat text-[16px] font-semibold leading-6 text-[#10233A]">Organization details</h3>
+                <h3 className="font-montserrat text-[16px] font-semibold leading-6 text-[#10233A]">Company details</h3>
                 <p className="mt-1 font-montserrat text-[12px] font-normal leading-[18px] text-[#7288A3]">Primary identification and registration information.</p>
               </div>
               <span className={`inline-flex h-7 items-center rounded-full px-3 font-montserrat text-[12px] font-semibold leading-[18px] ${STATUS_STYLES[currentStatus]}`}>
@@ -198,7 +198,7 @@ export default function ManageCompanyView({
               <ClientField field={{ key: 'baseCurrency', label: 'Base currency *', type: 'select', value: details.base_currency, options: loadOrganizationReferenceValues('Base currency') }} onChange={(value) => setDetails((current) => ({ ...current, base_currency: value }))} />
             </div>
             <div className="mt-6 border-t border-[#E5EDF4] pt-5">
-              <h4 className="font-montserrat text-[14px] font-semibold leading-5 text-[#10233A]">Organization address</h4>
+              <h4 className="font-montserrat text-[14px] font-semibold leading-5 text-[#10233A]">Company address</h4>
               <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {([['address', 'Registered address'], ['email', 'Primary email'], ['phone', 'Phone number'], ['website', 'Website'], ['client_since', 'Client since']] as const).map(([key, label]) => <ClientField key={key} field={{ key, label, value: details[key] }} onChange={value => setDetails(current => ({ ...current, [key]: value }))} />)}
                 <div className="md:col-span-2 xl:col-span-3">
@@ -219,10 +219,10 @@ export default function ManageCompanyView({
                   const { data, error } = await supabase.from('companies').select('*');
                   if (error) throw new Error(error.message);
                   const normalized = (value: unknown) => String(value || '').trim().toLowerCase();
-                  if ((data || []).some(row => row.id !== company.id && ((normalized(row.tax_country || row.country) === normalized(details.tax_country) && normalized(row.company_code) === normalized(details.company_code)) || (details.vat_code.trim() && normalized(row.vat_code) === normalized(details.vat_code))))) throw new Error('An organization with this company code or VAT code already exists.');
+                  if ((data || []).some(row => row.id !== company.id && ((normalized(row.tax_country || row.country) === normalized(details.tax_country) && normalized(row.company_code) === normalized(details.company_code)) || (details.vat_code.trim() && normalized(row.vat_code) === normalized(details.vat_code))))) throw new Error('A company with this company code or VAT code already exists.');
                   await onSaveDetails({ ...details, name: details.name.trim(), company_code: details.company_code.trim(), vat_code: details.vat_code.trim(), client_since: Number(details.client_since) });
                 }
-                catch (error) { setDetailsError(error instanceof Error ? error.message : 'Unable to save organization details.'); }
+                catch (error) { setDetailsError(error instanceof Error ? error.message : 'Unable to save company details.'); }
                 finally { setDetailsSaving(false); }
               }}>{detailsSaving ? 'Saving…' : 'Save'}</PageActionButton>
             </div>
@@ -232,7 +232,7 @@ export default function ManageCompanyView({
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <h3 className="font-montserrat text-[16px] font-semibold leading-6 text-[#10233A]">Status management</h3>
-                <p className="mt-1 max-w-[720px] font-montserrat text-[12px] font-normal leading-[18px] text-[#7288A3]">Status changes preserve the organization record and its complete audit history. User blocking is managed separately at user level.</p>
+                <p className="mt-1 max-w-[720px] font-montserrat text-[12px] font-normal leading-[18px] text-[#7288A3]">Status changes preserve the company record and its complete audit history. User blocking is managed separately at user level.</p>
               </div>
               <div className="flex flex-wrap justify-end gap-2">
                 {STATUS_ACTIONS.map(({ status, label, icon: Icon }) => (
@@ -271,7 +271,7 @@ export default function ManageCompanyView({
             <h3 className="font-montserrat text-[16px] font-semibold leading-6 text-[#10233A]">FH services & modules</h3>
             <p className="mt-1 font-montserrat text-[12px] font-medium leading-[18px] text-[#7288A3]">Services assigned to {company.name}.</p>
           </div>
-          <div role="table" aria-label="Organization service scope" className="font-montserrat text-[12px] font-medium text-[#10233A]">
+          <div role="table" aria-label="Company service scope" className="font-montserrat text-[12px] font-medium text-[#10233A]">
             <div role="row" className="mb-3 flex h-6 items-center">
               <div role="columnheader" className="min-w-0 flex-1 px-3">Service scope</div>
               <div role="columnheader" className="w-[180px] flex-shrink-0 border-l border-[#D3E1EC] px-3">Status</div>
@@ -282,20 +282,20 @@ export default function ManageCompanyView({
                 <div role="cell" className="flex w-[180px] flex-shrink-0 items-center gap-2 px-3"><span aria-hidden="true" className="h-[6px] w-[6px] rounded-full bg-[#12B886]" />Active</div>
               </div>)}
             </div>
-            {!services.length && <p className="py-12 text-center text-[13px] text-[#7288A3]">No services assigned to this organization.</p>}
+            {!services.length && <p className="py-12 text-center text-[13px] text-[#7288A3]">No services assigned to this company.</p>}
           </div>
         </section>
       )}
 
       {section === 'Setup & integration' && <OrganizationSetupIntegration key={company.id} company={company} embedded />}
 
-      {section === 'Additional settings' && <CompanyClientInformation key={company.id} company={company} activeTab="Client information" organizationMode additionalSettingsOnly onCompanyUpdated={onCompanyUpdated} />}
+      {section === 'Accounting setup' && <CompanyClientInformation key={company.id} company={company} activeTab="Client information" organizationMode additionalSettingsOnly onCompanyUpdated={onCompanyUpdated} />}
 
-      {section === 'Bank information' && <CompanyClientInformation key={`banking-${company.id}`} company={company} activeTab="Client information" organizationMode bankInformationOnly onCompanyUpdated={onCompanyUpdated} />}
+      {section === 'Bank setup' && <CompanyClientInformation key={`banking-${company.id}`} company={company} activeTab="Client information" organizationMode bankInformationOnly onCompanyUpdated={onCompanyUpdated} />}
 
-      {section === 'Document digitization settings' && <CompanyClientInformation key={`digitization-${company.id}`} company={company} activeTab="Client information" organizationMode digitizationSettingsOnly onCompanyUpdated={onCompanyUpdated} />}
+      {section === 'Documents & digitization setup' && <CompanyClientInformation key={`digitization-${company.id}`} company={company} activeTab="Client information" organizationMode digitizationSettingsOnly onCompanyUpdated={onCompanyUpdated} />}
 
-      {section === 'Sent mail history' && (
+      {section === 'Sent documents history' && (
         <OrganizationEmailHistoryView key={company.id} organizationId={company.id} organizationName={company.name} />
       )}
 
@@ -307,7 +307,7 @@ export default function ManageCompanyView({
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#10233A]/25 p-4" role="dialog" aria-modal="true" aria-labelledby="status-change-title">
           <div className="w-full max-w-[520px] rounded-xl border border-[#D3E1EC] bg-white p-6 shadow-[0_20px_60px_rgba(16,35,58,0.18)]">
             <h2 id="status-change-title" className="font-montserrat text-[20px] font-semibold leading-7 text-[#10233A]">Change status to {pendingStatus}</h2>
-            <p className="mt-2 font-montserrat text-[12px] font-normal leading-[18px] text-[#7288A3]">Provide a reason for this status change. The reason will be saved in the organization audit history.</p>
+            <p className="mt-2 font-montserrat text-[12px] font-normal leading-[18px] text-[#7288A3]">Provide a reason for this status change. The reason will be saved in the company audit history.</p>
             <label className="mt-5 flex flex-col gap-2">
               <span className="font-montserrat text-[12px] font-semibold leading-[18px] text-[#10233A]">Reason <span className="text-[#D92D20]">*</span></span>
               <textarea

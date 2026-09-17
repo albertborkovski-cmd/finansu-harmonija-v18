@@ -35,7 +35,7 @@ export function getDashboardAttentionNotifications(
       return currentReminderIds.has(row.id) && row.status === 'Active' && !row.resolvedAt
         && !isNotificationRead(row, session.email);
     }
-    if (row.category === 'notifications' && 'sourceChatId' in row && row.sourceChatId && row.sourceMessageId) {
+    if (row.category === 'notifications' && (row.relatedObject?.type === 'Chat' || ('sourceChatId' in row && row.sourceChatId))) {
       return requiresAction(row) && !isNotificationRead(row, session.email);
     }
     return requiresAction(row);

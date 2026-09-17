@@ -939,6 +939,7 @@ export default function Companies({
     };
   }, [bulkActionsOpen]);
   const [query, setQuery] = useState("");
+  const [assignedAccountantFilter, setAssignedAccountantFilter] = useState("");
   const [visibleFilterKeys, setVisibleFilterKeys] =
     useState<string[]>([]);
   const [filterValues, setFilterValues] = useState<Record<string, string[]>>(
@@ -1004,13 +1005,16 @@ export default function Companies({
         const parsed = JSON.parse(stored) as {
           visibleFilterKeys?: unknown;
           filterValues?: unknown;
+          assignedAccountantFilter?: unknown;
         };
         const availableKeys = new Set(entityColumnDefinitions(entityLabel, dataSource).map((column) => column.key));
         if (entityLabel === 'company') availableKeys.add('assignment_type');
         const restoredKeys = Array.isArray(parsed.visibleFilterKeys)
           ? parsed.visibleFilterKeys.filter(
               (key): key is string =>
-                typeof key === "string" && availableKeys.has(key),
+                typeof key === "string" &&
+                availableKeys.has(key) &&
+                !(dataSource === "companies" && entityLabel === "company" && key === "assigned_accountant"),
             )
           : [];
         const restoredValues =
@@ -1038,16 +1042,25 @@ export default function Companies({
         setVisibleFilterKeys(nextKeys);
         setPendingFilterKeys(nextKeys);
         setFilterValues(restoredValues);
+        setAssignedAccountantFilter(
+          dataSource === "companies" &&
+          entityLabel === "company" &&
+          typeof parsed.assignedAccountantFilter === "string"
+            ? parsed.assignedAccountantFilter
+            : "",
+        );
       } else {
         setVisibleFilterKeys([]);
         setPendingFilterKeys([]);
         setFilterValues({});
+        setAssignedAccountantFilter("");
       }
     } catch {
       window.localStorage.removeItem(filterPersistenceKey);
       setVisibleFilterKeys([]);
       setPendingFilterKeys([]);
       setFilterValues({});
+      setAssignedAccountantFilter("");
     }
     setHydratedFilterKey(filterPersistenceKey);
   }, [filterPersistenceKey, entityLabel, dataSource]);
@@ -1056,11 +1069,12 @@ export default function Companies({
     if (hydratedFilterKey !== filterPersistenceKey) return;
     window.localStorage.setItem(
       filterPersistenceKey,
-      JSON.stringify({ visibleFilterKeys, filterValues }),
+      JSON.stringify({ visibleFilterKeys, filterValues, assignedAccountantFilter }),
     );
   }, [
     filterPersistenceKey,
     filterValues,
+    assignedAccountantFilter,
     hydratedFilterKey,
     visibleFilterKeys,
   ]);
@@ -1699,7 +1713,10 @@ export default function Companies({
   const actionSession = parseSession(window.localStorage.getItem(AUTH_SESSION_KEY));
   const assignmentUser = loadLinkedDirectoryUsers('Internal users').find(user => user.email?.toLowerCase() === actionSession?.email.toLowerCase());
   const baseColumns = entityColumnDefinitions(entityLabel, dataSource);
-  const availableFilterColumns = entityLabel === 'company' ? [...baseColumns, { key: 'assignment_type', label: 'Assignment type', width: 150 }] : baseColumns;
+  const isCompaniesList = dataSource === 'companies' && entityLabel === 'company';
+  const availableFilterColumns = entityLabel === 'company'
+    ? [...baseColumns.filter(column => !isCompaniesList || column.key !== 'assigned_accountant'), { key: 'assignment_type', label: 'Assignment type', width: 150 }]
+    : baseColumns;
   const companiesWithActions = entityLabel === 'company' ? companies.map(company => ({ ...company, action_required: actionSession && canViewMenu(actionSession, 'notifications') && canAccessAssignedOrganization(company, actionSession) ? getOrganizationOpenTasks(attentionActions, company.id, actionSession).length : 0 })) : companies;
   const filterOptions =
       Object.fromEntries(
@@ -1720,11 +1737,30 @@ export default function Companies({
         ]),
       ) as Record<string, string[]>;
   filterOptions.assignment_type = ['All', 'Assigned', 'Substitution'];
+  const persistentAccountantOptions = isCompaniesList
+    ? loadLinkedDirectoryUsers('Internal users')
+        .filter((user, index, users) =>
+          users.findIndex(candidate => candidate.id === user.id) === index &&
+          companiesWithActions.some(company => isAccountantAssigned(company, user)),
+        )
+        .map(user => ({
+          value: user.id,
+          label: user.fullName?.trim() || user.username || user.email || 'Unnamed user',
+          description: user.email || undefined,
+        }))
+        .sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: 'base' }))
+    : [];
+  const selectedAccountantFilter = persistentAccountantOptions.find(option => option.value === assignedAccountantFilter);
   const filteredCompanies = companiesWithActions.filter((company) => {
         const currentSession = parseSession(window.localStorage.getItem(AUTH_SESSION_KEY));
         if (entityLabel === 'company' && currentSession && !canAccessAssignedOrganization(company, currentSession)) return false;
         const explicitStatusFilter = visibleFilterKeys.includes('company_status') && (filterValues.company_status?.length ?? 0) > 0;
         if (entityLabel === 'company' && !explicitStatusFilter && company.company_status === 'Archived') return false;
+        if (
+          isCompaniesList &&
+          assignedAccountantFilter &&
+          !organizationAccountantEntries(company).some(entry => entry.id === assignedAccountantFilter)
+        ) return false;
         if (
           !matchesTextSearch(
             baseColumns.map((column) =>
@@ -1756,7 +1792,7 @@ export default function Companies({
   const safePage = Math.min(page, totalPages);
   const rows = sorted.slice(0, safePage * ROWS_PER_PAGE);
 
-  useEffect(() => setPage(1), [dataSource, entityLabel, query, visibleFilterKeys, filterValues]);
+  useEffect(() => setPage(1), [dataSource, entityLabel, query, visibleFilterKeys, filterValues, assignedAccountantFilter]);
 
   const isSpinning = refreshing || loading;
   const colMap = new Map(columns.map((c) => [c.key, c]));
@@ -1934,7 +1970,7 @@ export default function Companies({
                 setCreateOpen(true);
               }}
             >
-              {entityLabel === 'company' ? '+ New organization' : 'Create new'}
+              {entityLabel === 'company' ? '+ New company' : 'Create new'}
             </PageActionButton>
           ) : null}
           </>
@@ -2154,6 +2190,60 @@ export default function Companies({
                 );
               })}
 
+              {isCompaniesList && (
+                <div className="relative flex-shrink-0">
+                  <button
+                    type="button"
+                    aria-label="Filter by Assigned accountant(s)"
+                    aria-expanded={openFilter === "__assigned_accountant"}
+                    onClick={() => {
+                      setOpenFilter(current => current === "__assigned_accountant" ? null : "__assigned_accountant");
+                      setAddFilterOpen(false);
+                    }}
+                    className="flex h-7 max-w-[240px] items-center gap-1 rounded bg-[#E5EDF9] px-2 py-[5px] font-montserrat text-[12px] font-medium leading-[18px] text-[#7288A3] hover:bg-[#DCE7F6]"
+                  >
+                    <span className="truncate whitespace-nowrap">
+                      Assigned accountant(s)
+                      {selectedAccountantFilter && <span className="text-[#10233A]">: {selectedAccountantFilter.label}</span>}
+                    </span>
+                    {assignedAccountantFilter ? (
+                      <X size={14} className="flex-shrink-0" onClick={event => {
+                        event.stopPropagation();
+                        setAssignedAccountantFilter("");
+                        setPage(1);
+                      }} />
+                    ) : (
+                      <ChevronDown size={14} className={`flex-shrink-0 transition-transform ${openFilter === "__assigned_accountant" ? "rotate-180" : ""}`} />
+                    )}
+                  </button>
+                  {openFilter === "__assigned_accountant" && (
+                    <div className="absolute left-0 top-[32px] z-50 min-w-[260px] overflow-hidden rounded-lg border border-[#D3E1EC] bg-white p-1.5 shadow-[0_8px_24px_rgba(16,35,58,0.14)]">
+                      <button type="button" onClick={() => { setAssignedAccountantFilter(""); setPage(1); }} className="flex h-9 w-full items-center gap-3 rounded-md px-2 text-left hover:bg-[#F2F7FC]">
+                        <span aria-hidden="true" className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[4px] border ${assignedAccountantFilter ? "border-[#A1B6C6] bg-white" : "border-[#007EA7] bg-[#007EA7]"}`}>
+                          {!assignedAccountantFilter && <Check size={12} strokeWidth={2.5} className="text-white" />}
+                        </span>
+                        <span className="font-montserrat text-[13px] font-medium text-[#10233A]">All</span>
+                      </button>
+                      <div className="max-h-60 overflow-y-auto">
+                        {persistentAccountantOptions.map(option => {
+                          const checked = option.value === assignedAccountantFilter;
+                          return <button key={option.value} type="button" onClick={() => { setAssignedAccountantFilter(checked ? "" : option.value); setPage(1); }} className="flex min-h-9 w-full items-center gap-3 rounded-md px-2 py-1.5 text-left hover:bg-[#F2F7FC]">
+                            <span aria-hidden="true" className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[4px] border ${checked ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}>
+                              {checked && <Check size={12} strokeWidth={2.5} className="text-white" />}
+                            </span>
+                            <span className="min-w-0 flex-1 font-montserrat text-[13px] font-medium text-[#10233A]">
+                              <span className="block truncate">{option.label}</span>
+                              {option.description && <span className="block truncate text-[12px] font-normal leading-[18px] text-[#7288A3]">{option.description}</span>}
+                            </span>
+                          </button>;
+                        })}
+                        {!persistentAccountantOptions.length && <p className="px-3 py-2 font-montserrat text-[12px] font-medium text-[#7288A3]">No options found</p>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="relative flex-shrink-0">
                 <button
                   type="button"
@@ -2237,6 +2327,7 @@ export default function Companies({
                   setVisibleFilterKeys([]);
                   setPendingFilterKeys([]);
                   setFilterValues({});
+                  setAssignedAccountantFilter("");
                   setAddFilterOpen(false);
                   setOpenFilter(null);
                   setPage(1);
@@ -2570,7 +2661,7 @@ export default function Companies({
                 : `gap-6 px-6 pb-8 pt-6 shadow-[-2px_0_0_#E5EDF9] ${isOrganizationForm ? "w-[min(1040px,calc(100vw-24px))]" : "w-[380px]"}`
             }`}
             onClick={(event) => event.stopPropagation()}
-            aria-label={`Create new ${isOrganizationForm ? 'organization' : entityLabel}`}
+            aria-label={`Create new ${isOrganizationForm ? 'company' : entityLabel}`}
           >
             {entityLabel === "counterparty" ? (
               <>
@@ -2607,7 +2698,7 @@ export default function Companies({
             ) : (
               <div className="flex items-center justify-between">
                 <h2 className="font-montserrat text-[22px] font-semibold leading-8 text-[#10233A]">
-                  {`Create new ${isOrganizationForm ? 'organization' : entityLabel}`}
+                  {`Create new ${isOrganizationForm ? 'company' : entityLabel}`}
                 </h2>
                 <button
                   type="button"
@@ -2625,11 +2716,11 @@ export default function Companies({
             {isOrganizationForm && (
               <div
                 role="tablist"
-                aria-label="Organization settings sections"
+                aria-label="Company settings sections"
                 className="flex border-b border-[#DDE7F0]"
               >
                 {[
-                  ["general", "Organization information"],
+                  ["general", "Company information"],
                   ["digitization", "Document digitization settings"],
                   ["sharepoint", "SharePoint settings"],
                   ["counterparties", "Counterparties Settings"],

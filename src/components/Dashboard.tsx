@@ -100,7 +100,7 @@ function ReadOnlyBoundary({
     const action =
       `${button.textContent ?? ""} ${button.getAttribute("aria-label") ?? ""} ${button.getAttribute("title") ?? ""}`.trim();
     if (
-      /\b(filter|columns|refresh|export|view|search|cancel|back|show more)\b/i.test(
+      /\b(filters?|columns|refresh|export|view|search|cancel|back|show more)\b/i.test(
         action,
       )
     )
@@ -514,17 +514,18 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
         <CompanyDetail
           key={`${selectedCompany.id}:${selectedCompanyRelatedObject?.id ?? selectedCompanyDocumentId ?? selectedCompanyMenu}`}
           company={selectedCompany}
+          canEditReconciliation={session.access.companies.edit}
           initialMenu={selectedCompanyMenu}
           initialDocumentId={selectedCompanyDocumentId}
           initialDocumentMode={selectedCompanyDocumentMode}
           initialRelatedObject={selectedCompanyRelatedObject}
-          onOpenNotifications={canViewMenu(session, 'notifications') ? (menu) => {
-            relatedChatReturnScroll.current = null;
-            setRelatedChat(null);
-            setNotificationTarget({ tab: 'notifications', query: '', organization: { id: selectedCompany.id, name: selectedCompany.name }, returnCompany: { company: selectedCompany, menu } });
-            setSelectedCompany(null);
-            setActiveMenu('notifications');
-          } : undefined}
+          notificationsContent={canViewMenu(session, 'notifications') ? <OrganizationRequiredActionsView
+            organization={{ id: selectedCompany.id, name: selectedCompany.name }}
+            session={session}
+            initialTab={selectedCompanyMenu === 'notifications' && notificationTarget.organization?.id === selectedCompany.id ? notificationTarget.tab : 'notifications'}
+            initialOpenTasksOnly={selectedCompanyMenu === 'notifications' && notificationTarget.organization?.id === selectedCompany.id && notificationTarget.openTasksOnly}
+            onOpenRelatedObject={openRelatedObject}
+          /> : undefined}
           onLogout={onLogout}
           onOpenProfile={() => {
             relatedChatReturnScroll.current = null;
@@ -608,7 +609,7 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
       }} onViewCompany={(company) => openCompany(company)} onOpenRequiredActions={company => {
         if (!canViewMenu(session, 'notifications') || !visibleNotifications.canAccessOrganization(company.id)) return;
         setNotificationTarget({ tab: 'reminders', query: '', organization: { id: company.id, name: company.name }, openTasksOnly: true });
-        setActiveMenu('notifications');
+        openCompany(company, 'notifications');
       }} />;
     if (activeMenu === 'audit-history') return <CompanyActionHistoryView company={{ id: 'all', name: 'All organizations', company_code: '', vat_code: '', client_since: 0, action_required: 0 }} global />;
     if (activeMenu === "global-dashboard")
@@ -663,18 +664,7 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
       },
     } as const;
     if (activeMenu === "settings-organizations")
-      return (
-        <SettingsOrganizationsView
-          onNavigateToUserDirectory={(audience) => {
-            setUserDirectoryCreateRequest(audience);
-            handleMenuClick(
-              audience === "Internal users"
-                ? "settings-internal-users"
-                : "settings-external-users",
-            );
-          }}
-        />
-      );
+      return <GeneralLedgerView />;
     if (activeMenu === "settings-vat-classifications")
       return <VatClassificationsView />;
     if (activeMenu === "settings-organizations-operation-date-validation")

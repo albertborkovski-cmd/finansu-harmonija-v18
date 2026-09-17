@@ -3,15 +3,17 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
 
-async function loadTypescript(path) {
+function moduleUrl(path) {
   const { outputText } = ts.transpileModule(readFileSync(new URL(path, import.meta.url), 'utf8'), {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
   });
-  return import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
+  const resolved = path.endsWith('/manualReconciliation.ts') ? outputText.replace("from './reconciliation'", `from '${engineUrl}'`) : outputText;
+  return `data:text/javascript;base64,${Buffer.from(resolved).toString('base64')}`;
 }
 
-const { getManualReconciliationCandidates, buildManualReconciliation } = await loadTypescript('../src/lib/manualReconciliation.ts');
-const { applyReconciliation, reverseReconciliation } = await loadTypescript('../src/lib/reconciliation.ts');
+const engineUrl = moduleUrl('../src/lib/reconciliation.ts');
+const { getManualReconciliationCandidates, getManualReconciliationOptions, buildManualReconciliation, parseManualReconciliationAmount } = await import(moduleUrl('../src/lib/manualReconciliation.ts'));
+const { applyReconciliation, reverseReconciliation } = await import(engineUrl);
 const organizationId = 'organization-1';
 const batch = { id: 'manual-batch-1', at: '2026-09-14T10:00:00.000Z', actor: 'Accountant' };
 
@@ -38,6 +40,35 @@ function funding(id = 'payment-1', patch = {}) {
   return invoice(id, { kind: 'Payment', documentNumber: `PAY-${id}`, dueDate: '', ...patch });
 }
 
+test('edit browser shows all open counterparties and types, but hides closed and other-organization records', () => {
+  const items = [invoice(), funding(), funding('other-party', { counterpartyId: 'other', counterpartyName: 'Other party' }), invoice('same-type'), funding('closed', { remainingMinor: 0 }), funding('foreign', { organizationId: 'foreign' })];
+  const before = JSON.stringify(items);
+  const rows = getManualReconciliationOptions(items, 'invoice-1');
+  assert.deepEqual(new Set(rows.map(row => row.item.id)), new Set(['payment-1', 'other-party', 'same-type']));
+  assert.equal(rows[0].reason, '');
+  assert.equal(rows.find(row => row.item.id === 'other-party').reason, 'Different counterparty');
+  assert.equal(rows.find(row => row.item.id === 'same-type').reason, 'Requires an opposite document type');
+  assert.equal(JSON.stringify(items), before);
+  assert.throws(() => buildManualReconciliation(items, 'invoice-1', ['other-party']));
+});
+
+test('edit browser explains currency, direction and accounting exclusions without making them selectable', () => {
+  const items = [invoice(), funding('usd', { currency: 'USD' }), funding('outgoing', { side: 'Payable' }), funding('tax', { counterpartyId: '', counterpartyName: '', payeeName: 'VMI' })];
+  const rows = getManualReconciliationOptions(items, 'invoice-1');
+  assert.equal(rows.find(row => row.item.id === 'usd').reason, 'Different currency');
+  assert.equal(rows.find(row => row.item.id === 'outgoing').reason, 'Different receivable / payable side');
+  assert.equal(rows.find(row => row.item.id === 'tax').reason, 'Accounting operation — use GL assignment');
+  assert.equal(getManualReconciliationCandidates(items, 'invoice-1').length, 0);
+});
+
+test('edit browser keeps partially reconciled records and excludes duplicate IDs', () => {
+  const partial = funding('partial', { remainingMinor: 1234 });
+  const rows = getManualReconciliationOptions([invoice(), partial, funding('duplicate'), funding('duplicate')], 'invoice-1');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].item.remainingMinor, 1234);
+  assert.equal(rows[0].reason, '');
+});
+
 function state(items) {
   return { version: 1, organizationId, items, batches: [] };
 }
@@ -55,7 +86,7 @@ function deepFreeze(value) {
 }
 
 test('exact manual match supports every funding kind from either source direction', () => {
-  for (const kind of ['Payment', 'Credit note', 'Advance']) {
+  for (const kind of ['Payment', 'Credit note', 'Advance', 'Deposit']) {
     const items = [invoice(), funding('payment-1', { kind, reference: 'Unrelated text' })];
     for (const sourceId of ['invoice-1', 'payment-1']) {
       const selectedId = sourceId === 'invoice-1' ? 'payment-1' : 'invoice-1';
@@ -70,6 +101,27 @@ test('exact manual match supports every funding kind from either source directio
       assert.deepEqual(result.proposals[0].expectedRemaining, { 'payment-1': 10000, 'invoice-1': 10000 });
       assert.deepEqual(balances(applyReconciliation(state(items), result.proposals, batch)), { 'invoice-1': 0, 'payment-1': 0 });
     }
+  }
+});
+
+test('manual deposits expose only compatible invoices and retain unreleased balance over multiple allocations', () => {
+  const deposit = funding('deposit', { kind: 'Deposit', originalMinor: 25000, remainingMinor: 25000, reference: 'Contract LT-2026-001' });
+  const input = deepFreeze(state([
+    deposit, invoice('invoice-a'), invoice('invoice-b'),
+    invoice('other-company', { organizationId: 'other-company' }),
+    invoice('other-counterparty', { counterpartyId: 'other-counterparty' }),
+    invoice('other-currency', { currency: 'USD' }),
+    invoice('other-side', { side: 'Payable' }),
+    funding('bank'), funding('another-deposit', { kind: 'Deposit' }),
+  ]));
+  assert.deepEqual(getManualReconciliationCandidates(input.items, 'deposit').map(row => row.id), ['invoice-a', 'invoice-b']);
+  const preview = buildManualReconciliation(input.items, 'deposit', ['invoice-a', 'invoice-b'], { 'invoice-a': 2500, 'invoice-b': 4250 });
+  assert.equal(preview.totalMinor, 6750);
+  assert.equal(preview.sourceRemainingMinor, 18250);
+  assert.equal(preview.proposals.length, 1);
+  assert.deepEqual(preview.proposals[0].allocations, [{ invoiceId: 'invoice-a', amountMinor: 2500 }, { invoiceId: 'invoice-b', amountMinor: 4250 }]);
+  for (const id of ['other-company', 'other-counterparty', 'other-currency', 'other-side', 'bank', 'another-deposit']) {
+    assert.throws(() => buildManualReconciliation(input.items, 'deposit', [id]), /not eligible/);
   }
 });
 
@@ -299,5 +351,197 @@ test('stale manual proposals are rejected atomically without mutation', () => {
     assert.throws(() => applyReconciliation(stale, result.proposals, batch), /Stale/);
     assert.equal(JSON.stringify(stale), before);
     assert.equal(stale.batches.length, 0);
+  }
+});
+
+test('entered partial amounts leave both document balances open in either source direction', () => {
+  for (const kind of ['Payment', 'Credit note', 'Advance', 'Deposit']) {
+    for (const sourceIsInvoice of [true, false]) {
+      const input = deepFreeze(state([invoice(), funding('payment-1', { kind })]));
+      const sourceId = sourceIsInvoice ? 'invoice-1' : 'payment-1';
+      const candidateId = sourceIsInvoice ? 'payment-1' : 'invoice-1';
+      const result = buildManualReconciliation(input.items, sourceId, [candidateId], { [candidateId]: 2517 });
+      assert.deepEqual(result.allocations, [{ itemId: candidateId, amountMinor: 2517, remainingMinor: 7483 }]);
+      assert.equal(result.totalMinor, 2517);
+      assert.equal(result.sourceRemainingMinor, 7483);
+      assert.deepEqual(result.proposals[0].expectedRemaining, { 'payment-1': 10000, 'invoice-1': 10000 });
+      const applied = applyReconciliation(input, result.proposals, batch);
+      assert.deepEqual(balances(applied), { 'invoice-1': 7483, 'payment-1': 7483 });
+      assert.deepEqual(reverseReconciliation(applied, batch.id, '2026-09-14T11:00:00.000Z').items, input.items);
+    }
+  }
+});
+
+test('purchase deposit is allocated partially across several invoices without consuming their remaining debt', () => {
+  for (const kind of ['Advance', 'Deposit']) {
+    const input = state([
+      funding('deposit', { kind, side: 'Payable', originalMinor: 100000, remainingMinor: 100000 }),
+      invoice('purchase-a', { side: 'Payable', originalMinor: 70000, remainingMinor: 70000 }),
+      invoice('purchase-b', { side: 'Payable', originalMinor: 60000, remainingMinor: 60000 }),
+    ]);
+    const preview = buildManualReconciliation(input.items, 'deposit', ['purchase-a', 'purchase-b'], { 'purchase-a': 30000, 'purchase-b': 20000 });
+    assert.equal(preview.totalMinor, 50000);
+    assert.equal(preview.sourceRemainingMinor, 50000);
+    const applied = applyReconciliation(input, preview.proposals, batch);
+    assert.deepEqual(balances(applied), { deposit: 50000, 'purchase-a': 40000, 'purchase-b': 40000 });
+    assert.deepEqual(reverseReconciliation(applied, batch.id, '2026-09-16T11:00:00.000Z').items, input.items);
+  }
+});
+
+test('explicit amounts are reserved before automatic allocations in either direction', () => {
+  for (const sourceIsInvoice of [true, false]) {
+    const source = sourceIsInvoice ? invoice('source') : funding('source');
+    const candidate = sourceIsInvoice ? funding : invoice;
+    const input = deepFreeze(state([
+      source,
+      candidate('automatic-first', { remainingMinor: 6000 }),
+      candidate('explicit-middle'),
+      candidate('automatic-last'),
+      candidate('explicit-last'),
+    ]));
+    const overrides = deepFreeze({ 'explicit-last': 1000, 'explicit-middle': 2000 });
+    const result = buildManualReconciliation(input.items, 'source', [
+      'automatic-first', 'explicit-middle', 'automatic-last', 'explicit-last',
+    ], overrides);
+    assert.deepEqual(result.allocations, [
+      { itemId: 'automatic-first', amountMinor: 6000, remainingMinor: 0 },
+      { itemId: 'explicit-middle', amountMinor: 2000, remainingMinor: 8000 },
+      { itemId: 'automatic-last', amountMinor: 1000, remainingMinor: 9000 },
+      { itemId: 'explicit-last', amountMinor: 1000, remainingMinor: 9000 },
+    ]);
+    assert.equal(result.totalMinor, 10000);
+    assert.equal(result.sourceRemainingMinor, 0);
+    assert.ok(result.proposals.every(proposal => proposal.expectedRemaining.source === 10000));
+    const applied = applyReconciliation(input, result.proposals, batch);
+    assert.deepEqual(balances(applied), {
+      source: 0, 'automatic-first': 0, 'explicit-middle': 8000, 'automatic-last': 9000, 'explicit-last': 9000,
+    });
+    assert.deepEqual(reverseReconciliation(applied, batch.id, '2026-09-14T11:00:00.000Z').items, input.items);
+  }
+});
+
+test('fully reserved source keeps automatic selected rows at zero without changing entered amounts', () => {
+  const items = [invoice(), funding('automatic'), funding('explicit')];
+  const result = buildManualReconciliation(items, 'invoice-1', ['automatic', 'explicit'], { explicit: 10000 });
+  assert.deepEqual(result.allocations, [
+    { itemId: 'automatic', amountMinor: 0, remainingMinor: 10000 },
+    { itemId: 'explicit', amountMinor: 10000, remainingMinor: 0 },
+  ]);
+  assert.equal(result.proposals.length, 1);
+  assert.equal(result.proposals[0].fundingId, 'explicit');
+});
+
+test('manual overrides reject unselected keys and invalid, over-balance or over-source amounts', () => {
+  const input = deepFreeze(state([invoice(), funding('a', { remainingMinor: 6000 }), funding('b')]));
+  const before = JSON.stringify(input);
+  for (const value of [0, -1, 0.1, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, '100', null, undefined]) {
+    assert.throws(() => buildManualReconciliation(input.items, 'invoice-1', ['a'], { a: value }), /positive safe integer/);
+  }
+  for (const key of ['missing', 'b', 'invoice-1']) {
+    assert.throws(() => buildManualReconciliation(input.items, 'invoice-1', ['a'], { [key]: 1 }), /selected item/);
+  }
+  assert.throws(() => buildManualReconciliation(input.items, 'invoice-1', [], { a: 1 }), /selected item/);
+  assert.throws(() => buildManualReconciliation(input.items, 'invoice-1', ['a'], { a: 6001 }), /selected document's open balance/);
+  assert.throws(() => buildManualReconciliation(input.items, 'invoice-1', ['a', 'b'], { a: 6000, b: 4001 }), /source document's open balance/);
+  for (const invalid of [null, [], '100']) {
+    assert.throws(() => buildManualReconciliation(input.items, 'invoice-1', ['a'], invalid), /supplied by selected item ID/);
+  }
+  assert.equal(JSON.stringify(input), before);
+});
+
+test('safe integer capacity checks cannot overflow when summing explicit requests', () => {
+  const maximum = Number.MAX_SAFE_INTEGER;
+  const items = [
+    invoice('source', { originalMinor: maximum, remainingMinor: maximum }),
+    funding('a', { originalMinor: maximum, remainingMinor: maximum }),
+    funding('b', { originalMinor: maximum, remainingMinor: maximum }),
+  ];
+  const result = buildManualReconciliation(items, 'source', ['a', 'b'], { a: maximum - 1, b: 1 });
+  assert.equal(result.totalMinor, maximum);
+  assert.equal(result.sourceRemainingMinor, 0);
+  assert.deepEqual(result.allocations.map(row => row.amountMinor), [maximum - 1, 1]);
+  assert.throws(() => buildManualReconciliation(items, 'source', ['a', 'b'], { a: maximum, b: maximum }), /source document's open balance/);
+});
+
+test('partial proposals use immutable original snapshots and reject stale data atomically', () => {
+  const original = deepFreeze(state([invoice(), funding('a'), funding('b')]));
+  const result = buildManualReconciliation(original.items, 'invoice-1', ['a', 'b'], { a: 1500, b: 2000 });
+  assert.deepEqual(result.proposals.map(proposal => proposal.expectedRemaining), [
+    { a: 10000, 'invoice-1': 10000 }, { b: 10000, 'invoice-1': 10000 },
+  ]);
+  for (const changedId of ['invoice-1', 'a', 'b']) {
+    const stale = deepFreeze({
+      ...original,
+      items: original.items.map(item => item.id === changedId ? { ...item, remainingMinor: item.remainingMinor - 1 } : item),
+    });
+    const before = JSON.stringify(stale);
+    assert.throws(() => applyReconciliation(stale, result.proposals, batch), /Stale/);
+    assert.equal(JSON.stringify(stale), before);
+  }
+  const nowTooSmall = original.items.map(item => item.id === 'a' ? { ...item, remainingMinor: 1499 } : item);
+  assert.throws(() => buildManualReconciliation(nowTooSmall, 'invoice-1', ['a', 'b'], { a: 1500, b: 2000 }), /selected document's open balance/);
+  const sourceTooSmall = original.items.map(item => item.id === 'invoice-1' ? { ...item, remainingMinor: 3499 } : item);
+  assert.throws(() => buildManualReconciliation(sourceTooSmall, 'invoice-1', ['a', 'b'], { a: 1500, b: 2000 }), /source document's open balance/);
+});
+
+test('partial proposal identities are deterministic, amount-sensitive and ignore override insertion order', () => {
+  const items = deepFreeze([invoice(), funding('a'), funding('b')]);
+  const selected = deepFreeze(['a', 'b']);
+  const overrides = deepFreeze({ a: 1500, b: 2000 });
+  const result = buildManualReconciliation(items, 'invoice-1', selected, overrides);
+  assert.deepEqual(buildManualReconciliation([...items].reverse(), 'invoice-1', selected, { b: 2000, a: 1500 }), result);
+  const changed = buildManualReconciliation(items, 'invoice-1', selected, { a: 1501, b: 2000 });
+  assert.ok(changed.proposals.every((proposal, index) => proposal.id !== result.proposals[index].id));
+  assert.deepEqual(overrides, { a: 1500, b: 2000 });
+  assert.deepEqual(buildManualReconciliation(items, 'invoice-1', selected, {}), buildManualReconciliation(items, 'invoice-1', selected));
+});
+
+test('special-property override IDs are treated as own keys and inherited values are not amounts', () => {
+  const items = [invoice('source'), funding('__proto__'), funding('constructor'), funding('toString')];
+  const overrides = Object.fromEntries([['__proto__', 1000], ['constructor', 2000], ['toString', 3000]]);
+  const result = buildManualReconciliation(items, 'source', ['__proto__', 'constructor', 'toString'], overrides);
+  assert.deepEqual(result.allocations.map(row => row.amountMinor), [1000, 2000, 3000]);
+  assert.deepEqual(balances(applyReconciliation(state(items), result.proposals, batch)), {
+    source: 4000, ['__proto__']: 9000, constructor: 8000, toString: 7000,
+  });
+  const inherited = Object.create({ constructor: 2000, missing: 1 });
+  assert.equal(buildManualReconciliation(items, 'source', ['constructor'], inherited).totalMinor, 10000);
+});
+
+test('decimal amount parsing is exact for dot and comma separators and accepts the safe limit', () => {
+  for (const [text, expected] of [
+    ['1', 100], ['1.2', 120], ['1,23', 123], ['0.29', 29], ['0,01', 1], ['0001.02', 102],
+    ['  12.34  ', 1234], ['90071992547409.91', Number.MAX_SAFE_INTEGER],
+  ]) assert.equal(parseManualReconciliationAmount(text), expected, text);
+});
+
+test('decimal amount parsing rejects empty, zero, negatives, exponent, grouping and excessive precision', () => {
+  for (const text of [
+    '', ' ', '0', '0.00', '00,00', '-1', '+1', '1e2', '1E2', '1.001', '1,001',
+    '1,000.00', '1.000,00', '1 000', '1_000', '1.', '.5', '1,', '1..2', 'NaN', 'Infinity',
+    '90071992547409.92', '999999999999999999999999', null, undefined, 12.34,
+  ]) assert.throws(() => parseManualReconciliationAmount(text), /amount|Enter/, String(text));
+});
+
+test('accounting and unidentified payments are excluded as manual source and candidate', () => {
+  for (const patch of [
+    { payeeName: 'VMI' }, { counterpartyName: 'Sodra' }, { reference: 'Salary September' },
+    { reference: 'Bank fee' }, { counterpartyId: '', counterpartyName: '', reference: 'Unidentified transfer' },
+  ]) {
+    const items = deepFreeze([invoice(), funding('accounting', patch), funding('client-payment')]);
+    const before = JSON.stringify(items);
+    assert.deepEqual(getManualReconciliationCandidates(items, 'accounting'), []);
+    assert.deepEqual(getManualReconciliationCandidates(items, 'invoice-1').map(row => row.id), ['client-payment']);
+    assert.throws(() => buildManualReconciliation(items, 'accounting', ['invoice-1']), /source/);
+    assert.throws(() => buildManualReconciliation(items, 'invoice-1', ['accounting']), /eligible/);
+    assert.equal(JSON.stringify(items), before);
+  }
+});
+
+test('generic VAT and ordinary commission references remain available for manual client matching', () => {
+  for (const reference of ['VAT invoice INV-1', 'Sales commission', 'Sodralita services', 'VMI123']) {
+    const items = [invoice(), funding('client', { reference })];
+    assert.equal(getManualReconciliationCandidates(items, 'client').length, 1);
+    assert.equal(buildManualReconciliation(items, 'client', ['invoice-1']).totalMinor, 10000);
   }
 });

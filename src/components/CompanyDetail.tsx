@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { ArrowLeft, User, Menu, LogOut, ChevronDown, LayoutDashboard, Files, HandCoins, Scale, BarChart3, Building2, Headphones, HelpCircle, BookOpenText, Landmark, Bell } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { ArrowLeft, User, Menu, LogOut, ChevronDown, LayoutDashboard, Files, HandCoins, Scale, BarChart3, Headphones, HelpCircle, BookOpenText, Landmark, Bell } from 'lucide-react';
 import type { Company } from '../lib/supabase';
 import Documents from './Documents';
 import DashboardView from './DashboardView';
@@ -31,19 +31,19 @@ interface CompanyDetailProps {
   initialRelatedObject?: RelatedObject | null;
   onInitialRelatedObjectBack?: () => void;
   onOpenChat?: (context: InvoiceChatContext) => void;
-  onOpenNotifications?: (returnMenu: string) => void;
+  notificationsContent?: ReactNode;
+  canEditReconciliation?: boolean;
 }
 
 const mainMenuItems = [
   { id: 'overview',      label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'documents',     label: 'All documents', icon: Files },
   { id: 'notifications', label: 'Notifications & Tasks', icon: Bell },
+  { id: 'documents',     label: 'All documents', icon: Files },
   { id: 'gl-journal',    label: 'GL journal', icon: BookOpenText },
   { id: 'bank',          label: 'Bank', icon: Landmark },
   { id: 'reports',       label: 'Debts', icon: HandCoins },
   { id: 'services',      label: 'Reconciliation', icon: Scale },
   { id: 'settings',      label: 'Reports', icon: BarChart3 },
-  { id: 'activity',      label: 'Company/Client information', icon: Building2 },
 ];
 
 const contactMenuItems = [
@@ -86,7 +86,7 @@ function SubmenuStepperDot({ isActive, isFirst, isLast }: { isActive: boolean; i
   );
 }
 
-export default function CompanyDetail({ company, onBack, onLogout, onOpenProfile, initialMenu = 'overview', initialDocumentId = null, initialDocumentMode = 'view', initialRelatedObject = null, onInitialRelatedObjectBack, onOpenChat, onOpenNotifications }: CompanyDetailProps) {
+export default function CompanyDetail({ company, onBack, onLogout, onOpenProfile, initialMenu = 'overview', initialDocumentId = null, initialDocumentMode = 'view', initialRelatedObject = null, onInitialRelatedObjectBack, onOpenChat, notificationsContent, canEditReconciliation = false }: CompanyDetailProps) {
   const relatedObject = initialRelatedObject?.organizationId === company.id ? initialRelatedObject : null;
   const relatedRecordId = relatedObject?.recordId || relatedObject?.id;
   const relatedMenu = relatedObject?.type === 'Bank operation' ? 'bank'
@@ -201,14 +201,13 @@ export default function CompanyDetail({ company, onBack, onLogout, onOpenProfile
 
           {/* Main menu — grows to fill space */}
           <nav className="flex flex-col gap-0 flex-1 overflow-y-auto">
-            {mainMenuItems.filter(item => item.id !== 'notifications' || onOpenNotifications).map((item) => {
+            {mainMenuItems.filter(item => item.id !== 'notifications' || notificationsContent).map((item) => {
               const isActive = activeMenu === item.id;
               const Icon = item.icon;
               return (
                 <div key={item.id} className="flex flex-col">
                   <button
                     onClick={() => {
-                      if (item.id === 'notifications') { onOpenNotifications?.(activeMenu); return; }
                       setActiveMenu(item.id);
                       if (item.id === 'activity') {
                         setActiveCompanyInformationMenu('Client information');
@@ -338,7 +337,7 @@ export default function CompanyDetail({ company, onBack, onLogout, onOpenProfile
 
       {/* Main content */}
       <div data-app-main className="relative min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-white">
-        {activeMenu === 'documents' ? (
+        {activeMenu === 'notifications' ? notificationsContent : activeMenu === 'documents' ? (
           activeDocumentsMenu === 'documents'
             ? <Documents companyId={currentCompany.id} companyName={currentCompany.name} company={currentCompany} generalLedgerName={currentCompany.general_ledger ?? ''} initialViewDocumentId={dashboardDocumentId} initialDocumentMode={initialDocumentMode} onInitialViewConsumed={() => setDashboardDocumentId(null)} onInitialViewBack={initialDocumentId ? onBack : () => setActiveMenu('overview')} onOpenGeneralLedger={openGeneralLedger} onStartChat={onOpenChat} />
             : activeDocumentsMenu === 'invoices'
@@ -371,7 +370,7 @@ export default function CompanyDetail({ company, onBack, onLogout, onOpenProfile
               ? <CompanyClientsView company={currentCompany} initialRecordId={relatedRecordId} onRelatedObjectBack={backFromRelatedObject} />
               : <CompanyClientInformation company={currentCompany} activeTab={activeCompanyInformationMenu} organizationDesign onCompanyUpdated={setCurrentCompany} />
         ) : activeMenu === 'services' ? (
-          <CompanyReconciliationView key={currentCompany.id + ':examples-v2'} companyId={currentCompany.id} companyName={currentCompany.name} initialRecordId={relatedObject?.type === 'Reconciliation' ? relatedRecordId : undefined} onRelatedObjectBack={backFromRelatedObject} />
+          <CompanyReconciliationView key={currentCompany.id + ':examples-v2'} companyId={currentCompany.id} companyName={currentCompany.name} generalLedgerName={currentCompany.general_ledger ?? ''} canEditGlAccounts={canEditReconciliation} initialRecordId={relatedObject?.type === 'Reconciliation' ? relatedRecordId : undefined} onRelatedObjectBack={backFromRelatedObject} />
         ) : activeMenu === 'settings' ? (
           <CompanyReportsView company={currentCompany} />
         ) : (

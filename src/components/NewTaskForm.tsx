@@ -26,6 +26,15 @@ type Props = {
 
 const Required = () => <span aria-hidden="true" className="text-red-600">*</span>;
 const INPUT = 'h-[42px] w-full rounded-lg border border-[#D3E1EC] bg-white px-[14px] text-[14px] outline-none focus:border-[#007EA7]';
+const RELATED_MODULES = [
+  { value: 'Document', label: 'Documents' },
+  { value: 'Invoice', label: 'Invoices' },
+  { value: 'Bank operation', label: 'Bank' },
+  { value: 'Reconciliation', label: 'Reconciliation' },
+  { value: 'Debt', label: 'Debts' },
+  { value: 'Counterparty', label: 'Counterparties' },
+  { value: 'Chat', label: 'Chats' },
+];
 
 export default function NewTaskForm({ session, organizations, organizationContext, task, onSave, onClose, onOpenRelatedObject }: Props) {
   const [draft, setDraft] = useState<TaskDraft>(() => ({
@@ -38,6 +47,7 @@ export default function NewTaskForm({ session, organizations, organizationContex
     relatedObjectId: task?.relatedObject?.id ?? '',
     description: task?.message ?? '',
   }));
+  const [relatedModule, setRelatedModule] = useState<string>(task?.relatedObject?.type ?? '');
   const [related, setRelated] = useState<{ organizationId: string; rows: TaskRelatedObject[]; loading: boolean; error: string }>({ organizationId: '', rows: [], loading: false, error: '' });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -90,11 +100,24 @@ export default function NewTaskForm({ session, organizations, organizationContex
         <div className="flex flex-col gap-1"><span>Task type <Required /></span><SearchableSelect selectionIndicator="checkbox" ariaLabel="Task type" value={draft.type} options={[...TASK_TYPES]} placeholder="Select task type" disabled={saving} onChange={type => setDraft({ ...draft, type })} />{task && !(TASK_TYPES as readonly string[]).includes(task.type) && !draft.type && <p className="text-[12px] text-[#7288A3]">Select a task type to replace the previous classification.</p>}</div>
         <div className="flex flex-col gap-1"><span>Organization <Required /></span>{organizationContext
           ? <input aria-label="Organization" readOnly className={INPUT} style={{ backgroundColor: '#F5F5F5', color: '#7288A3' }} value={organization?.name ?? organizationContext.name} title={organization?.name ?? organizationContext.name} />
-          : <SearchableSelect selectionIndicator="checkbox" ariaLabel="Organization" value={draft.organizationId} options={organizations.map(org => ({ value: org.id, label: org.name, description: org.company_code || undefined }))} placeholder="Select organization" disabled={saving} onChange={organizationId => { setDraft({ ...draft, organizationId, assignedToId: '', relatedObjectId: '' }); setError(''); }} />}</div>
+          : <SearchableSelect selectionIndicator="checkbox" ariaLabel="Organization" value={draft.organizationId} options={organizations.map(org => ({ value: org.id, label: org.name, description: org.company_code || undefined }))} placeholder="Select organization" disabled={saving} onChange={organizationId => { setDraft({ ...draft, organizationId, assignedToId: '', relatedObjectId: '' }); setRelatedModule(''); setError(''); }} />}</div>
         <div className="flex flex-col gap-1"><span>Assigned to <Required /></span><SearchableSelect selectionIndicator="checkbox" ariaLabel="Assigned to" value={draft.assignedToId} options={assignees.map(user => ({ value: user.id, label: user.name, description: `${user.audience} · ${user.email}` }))} placeholder="Select user" disabled={!organization || saving} emptyMessage="No active assigned users" onChange={assignedToId => setDraft({ ...draft, assignedToId })} />{!organization && <p className="text-[12px] text-[#7288A3]">Select an organization first.</p>}</div>
         <div className="flex flex-col gap-1"><span>Due date <Required /></span><fieldset disabled={saving} className="min-w-0"><ScheduleDatePicker value={draft.dueDate} onChange={dueDate => setDraft({ ...draft, dueDate })} ariaLabel="Due date" placeholder="YYYY-MM-DD" align="right" /></fieldset></div>
         <div className="flex flex-col gap-1"><span>Reminder <span className="text-[#7288A3]">(optional)</span></span><SearchableSelect selectionIndicator="checkbox" ariaLabel="Reminder" value={draft.reminder ?? 'none'} options={TASK_REMINDER_OPTIONS} disabled={saving} onChange={reminder => setDraft({ ...draft, reminder })} /></div>
-        <div className="flex flex-col gap-1"><span>Related object <span className="text-[#7288A3]">(optional)</span></span><SearchableSelect selectionIndicator="checkbox" ariaLabel="Related object" value={draft.relatedObjectId} options={[{ value: '', label: 'None' }, ...relatedObjects.map(object => ({ value: object.id, label: object.label, description: object.type }))]} placeholder={related.loading ? 'Loading…' : 'Select related object'} disabled={!organization || related.loading || saving} onChange={relatedObjectId => setDraft({ ...draft, relatedObjectId })} />{related.error && <p className="text-[12px] text-[#7288A3]">{related.error}</p>}</div>
+        <div className="flex flex-col gap-1">
+          <span>Related object <span className="text-[#7288A3]">(optional)</span></span>
+          <SearchableSelect selectionIndicator="checkbox" ariaLabel="Related object module" value={relatedModule}
+            options={[{ value: '', label: 'None' }, ...RELATED_MODULES]} placeholder="Select module"
+            disabled={!organization || saving} onChange={value => { setRelatedModule(value); setDraft({ ...draft, relatedObjectId: '' }); }} />
+          {related.error && <p className="text-[12px] text-[#7288A3]">{related.error}</p>}
+        </div>
+        {relatedModule && <div className="flex flex-col gap-1">
+          <span>Record <span className="text-[#7288A3]">(optional)</span></span>
+          <SearchableSelect selectionIndicator="checkbox" ariaLabel="Related object record" value={draft.relatedObjectId}
+            options={[{ value: '', label: 'No specific record' }, ...relatedObjects.filter(object => object.type === relatedModule).map(object => ({ value: object.id, label: object.label }))]}
+            placeholder={related.loading ? 'Loading…' : 'Select record'} disabled={!organization || related.loading || saving}
+            emptyMessage="No available records in this module" onChange={relatedObjectId => setDraft({ ...draft, relatedObjectId })} />
+        </div>}
         {relatedObjects.filter(object => object.id === draft.relatedObjectId).map(object => <RelatedObjectLink key={object.id} object={object} organizationId={draft.organizationId} onOpen={onOpenRelatedObject} onError={setError} />)}
         <label className="flex flex-col gap-1"><span>Description <span className="text-[#7288A3]">(optional)</span></span><textarea aria-label="Description" rows={3} disabled={saving} className="w-full resize-y rounded-lg border border-[#D3E1EC] p-3 outline-none focus:border-[#007EA7]" value={draft.description} onChange={event => setDraft({ ...draft, description: event.target.value })} /></label>
         {task && <div className="flex flex-col gap-1"><span>Status</span><p aria-label="Task status" className="py-2">{getTaskStatus(task)}</p></div>}

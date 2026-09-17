@@ -208,7 +208,7 @@ export default function OrganizationUsersSettings({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="font-montserrat text-[16px] font-semibold text-[#10233A]">
-            Organization users
+            Company users
           </h2>
           <p className="mt-1 font-montserrat text-[12px] font-medium text-[#7288A3]">
             Assign users to {organizationName} or create a new user.

@@ -16,7 +16,10 @@ import {
 import UnsubscribeModal from './UnsubscribeModal';
 import { SaveButton } from './ScopedActionButtons';
 import { usePersistentState } from '../hooks/usePersistentState';
-import { userProfileStorageKey } from '../lib/currentUser';
+import { AUTH_SESSION_KEY, userProfileStorageKey } from '../lib/currentUser';
+import { isSystemAdministratorRole, parseSession } from '../lib/accessControl';
+import SearchableSelect from './SearchableSelect';
+import { ClientField } from './CompanyClientInformation';
 import {
   LOGIN_HISTORY_CHANGED_EVENT,
   loadLoginHistory,
@@ -32,6 +35,115 @@ import {
   type SettingsAudience,
 } from '../lib/linkedSettingsData';
 import { SystemBreadcrumb } from './SystemNavigation';
+
+const SYSTEM_OWNER_KEY = 'finansu-harmonija:v16:system-owner';
+const OWNER_DOCUMENT_SETTINGS_KEY = 'finansu-harmonija:v16:system-owner-document-settings';
+const OWNER_DOCUMENT_DEFAULTS = { prefix: 'SF', nextNumber: '1', digits: '6', separator: '-', currency: 'EUR', paymentDays: '14', language: 'English', footer: '' };
+
+function SystemOwnerDocumentSettings() {
+  const [draft, setDraft] = useState(() => {
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(OWNER_DOCUMENT_SETTINGS_KEY) || '{}');
+      return Object.fromEntries(Object.entries(OWNER_DOCUMENT_DEFAULTS).map(([key, fallback]) => [key, typeof stored?.[key] === 'string' ? stored[key] : fallback])) as typeof OWNER_DOCUMENT_DEFAULTS;
+    } catch { return { ...OWNER_DOCUMENT_DEFAULTS }; }
+  });
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const update = (key: keyof typeof draft, value: string) => { setDraft(current => ({ ...current, [key]: value })); setMessage(''); };
+  const next = Number(draft.nextNumber);
+  const digits = Number(draft.digits);
+  const validNumber = Number.isSafeInteger(next) && next > 0 && /^\d+$/.test(draft.nextNumber);
+  const validDigits = Number.isInteger(digits) && digits >= 1 && digits <= 12;
+  const preview = validNumber && validDigits ? `${draft.prefix.trim()}${draft.prefix.trim() ? draft.separator : ''}${String(next).padStart(digits, '0')}` : '—';
+  const inputClass = 'h-[42px] w-full rounded-lg border border-[#D3E1EC] bg-white px-3.5 text-[14px] font-medium outline-none focus:border-[#007EA7]';
+  const save = () => {
+    setError(''); setMessage('');
+    if (!parseSession(window.localStorage.getItem(AUTH_SESSION_KEY))?.roleNames.some(isSystemAdministratorRole)) { setError('Only Meso Admin can update these settings.'); return; }
+    if (!validNumber || !validDigits || !/^\d+$/.test(draft.paymentDays) || Number(draft.paymentDays) > 365) { setError('Enter a positive invoice number, 1–12 digits and payment terms of 0–365 days.'); return; }
+    try { window.localStorage.setItem(OWNER_DOCUMENT_SETTINGS_KEY, JSON.stringify({ ...draft, prefix: draft.prefix.trim() })); setMessage('Settings saved.'); }
+    catch { setError('Settings could not be saved. Please try again.'); }
+  };
+  return <section className="flex flex-col gap-6 font-montserrat text-[#10233A]">
+    <div className="rounded-lg border border-[#D3E1EC] bg-white p-5 sm:p-6">
+      <h2 className="mb-5 text-[16px] font-semibold">Invoice numbering</h2>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <label className="flex flex-col gap-2 text-[14px] font-semibold">Series / prefix<input className={inputClass} value={draft.prefix} maxLength={20} onChange={event => update('prefix', event.target.value)} /></label>
+        <label className="flex flex-col gap-2 text-[14px] font-semibold">Next invoice number<input className={inputClass} type="number" min="1" step="1" value={draft.nextNumber} onChange={event => update('nextNumber', event.target.value)} /></label>
+        <label className="flex flex-col gap-2 text-[14px] font-semibold">Number of digits<input className={inputClass} type="number" min="1" max="12" step="1" value={draft.digits} onChange={event => update('digits', event.target.value)} /></label>
+        <div className="flex flex-col gap-2 text-[14px] font-semibold"><span>Separator</span><SearchableSelect ariaLabel="Invoice number separator" value={draft.separator} options={[{ value: '-', label: 'Hyphen (-)' }, { value: '/', label: 'Slash (/)' }, { value: '', label: 'None' }]} onChange={value => update('separator', value)} /></div>
+      </div>
+      <p className="mt-4 rounded-md bg-[#E6F2F6] px-3 py-2 text-[13px]">Number preview: <strong>{preview}</strong></p>
+    </div>
+    <div className="rounded-lg border border-[#D3E1EC] bg-white p-5 sm:p-6">
+      <h2 className="mb-5 text-[16px] font-semibold">Document defaults</h2>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="flex flex-col gap-2 text-[14px] font-semibold"><span>Currency</span><SearchableSelect ariaLabel="Default document currency" value={draft.currency} options={['EUR', 'USD', 'GBP', 'PLN']} onChange={value => update('currency', value)} /></div>
+        <label className="flex flex-col gap-2 text-[14px] font-semibold">Payment terms (days)<input className={inputClass} type="number" min="0" max="365" value={draft.paymentDays} onChange={event => update('paymentDays', event.target.value)} /></label>
+        <div className="flex flex-col gap-2 text-[14px] font-semibold"><span>Document language</span><SearchableSelect ariaLabel="Default document language" value={draft.language} options={['English', 'Lithuanian']} onChange={value => update('language', value)} /></div>
+        <label className="flex flex-col gap-2 text-[14px] font-semibold md:col-span-3">Default invoice note<textarea className="min-h-[84px] rounded-lg border border-[#D3E1EC] p-3 text-[14px] font-normal outline-none focus:border-[#007EA7]" value={draft.footer} onChange={event => update('footer', event.target.value)} /></label>
+      </div>
+    </div>
+    {error && <p role="alert" className="text-[13px] text-red-600">{error}</p>}
+    {message && <p role="status" className="text-[13px] text-[#2EA96B]">{message}</p>}
+    <div className="flex justify-end"><SaveButton onClick={save}>Save</SaveButton></div>
+  </section>;
+}
+const OWNER_FIELDS = [
+  { title: 'Company details', fields: [['name', 'Company name'], ['code', 'Company code'], ['vat', 'VAT code'], ['email', 'Primary email'], ['phone', 'Phone number']] },
+  { title: 'Addresses', fields: [['registeredAddress', 'Registered address'], ['correspondenceAddress', 'Correspondence address'], ['country', 'Country']] },
+  { title: 'Bank details', fields: [['bank', 'Bank name'], ['iban', 'IBAN'], ['swift', 'SWIFT / BIC']] },
+];
+
+function SystemOwnerSettings() {
+  const [draft, setDraft] = useState<{ fields: Record<string, string>; userIds: string[] }>(() => {
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(SYSTEM_OWNER_KEY) || 'null');
+      return { fields: stored?.fields && typeof stored.fields === 'object' ? stored.fields : {}, userIds: Array.isArray(stored?.userIds) ? stored.userIds.filter((id: unknown) => typeof id === 'string') : [] };
+    } catch { return { fields: {}, userIds: [] }; }
+  });
+  const [users, setUsers] = useState(() => loadLinkedDirectoryUsers('Internal users'));
+  const [query, setQuery] = useState('');
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  useEffect(() => {
+    const refresh = () => setUsers(loadLinkedDirectoryUsers('Internal users'));
+    window.addEventListener(SETTINGS_DATA_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(SETTINGS_DATA_CHANGED_EVENT, refresh);
+  }, []);
+  const update = (key: string, value: string) => { setDraft(current => ({ ...current, fields: { ...current.fields, [key]: value } })); setMessage(''); };
+  const save = () => {
+    setError(''); setMessage('');
+    if (!parseSession(window.localStorage.getItem(AUTH_SESSION_KEY))?.roleNames.some(isSystemAdministratorRole)) { setError('Only Meso Admin can update these settings.'); return; }
+    if (!draft.fields.name?.trim() || !draft.fields.code?.trim()) { setError('Enter the company name and company code.'); return; }
+    try { window.localStorage.setItem(SYSTEM_OWNER_KEY, JSON.stringify(draft)); setMessage('Settings saved.'); }
+    catch { setError('Settings could not be saved. Please try again.'); }
+  };
+  return <section className="flex min-w-0 flex-col gap-6 font-montserrat">
+    <div className="rounded-lg border border-[#D3E1EC] bg-white p-5">
+    {OWNER_FIELDS.map((group, index) => <div key={group.title} className={index ? 'mt-6 border-t border-[#E5EDF4] pt-5' : ''}>
+      <h3 className={`${index ? 'text-[14px] leading-5' : 'text-[16px] leading-6'} font-semibold text-[#10233A]`}>{group.title === 'Addresses' ? 'Company address' : group.title}</h3>
+      {index === 0 && <p className="mt-1 text-[12px] leading-[18px] text-[#7288A3]">Primary identification and registration information.</p>}
+      <div className="mt-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {group.fields.map(([key, label]) => <ClientField key={key} field={{ key, label, value: draft.fields[key] || '', required: ['name', 'code'].includes(key) }} onChange={value => update(key, value)} />)}
+      </div>
+      </div>
+    </div>)}
+    </div>
+    <div className="rounded-lg border border-[#D3E1EC] bg-white p-5">
+      <h3 className="mb-4 text-[16px] font-semibold text-[#10233A]">Internal Users</h3>
+      <input aria-label="Search internal users" placeholder="Search" value={query} onChange={event => setQuery(event.target.value)} className="mb-3 h-[34px] rounded-md border border-[#D3E1EC] px-3 text-[13px] outline-none focus:border-[#007EA7]" />
+      <div className="max-h-[280px] overflow-y-auto">{users.filter(person => `${person.fullName} ${person.email}`.toLowerCase().includes(query.toLowerCase())).map(person => <label key={person.id} className="flex min-h-[42px] items-center gap-3 border-b border-[#E5EDF4] py-2 text-[13px] text-[#10233A]">
+        <input type="checkbox" className="h-4 w-4 accent-[#007EA7]" checked={draft.userIds.includes(person.id)} onChange={event => { const checked = event.target.checked; setDraft(current => ({ ...current, userIds: checked ? [...new Set([...current.userIds, person.id])] : current.userIds.filter(id => id !== person.id) })); setMessage(''); }} />
+        <span>{person.fullName || person.username || person.email}</span><span className="text-[#7288A3]">{person.email}</span>
+      </label>)}</div>
+      {!users.length && <p className="text-[13px] text-[#7288A3]">No internal users available.</p>}
+    </div>
+    {error && <p role="alert" className="text-[13px] text-red-600">{error}</p>}
+    {message && <p role="status" className="text-[13px] text-[#2EA96B]">{message}</p>}
+    <div className="flex justify-end"><SaveButton onClick={save}>Save</SaveButton></div>
+  </section>;
+}
 
 interface ProfileSettingsProps {
   user: {
@@ -69,6 +181,8 @@ interface PasswordTouched {
 }
 
 type ProfileSettingsTab =
+  | 'generalStatus'
+  | 'ownerSettings'
   | 'profile'
   | 'integrations'
   | 'security'
@@ -79,6 +193,8 @@ const PROFILE_SETTINGS_TABS: Array<{
   id: ProfileSettingsTab;
   label: string;
 }> = [
+  { id: 'generalStatus', label: 'General & status' },
+  { id: 'ownerSettings', label: 'Settings' },
   { id: 'profile', label: 'Profile' },
   { id: 'integrations', label: 'Integrations' },
   { id: 'security', label: 'Authorization notifications' },
@@ -317,6 +433,7 @@ function createDefaultNotificationPreferences(): ProfileNotificationPreferences 
 }
 
 export default function ProfileSettings({ user, onProfileSaved, onOpenCompanies }: ProfileSettingsProps) {
+  const canManageSystemOwner = Boolean(parseSession(window.localStorage.getItem(AUTH_SESSION_KEY))?.roleNames.some(isSystemAdministratorRole));
   const [activeTab, setActiveTab] = useState<ProfileSettingsTab>('profile');
   const normalizedUserEmail = user.email.trim().toLocaleLowerCase();
   const [storedProfile, setStoredProfile] = usePersistentState(userProfileStorageKey(user.email), {
@@ -861,7 +978,7 @@ export default function ProfileSettings({ user, onProfileSaved, onOpenCompanies 
         aria-label="Profile settings sections"
         className="flex min-h-[42px] w-full flex-wrap items-end gap-1 border-b border-[#D3E1EC]"
       >
-        {PROFILE_SETTINGS_TABS.map(tab => {
+        {PROFILE_SETTINGS_TABS.filter(tab => !['generalStatus', 'ownerSettings'].includes(tab.id) || canManageSystemOwner).map(tab => {
           const selected = activeTab === tab.id;
           return (
             <button
@@ -912,6 +1029,8 @@ export default function ProfileSettings({ user, onProfileSaved, onOpenCompanies 
       )}
 
       {/* Settings cards */}
+      {activeTab === 'generalStatus' && canManageSystemOwner && <SystemOwnerSettings />}
+      {activeTab === 'ownerSettings' && canManageSystemOwner && <SystemOwnerDocumentSettings />}
       <div
         className={`${activeTab === 'accessActivity' ? 'hidden' : 'grid'} grid-cols-[repeat(auto-fit,minmax(min(100%,340px),1fr))] gap-6 xl:gap-8 items-start`}
       >

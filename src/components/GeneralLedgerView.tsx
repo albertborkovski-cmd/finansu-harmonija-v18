@@ -1016,6 +1016,8 @@ export default function GeneralLedgerView({
             <>
               <span>Settings</span>
               <span className="text-[#A1B6C6]">/</span>
+              <span>Organizations settings</span>
+              <span className="text-[#A1B6C6]">/</span>
               <span>General ledger</span>
               <span className="text-[#A1B6C6]">/</span>
               <span className="text-[#A1B6C6]">{selectedTemplate.name}</span>
@@ -1315,6 +1317,8 @@ export default function GeneralLedgerView({
       />
       <div className="flex items-center gap-2 font-montserrat text-[12px] font-medium text-[#7288A3]">
         <span>Settings</span>
+        <span className="text-[#A1B6C6]">/</span>
+        <span>Organizations settings</span>
         <span className="text-[#A1B6C6]">/</span>
         <span className="text-[#A1B6C6]">General ledger</span>
       </div>

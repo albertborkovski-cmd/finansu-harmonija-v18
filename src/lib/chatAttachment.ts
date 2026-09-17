@@ -13,7 +13,7 @@ export function validateChatAttachment(file: File) {
 export async function registerChatAttachment(context: InvoiceChatContext, file: File, id: string): Promise<NonNullable<InvoiceChatMessage['attachments']>[number]> {
   validateChatAttachment(file);
   const session = parseSession(window.localStorage.getItem(AUTH_SESSION_KEY));
-  if (!session || !canEditMenu(session, 'messages') || !session.access.companies.edit) throw new Error('You do not have permission to upload documents.');
+  if (!session || !canEditMenu(session, 'messages') || (!session.access.companies.edit && !session.roleNames.includes('External demo user'))) throw new Error('You do not have permission to upload documents.');
   const { data } = await supabase.from('companies').select('*');
   const matches = ((data ?? []) as unknown as Company[]).filter(company => context.organizationId ? company.id === context.organizationId : company.name === context.companyName);
   const company = matches.length === 1 ? matches[0] : undefined;

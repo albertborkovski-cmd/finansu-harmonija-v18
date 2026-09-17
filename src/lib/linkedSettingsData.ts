@@ -74,6 +74,7 @@ export function hasOrganizationSubstitution(organizationId: string, userId: stri
 }
 
 export function canAccessAssignedOrganization(organization: LinkedOrganization & { assigned_accountant?: string }, session: { email: string; roleNames: string[] }, now = new Date()) {
+  if (session.roleNames.includes('External demo user')) return organization.name === 'Alice Stone';
   if (session.roleNames.some(role => ['administrator', 'administration'].includes(role.toLowerCase()))) return true;
   // Preserve other existing audiences; substitution applies to Meso accountants only.
   if (!session.roleNames.some(role => role.toLowerCase() === 'meso accountant')) return true;
@@ -81,6 +82,16 @@ export function canAccessAssignedOrganization(organization: LinkedOrganization &
   if (!user || (user.status && !['enabled', 'active'].includes(user.status.toLowerCase()))) return false;
   return isAccountantAssigned(organization, user) || hasOrganizationSubstitution(organization.id, user.id, now);
 }
+
+export const EXTERNAL_USER_DEFAULTS: LinkedDirectoryUser[] = [{
+  id: 'user-demo-external-aurika',
+  username: 'aurika.z',
+  fullName: 'Aurika Z. (Demo)',
+  email: 'aurika.z@meso.lt',
+  roles: 'External demo user',
+  organizations: 'Alice Stone',
+  status: 'Enabled',
+}];
 
 export const INTERNAL_USER_DEFAULTS: LinkedDirectoryUser[] = [
   {
@@ -180,7 +191,7 @@ export function loadLinkedDirectoryUsers(
   );
   const merged = stored.filter((user) => !deleted.has(user.id));
   const defaults =
-    audience === "Internal users" ? INTERNAL_USER_DEFAULTS : [];
+    audience === "Internal users" ? INTERNAL_USER_DEFAULTS : EXTERNAL_USER_DEFAULTS;
   defaults.forEach((defaultUser) => {
     if (deleted.has(defaultUser.id)) return;
     const index = merged.findIndex(

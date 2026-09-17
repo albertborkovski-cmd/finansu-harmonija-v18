@@ -46,6 +46,22 @@ function setup(initial = [], extra = []) {
   return { values, writes, events, storage, rows: () => JSON.parse(storage.getItem(KEY) ?? '[]') };
 }
 
+test('chat read receipts clear existing alerts but not later messages or another recipient', () => {
+  const state = setup([], [[sourceKey, JSON.stringify([message(), message({ id: 'message-2', sentAt: '2026-09-15T09:00:00.000Z' })])],
+    ['finansu-harmonija:v14:chat-read:recipient%40example.com:thread-1', 'message-1']]);
+  publishChatMessageNotification(context(), message());
+  publishChatMessageNotification(context(), message({ id: 'message-2', sentAt: '2026-09-15T09:00:00.000Z' }));
+  const [first, second] = state.rows();
+  assert.equal(isNotificationRead(first, 'recipient@example.com'), true);
+  assert.equal(isNotificationRead(second, 'recipient@example.com'), false);
+  assert.equal(isNotificationRead(first, 'someone@example.com'), false);
+  const legacy = { ...first, sourceChatId: undefined, sourceMessageId: undefined };
+  assert.equal(isNotificationRead(legacy, 'recipient@example.com'), false);
+  state.storage.setItem('finansu-harmonija:v14:chat-read:recipient%40example.com:thread-1', 'message-2');
+  assert.equal(isNotificationRead(legacy, 'recipient@example.com'), true);
+  assert.equal(getDashboardAttentionNotifications([{ ...legacy, category: 'notifications' }], viewer()).length, 0);
+});
+
 test('persisted incoming chat emits a recipient-only immutable system signal with canonical Open chat target', () => {
   const originalContext = Object.freeze(context());
   const originalMessage = Object.freeze(message());

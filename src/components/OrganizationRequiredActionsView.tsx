@@ -21,7 +21,7 @@ import NotificationRelatedObjectField from './NotificationRelatedObjectField';
 import NotificationDetailsPanel from './NotificationDetailsPanel';
 import RelatedObjectLink, { type OpenRelatedObject } from './RelatedObjectLink';
 import { resolveRelatedObject } from '../lib/relatedObjects';
-import { assertTaskUnchanged } from '../lib/taskCreation';
+import { assertTaskUnchanged, TASK_TYPES } from '../lib/taskCreation';
 import { getTaskActionVisibility, getTaskPermissions, transitionTask } from '../lib/taskPermissions';
 import { getTaskDueGroup, matchesTaskQuickFilters, type TaskQuickPeriod } from '../lib/taskSchedule';
 import { getTaskProvenance } from '../lib/taskProvenance';
@@ -45,7 +45,6 @@ const TASK_COLUMNS: ColConfig[] = [
   { key: 'source', label: 'Source', width: 150, visible: false },
   { key: 'createdBy', label: 'Created by', width: 200, visible: false },
   { key: 'message', label: 'Description', width: 380, visible: false },
-  { key: 'requiresAction', label: 'Requires action', width: 150, visible: false },
 ];
 
 const SECTIONS = [
@@ -57,7 +56,7 @@ const TASK_QUICK_PERIODS: TaskQuickPeriod[] = ['Overdue', 'Today', 'Upcoming', '
 function editableTask(row: AttentionNotification): ReminderRow {
   const { category, ...record } = row;
   if (category !== 'reminders') throw new Error('Only tasks can be edited in this form.');
-  return { ...record, daysTillRemind: 'daysTillRemind' in record ? record.daysTillRemind : '' };
+  return { ...record, type: (TASK_TYPES as readonly string[]).includes(record.type) ? record.type : 'To-do', daysTillRemind: 'daysTillRemind' in record ? record.daysTillRemind : '' };
 }
 
 export default function OrganizationRequiredActionsView({ organization, session, onBack, onOpenRelatedObject, initialQuery = '', initialTab = 'notifications', initialRequiresAction = false, initialOpenTasksOnly = false }: { organization?: { id: string; name: string }; session: AppSession; onBack?: () => void; onOpenRelatedObject: OpenRelatedObject; initialQuery?: string; initialTab?: NotificationTab; initialRequiresAction?: boolean; initialOpenTasksOnly?: boolean }) {
@@ -180,8 +179,8 @@ export default function OrganizationRequiredActionsView({ organization, session,
     }
     return String(row[key as keyof AttentionNotification] ?? '');
   };
-  const [activeFilters, setActiveFilters] = useState<string[]>([...(!organization ? ['organization'] : []), ...(initialRequiresAction ? ['requiresAction'] : []), ...(initialOpenTasksOnly && initialTab === 'reminders' ? ['status'] : [])]);
-  const [filters, setFilters] = useState<Record<string, string[]>>({ ...(initialRequiresAction ? { requiresAction: ['Yes'] } : {}), ...(initialOpenTasksOnly && initialTab === 'reminders' ? { status: ['Open'] } : {}) });
+  const [activeFilters, setActiveFilters] = useState<string[]>([...(!organization ? ['organization'] : []), ...((initialOpenTasksOnly || initialRequiresAction) && initialTab === 'reminders' ? ['status'] : [])]);
+  const [filters, setFilters] = useState<Record<string, string[]>>({ ...((initialOpenTasksOnly || initialRequiresAction) && initialTab === 'reminders' ? { status: ['Open'] } : {}) });
   const filterValue = (row: AttentionNotification, key: string) => key === 'organization' ? row.organizationId ?? '' : valueFor(row, key);
   const [page, setPage] = useState(1);
   const [notificationColumns, setNotificationColumns] = useState(() => createNotificationColumns(Boolean(organization)));
@@ -210,7 +209,7 @@ export default function OrganizationRequiredActionsView({ organization, session,
   // Only reserve the extra edit/delete space when legacy manual records need it.
   const actionWidth = activeTab === 'notifications' ? 128 + (actions.some(row => !isSystemNotification(row)) ? 64 : 0) : 108;
   const tabColumns = columns;
-  const filterKeys = (activeTab === 'reminders' ? ['organization', 'assignedTo', 'type', 'requiresAction', 'status'] : ['organization', 'requiresAction', 'type', 'status']).filter(key => !organization || key !== 'organization');
+  const filterKeys = (activeTab === 'reminders' ? ['organization', 'assignedTo', 'type', 'status'] : ['organization', 'type', 'status']).filter(key => !organization || key !== 'organization');
   const filterColumns = filterKeys.map(key => key === 'organization' ? {
     key, label: 'Organization', options: organizations.map(company => company.id),
     optionLabels: Object.fromEntries(organizations.map(company => [company.id, `${company.name}${company.company_code ? ` · ${company.company_code}` : ''}`])),
@@ -363,7 +362,7 @@ export default function OrganizationRequiredActionsView({ organization, session,
         const current = rows.find(row => row.id === editor.id && row.organizationId === editor.organizationId);
         const currentTask = current ? { ...current, daysTillRemind: 'daysTillRemind' in current ? current.daysTillRemind : '' } : null;
         if (!currentTask || !hasTaskOrganizationAccess(currentTask, saveSession) || !getTaskPermissions(currentTask, saveSession).edit) throw new Error('This task is no longer accessible. Close the editor and refresh the list.');
-        assertTaskUnchanged(currentTask, editableTask(editor));
+        assertTaskUnchanged(currentTask, { ...editableTask(editor), type: editor.type });
         return rows.map(row => row === current ? { ...row, ...record, status: row.status, taskStatus: row.taskStatus, resolvedAt: row.resolvedAt, readAtByEmail: row.readAtByEmail } : row);
       });
       setEditor(null);
@@ -408,7 +407,6 @@ export default function OrganizationRequiredActionsView({ organization, session,
         <NotificationRelatedObjectField organization={organizations.find(company => company.id === editor.organizationId)} session={effectiveSession} value={editor.relatedObject} onChange={relatedObject => setEditor({ ...editor, relatedObject })} onOpen={onOpenRelatedObject} />
         <label>Description <span className="text-red-600">*</span><textarea required rows={5} className="mt-1 w-full rounded-lg border border-[#D3E1EC] p-3" value={editor.message} onChange={event => setEditor({ ...editor, message: event.target.value })} /></label>
         <label className="flex items-center gap-2"><input type="checkbox" checked={editor.status === 'Active'} onChange={event => setEditor({ ...editor, status: event.target.checked ? 'Active' : 'Inactive' })} />Active</label>
-        <label className="flex items-center gap-2"><input type="checkbox" checked={Boolean(editor.requiresAction)} onChange={event => setEditor({ ...editor, requiresAction: event.target.checked })} />Requires action</label>
         {error && <p role="alert" className="text-[12px] text-red-600">{error}</p>}
         <footer className="mt-auto flex justify-end gap-2"><PageActionButton disabled={savingNotification} onClick={() => setEditor(null)}>Cancel</PageActionButton><button type="submit" disabled={savingNotification || !canEdit || !editorAccessible || !editor.name.trim() || !editor.type || !editor.message.trim()} className="rounded-md border-2 border-[#D3E1EC] px-3 py-1 font-semibold text-[#7288A3] disabled:opacity-40">{savingNotification ? 'Saving…' : 'Save'}</button></footer>
         </fieldset>

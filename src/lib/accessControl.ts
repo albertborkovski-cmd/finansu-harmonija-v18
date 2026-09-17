@@ -285,6 +285,15 @@ function resolveConfiguredUser(email: string): AppSession | null {
 
 export function resolveSessionForEmail(rawEmail: string): AppSession {
   const email = rawEmail.trim().toLowerCase();
+  // Explicit public demo persona. No administrative, OCR or company-edit access.
+  if (email === 'aurika.z@meso.lt') {
+    const access = createEmptyAccess();
+    access.companies = { view: true, edit: false };
+    access.chats = { view: true, edit: true };
+    access.notifications = { view: true, edit: true };
+    access.faq = { view: true, edit: false };
+    return { email, fullName: 'Aurika Z. (Demo)', roleNames: ['External demo user'], access, menuAccess: createMenuAccessFromModules(access) };
+  }
   if (
     email === 'albertborkvski@gmail.com' ||
     email === 'albertborkovski@gmail.com' ||

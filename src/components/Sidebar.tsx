@@ -71,12 +71,12 @@ const settingsGroups = [
 ];
 
 const settingsCatalogItems: SubMenuItem[] = [
-  { id: "settings-organizations", label: "Organizations" },
+  { id: "settings-organizations", label: "Organizations settings" },
   { id: "settings-counterparties", label: "Counterparties" },
-  { id: "settings-general-ledger", label: "General ledger" },
 ];
 
 const organizationReferenceItems: SubMenuItem[] = [
+  { id: "settings-general-ledger", label: "General ledger" },
   { id: "settings-organizations-company-status", label: "Company status" },
   { id: "settings-organizations-tax-country", label: "Tax country" },
   { id: "settings-organizations-legal-form", label: "Legal form" },
@@ -519,7 +519,8 @@ export default function Sidebar({
                         const itemActive = isOrganizations
                           ? activeMenu === item.id ||
                             activeMenu.startsWith("settings-organizations-") ||
-                            activeMenu === "settings-vat-classifications"
+                            activeMenu === "settings-vat-classifications" ||
+                            activeMenu === "settings-general-ledger"
                           : activeMenu === item.id;
                         return (
                           <div key={item.id}>
@@ -534,14 +535,14 @@ export default function Sidebar({
                                 }
                               />
                               <div
-                                className={`flex h-8 min-w-0 flex-1 items-center rounded-md transition-colors ${itemActive ? "bg-[#007EA7]" : "hover:bg-[#F0F7FA]"}`}
+                                className={`flex h-8 min-w-0 flex-1 items-center rounded-md transition-colors ${itemActive && !isOrganizations ? "bg-[#007EA7]" : "hover:bg-[#F0F7FA]"}`}
                               >
                                 <button
-                                  onClick={() => onMenuClick(item.id)}
+                                  onClick={() => { if (isOrganizations) { setOrganizationsExpanded(true); onMenuClick("settings-general-ledger"); } else onMenuClick(item.id); }}
                                   className="flex h-8 min-w-0 flex-1 items-center px-3 text-left"
                                 >
                                   <span
-                                    className={`truncate font-montserrat text-[13px] leading-5 ${isOrganizations ? "font-semibold" : "font-medium"} ${itemActive ? "text-white" : "text-[#10233A]"}`}
+                                    className={`truncate font-montserrat text-[13px] leading-5 ${isOrganizations ? "font-semibold" : "font-medium"} ${itemActive ? isOrganizations ? "text-[#007EA7]" : "text-white" : "text-[#10233A]"}`}
                                   >
                                     {item.label}
                                   </span>
@@ -556,7 +557,7 @@ export default function Sidebar({
                                         (current) => !current,
                                       )
                                     }
-                                    className={`mr-3 flex h-8 w-[14px] flex-shrink-0 appearance-none items-center justify-center border-0 bg-transparent p-0 leading-none ${itemActive ? "text-white" : "text-[#7288A3] hover:text-[#007EA7]"}`}
+                                    className="mr-3 flex h-8 w-[14px] flex-shrink-0 appearance-none items-center justify-center border-0 bg-transparent p-0 leading-none text-[#7288A3] hover:text-[#007EA7]"
                                   >
                                     <ChevronDown
                                       size={14}

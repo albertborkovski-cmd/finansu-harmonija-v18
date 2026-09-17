@@ -1,16 +1,13 @@
 import { parseSession, canEditMenu } from './accessControl';
 import { AUTH_SESSION_KEY } from './currentUser';
-import { canAccessAssignedOrganization, loadLinkedDirectoryUsers, loadOrganizationUserIds, organizationAssignmentStorageKey, isAccountantAssigned, hasOrganizationSubstitution, type LinkedOrganization } from './linkedSettingsData';
+import { canAccessAssignedOrganization, loadLinkedDirectoryUsers, organizationAccountantEntries, type LinkedOrganization } from './linkedSettingsData';
 import { invoiceChatPersistenceKey, loadChatConversations, registerChatConversation, type InvoiceChatMessage } from '../components/invoices/invoiceChat';
 
-export function handoffAccountants(organization: LinkedOrganization, currentEmail: string) {
-  const assigned = new Set(loadOrganizationUserIds(organization.id, 'Internal users'));
-  const hasExplicitAssignments = window.localStorage.getItem(organizationAssignmentStorageKey(organization.id, 'Internal users')) !== null;
+export function handoffAccountants(organization: LinkedOrganization & { assigned_accountant?: string }, currentEmail: string) {
+  const assigned = new Set(organizationAccountantEntries(organization).map(user => user.id));
   return loadLinkedDirectoryUsers('Internal users').filter(user => user.email && user.email.toLowerCase() !== currentEmail.toLowerCase()
     && (!user.status || ['enabled', 'active'].includes(user.status.toLowerCase()))
-    && (assigned.has(user.id) || isAccountantAssigned(organization, user) || hasOrganizationSubstitution(organization.id, user.id)
-      || (!hasExplicitAssignments && (user.organizations?.trim().toLowerCase() === 'all organizations'
-        || user.organizations?.split(',').some(value => [organization.id.toLowerCase(), organization.name.toLowerCase()].includes(value.trim().toLowerCase()))))));
+    && assigned.has(user.id));
 }
 
 export function handoffAiChat(storageKey: string, organization: LinkedOrganization, accountantId: string) {
