@@ -1,7 +1,7 @@
 {
-  "name": "finansu-harmonija-v16",
+  "name": "finansu-harmonija-v17",
   "private": true,
-  "version": "16.0.0",
+  "version": "17.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

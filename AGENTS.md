@@ -1,7 +1,9 @@
-# Frozen V16 release
+# Active V17 workspace
 
-V16 is frozen for testing. Do not make application changes here.
-All future improvements belong in the sibling V17 workspace.
+V17 is active. All future improvements belong here only.
+V17 runs at http://127.0.0.1:5198/.
+V17 was created from frozen V16 commit 1aef121a0c750afc28cf87735c808dafcbb64d21 (tag v16).
+V16 and earlier versions are frozen. Never modify them or add their repositories as V17 remotes.
 V16 testing: https://albertborkovski-cmd.github.io/finansu-harmonija-v16/.
 V16 runs at http://127.0.0.1:5197/.
 V16 was created from frozen V15 commit 0f2280d63a4c95c40e319905d4128ec5605dd903 (tag v15).
