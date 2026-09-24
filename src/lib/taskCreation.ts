@@ -2,6 +2,7 @@ import type { ReminderRow } from './notifications';
 import { TASK_REMINDER_OPTIONS } from './taskSchedule';
 
 export const TASK_TYPES = ['To-do', 'Request', 'Review', 'Approval'] as const;
+export const TASK_PRIORITIES = ['Low', 'Normal', 'High', 'Urgent'] as const;
 export type TaskAssignee = {
   id: string; userId: string; name: string; email: string;
   audience: 'Internal users' | 'External users'; organizationId: string;
@@ -11,6 +12,7 @@ export type TaskDraft = {
   name: string; type: string; organizationId: string; assignedToId: string;
   dueDate: string; relatedObjectId: string; description: string;
   reminder?: string;
+  priority?: string;
 };
 export type TaskCreationContext = {
   session: { email: string; fullName: string };
@@ -22,6 +24,7 @@ export type TaskCreationContext = {
 
 export function validateTaskDraft(draft: TaskDraft, context: TaskCreationContext): Partial<Record<keyof TaskDraft, string>> {
   const errors: Partial<Record<keyof TaskDraft, string>> = {};
+  if (draft.priority !== undefined && !(TASK_PRIORITIES as readonly string[]).includes(draft.priority)) errors.priority = 'Select a valid priority.';
   if (!draft.name.trim()) errors.name = 'Enter a task name.';
   if (!(TASK_TYPES as readonly string[]).includes(draft.type)) errors.type = 'Select a task type.';
   if (!context.organizations.some(org => org.id === draft.organizationId)) errors.organizationId = 'Select an available organization.';
@@ -43,6 +46,7 @@ function editableTaskFields(draft: TaskDraft, context: TaskCreationContext) {
   const relatedObject = context.relatedObjects.find(object => object.id === draft.relatedObjectId && object.organizationId === organization.id);
   return {
     name: draft.name.trim(), type: draft.type, message: draft.description.trim(),
+    priority: (draft.priority ?? 'Normal') as NonNullable<ReminderRow['priority']>,
     organizationId: organization.id, organizationName: organization.name,
     assignedToId: assignee.id, assignedToName: assignee.name, assignedToEmail: assignee.email,
     assignedToAudience: assignee.audience, dueDate: draft.dueDate,

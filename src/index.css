@@ -4,6 +4,21 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Shared table viewport: rows scroll, column headings remain visible. */
+[data-system-table-viewport="true"] {
+  overflow: auto !important;
+  overscroll-behavior: contain;
+  min-height: 0;
+}
+[data-system-table-viewport="true"] [data-frozen-table-header="true"],
+[data-system-table-viewport="true"] thead {
+  position: sticky !important;
+  top: 0;
+  z-index: 20;
+  background: #fff !important;
+  box-shadow: 0 1px 0 #d3e1ec;
+}
+
 /* The application provides its own password visibility control. Microsoft
  * Edge also injects a native reveal button into password inputs, which would
  * otherwise display a second eye beside the system icon. */

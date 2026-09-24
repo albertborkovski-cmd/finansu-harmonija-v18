@@ -1,3 +1,4 @@
+import { toggleFilteredSelection } from '../lib/tableSelection';
 import {
   useCallback,
   useEffect,
@@ -1377,10 +1378,7 @@ export default function AllDocumentsView({
                 mixed={someSelected}
                 label="Select all documents"
                 onChange={() =>
-                  setSelected(
-                    allSelected
-                      ? new Set()
-                      : new Set(sortedRows.map((record) => record.id)),
+                  setSelected(current => toggleFilteredSelection(current, sortedRows.map((record) => record.id)),
                   )
                 }
               />

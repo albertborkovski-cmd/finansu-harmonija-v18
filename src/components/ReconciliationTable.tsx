@@ -1,3 +1,4 @@
+import { toggleFilteredSelection } from '../lib/tableSelection';
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Download } from 'lucide-react';
 import ColumnSettingsPanel, { type ColConfig } from './ColumnSettingsPanel';
@@ -91,7 +92,7 @@ export default function ReconciliationTable({ scope, rows, defaultColumns, selec
   const selectedIds = selectableRows.filter((row) => selected.has(row.id)).map((row) => row.id);
   const allSelected = selectableRows.length > 0 && selectedIds.length === selectableRows.length;
   const actionIds = selectedIds.length || selectedOnlyAction ? selectedIds : selectableRows.map((row) => row.id);
-  const changeFilter = (update: () => void) => { update(); setSelected(new Set()); setBatch(1); if (scrollRef.current) scrollRef.current.scrollTop = 0; };
+  const changeFilter = (update: () => void) => { update(); setBatch(1); if (scrollRef.current) scrollRef.current.scrollTop = 0; };
   const clear = () => changeFilter(() => { setQuery(''); setActiveFilters([]); setFilterValues({}); onClearFilters?.(); });
   const exportRows = () => {
     const escape = (value: string | number) => `"${String(value).replace(/^[=+@-]/, "'$&").replace(/"/g, '""')}"`;
@@ -126,7 +127,7 @@ export default function ReconciliationTable({ scope, rows, defaultColumns, selec
       <div role="table" aria-label="Reconciliation records" style={{ minWidth: rowWidth }} className="w-full font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A]">
         <div role="row" className="system-table-header-row sticky top-0 z-10 mb-1 flex h-9 w-full items-start border-b border-[#E5EDF9] bg-white">
           <div role="columnheader" data-table-header-select="true" className="system-table-select-cell flex h-9 w-[30px] shrink-0 items-start">
-            {selectable && <input type="checkbox" aria-label="Select all filtered reconciliation records" checked={allSelected} disabled={!selectableRows.length} onChange={() => setSelected(allSelected ? new Set() : new Set(selectableRows.map((row) => row.id)))} className="h-[18px] w-[18px] cursor-pointer rounded border border-[#A1B6C6] accent-[#007EA7]" />}
+            {selectable && <input type="checkbox" aria-label="Select all filtered reconciliation records" checked={allSelected} disabled={!selectableRows.length} onChange={() => setSelected(current => toggleFilteredSelection(current, selectableRows.map(row => row.id)))} className="h-[18px] w-[18px] cursor-pointer rounded border border-[#A1B6C6] accent-[#007EA7]" />}
           </div>
           {visibleColumns.map((column) => <div role="columnheader" aria-sort={directionFor(column.key) === 'asc' ? 'ascending' : directionFor(column.key) === 'desc' ? 'descending' : 'none'} key={column.key} style={columnStyle(column)} className="relative flex h-9 min-w-0 items-start pr-4 text-[12px] font-medium leading-[18px]">
             <div className="flex w-full min-w-0 items-center gap-1.5">

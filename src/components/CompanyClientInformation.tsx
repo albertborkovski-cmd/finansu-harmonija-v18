@@ -25,7 +25,7 @@ import {
 import OrganizationUsersSettings from "./OrganizationUsersSettings";
 import OrganizationEmailHistoryView from "./OrganizationEmailHistoryView";
 import { loadVatClassificationTemplateNames } from "./VatClassificationsView";
-import { loadGeneralLedgerTemplateNames } from "./GeneralLedgerView";
+import GeneralLedgerView, { loadGeneralLedgerTemplateNames } from "./GeneralLedgerView";
 import CompanyClientsView from "./CompanyClientsView";
 import { ensureOrganizationProductGroups } from "../lib/organizationProductGroups";
 import { loadCompanyLogo, saveCompanyLogo } from "../lib/companyBranding";
@@ -847,6 +847,7 @@ export default function CompanyClientInformation({
   onBack,
   onNavigateToUserDirectory,
   onOpenSetupIntegration,
+  onEditGeneralLedger,
   organizationMode = false,
   organizationDesign = false,
   createMode = false,
@@ -859,6 +860,7 @@ export default function CompanyClientInformation({
   onCompanyUpdated?: (company: Company) => void;
   onBack?: () => void;
   onOpenSetupIntegration?: () => void;
+  onEditGeneralLedger?: (templateName: string) => void;
   onNavigateToUserDirectory?: (
     audience: "Internal users" | "External users",
   ) => void;
@@ -879,6 +881,7 @@ export default function CompanyClientInformation({
   const [companyLogoError, setCompanyLogoError] = useState("");
   const [activeStatsTab, setActiveStatsTab] = useState("Stats");
   const [saved, setSaved] = useState(false);
+  const [editingCompanyLedger, setEditingCompanyLedger] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [organizationFormSection, setOrganizationFormSection] = useState<
@@ -1278,6 +1281,16 @@ export default function CompanyClientInformation({
     }
   };
 
+  if (editingCompanyLedger && !createMode && company.id) return (
+    <GeneralLedgerView
+      key={`${company.id}:${fields.find(field => field.key === 'generalLedger')?.value}`}
+      companyId={company.id}
+      companyName={company.name}
+      assignedTemplateName={fields.find(field => field.key === 'generalLedger')?.value || company.general_ledger}
+      onBack={() => setEditingCompanyLedger(false)}
+    />
+  );
+
   if (scopedSettingsOnly) return (
     <section className="flex min-w-0 flex-col gap-6 rounded-lg border border-[#D3E1EC] p-5">
       <h3 className="font-montserrat text-[16px] font-semibold leading-6 text-[#10233A]">{scopedSettingsTitle}</h3>
@@ -1287,6 +1300,14 @@ export default function CompanyClientInformation({
           return dimension ? (
             <div key={field.key} className="min-w-0">
               <DepartmentCodesEditor value={field.value} onChange={value => updateField(field.key, value)} title={dimension.title} requiredLabel={dimension.requiredLabel} itemSingular={dimension.itemSingular} itemPlural={dimension.itemPlural} manageWhenNotRequired={field.key === 'productGroups' || field.key === 'documentSeries'} />
+            </div>
+          ) : field.key === 'generalLedger' ? (
+            <div key={field.key} className="min-w-0">
+              <ClientField field={field} onChange={value => updateField(field.key, value)} />
+              <div className="mt-2 flex justify-end">
+                <PageActionButton disabled={createMode || !company.id || !field.value} onClick={() => onEditGeneralLedger ? onEditGeneralLedger(field.value) : setEditingCompanyLedger(true)}>Edit</PageActionButton>
+              </div>
+              <p className="mt-1 text-[11px] leading-4 text-[#7288A3]">Changes apply to this company only. The shared template is unchanged.</p>
             </div>
           ) : <ClientField key={field.key} field={field} onChange={value => updateField(field.key, value)} />;
         })}

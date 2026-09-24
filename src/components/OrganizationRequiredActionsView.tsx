@@ -11,10 +11,10 @@ import HorizontalTableScrollbar from './HorizontalTableScrollbar';
 import TablePagination from './TablePagination';
 import { useAttentionNotifications } from '../hooks/useAttentionNotifications';
 import { useVisibleNotificationRecords } from '../hooks/useVisibleNotificationRecords';
-import { getNotificationTabCounts, getRelevantActionsForTab, getTaskStatus, isNotificationRead, setNotificationRead, requiresAction, type AttentionNotification, type NotificationTab } from '../lib/notifications';
+import { getNotificationStatus, getNotificationTabCounts, getRelevantActionsForTab, getTaskStatus, isNotificationRead, setNotificationRead, requiresAction, type AttentionNotification, type NotificationTab } from '../lib/notifications';
 import SystemAddFilters from './SystemAddFilters';
 import { canEditMenu, parseSession, type AppSession } from '../lib/accessControl';
-import { Check, XCircle, Mail, MailCheck, Pencil, Trash2, RefreshCw, X } from 'lucide-react';
+import { Check, XCircle, Mail, MailCheck, Pencil, Trash2, RefreshCw, X, AlertTriangle, Info } from 'lucide-react';
 import SearchableSelect from './SearchableSelect';
 import NewTaskForm from './NewTaskForm';
 import NotificationRelatedObjectField from './NotificationRelatedObjectField';
@@ -29,7 +29,7 @@ import { useTaskToday } from '../hooks/useTaskToday';
 import { canAccessAssignedOrganization } from '../lib/linkedSettingsData';
 import { SAMPLE_NOTIFICATIONS, SAMPLE_REMINDERS, type NotificationRow, type ReminderRow } from '../lib/notifications';
 import { matchesTextSearch } from '../utils/textSearch';
-import { createNotificationColumns, formatNotificationDateTime, getNotificationActionLabel, getNotificationModuleLabel, getNotificationSourceTaskId, isSystemNotification, notificationMessage, NOTIFICATION_MODULE_LABELS, NOTIFICATION_OPEN_BUTTON_CLASS_NAME } from '../lib/notificationPresentation';
+import { createNotificationColumns, formatNotificationDateTime, getNotificationActionLabel, getNotificationRelatedObjectLabel, getNotificationModuleLabel, getNotificationSourceTaskId, isSystemNotification, notificationMessage, NOTIFICATION_MODULE_LABELS, NOTIFICATION_OPEN_BUTTON_CLASS_NAME } from '../lib/notificationPresentation';
 import { ensureReceivedEmailExample } from '../lib/chatNotificationExample';
 import { ensureObjectNotificationExamples } from '../lib/notificationObjectExamples';
 import { scopeNotificationRecords } from '../lib/notificationOrganizationScope';
@@ -42,15 +42,12 @@ const TASK_COLUMNS: ColConfig[] = [
   { key: 'dueDate', label: 'Due date', width: 180, visible: true },
   { key: 'relatedObject', label: 'Related object', width: 240, visible: true },
   { key: 'status', label: 'Status', width: 140, visible: true },
+  { key: 'priority', label: 'Priority', width: 110, visible: true },
   { key: 'source', label: 'Source', width: 150, visible: false },
   { key: 'createdBy', label: 'Created by', width: 200, visible: false },
   { key: 'message', label: 'Description', width: 380, visible: false },
 ];
 
-const SECTIONS = [
-  { id: 'notifications' as const, label: 'Notifications' },
-  { id: 'reminders' as const, label: 'Tasks' },
-];
 const TASK_QUICK_PERIODS: TaskQuickPeriod[] = ['Overdue', 'Today', 'Upcoming', 'Completed'];
 
 function editableTask(row: AttentionNotification): ReminderRow {
@@ -59,7 +56,7 @@ function editableTask(row: AttentionNotification): ReminderRow {
   return { ...record, type: (TASK_TYPES as readonly string[]).includes(record.type) ? record.type : 'To-do', daysTillRemind: 'daysTillRemind' in record ? record.daysTillRemind : '' };
 }
 
-export default function OrganizationRequiredActionsView({ organization, session, onBack, onOpenRelatedObject, initialQuery = '', initialTab = 'notifications', initialRequiresAction = false, initialOpenTasksOnly = false }: { organization?: { id: string; name: string }; session: AppSession; onBack?: () => void; onOpenRelatedObject: OpenRelatedObject; initialQuery?: string; initialTab?: NotificationTab; initialRequiresAction?: boolean; initialOpenTasksOnly?: boolean }) {
+export default function OrganizationRequiredActionsView({ organization, session, onBack, onOpenRelatedObject, onOpenModule, initialQuery = '', initialTab = 'notifications', initialRequiresAction = false, initialOpenTasksOnly = false }: { organization?: { id: string; name: string }; session: AppSession; onBack?: () => void; onOpenRelatedObject: OpenRelatedObject; onOpenModule?: (organizationId: string, menu: string) => Promise<void>; initialQuery?: string; initialTab?: NotificationTab; initialRequiresAction?: boolean; initialOpenTasksOnly?: boolean }) {
   const [activeTab, setActiveTab] = useState<NotificationTab>(initialTab);
   const [myTasks, setMyTasks] = useState(false);
   const [quickPeriod, setQuickPeriod] = useState<TaskQuickPeriod | null>(null);
@@ -162,16 +159,18 @@ export default function OrganizationRequiredActionsView({ organization, session,
     if (key === 'requiresAction') return requiresAction(row) ? 'Yes' : 'No';
     if (key === 'category') return row.category === 'reminders' ? 'Task' : 'Notification';
     if (key === 'createdAt') return formatNotificationDateTime(row);
+    if (key === 'severity') return 'severity' in row ? row.severity || '—' : '—';
     if (key === 'type' && row.category === 'notifications') return getNotificationModuleLabel(row);
     if (key === 'message' && row.category === 'notifications') return notificationMessage(row);
-    if (key === 'status') return row.category === 'reminders' ? getTaskStatus(row) : isNotificationRead(row, effectiveSession.email) ? 'Read' : 'Unread';
+    if (key === 'status') return row.category === 'reminders' ? getTaskStatus(row) : getNotificationStatus(row);
     if (key === 'dueDate') return row.category === 'reminders' && 'dueDate' in row ? row.dueDate || '—' : '—';
     if (key === 'relatedObject') {
-      if (row.category === 'notifications') return getNotificationActionLabel(row) || '—';
+      if (row.category === 'notifications') return getNotificationRelatedObjectLabel(row, sectionActions.reminders);
       return row.relatedObject?.label || '—';
     }
     if (row.category === 'reminders') {
       const task = editableTask(row);
+      if (key === 'priority') return task.priority ?? 'Normal';
       if (key === 'type') return task.type || '—';
       if (key === 'assignedTo') return task.assignedToName?.trim() || task.assignedToEmail?.trim() || '—';
       if (key === 'source') return getTaskProvenance(task).source;
@@ -267,16 +266,24 @@ export default function OrganizationRequiredActionsView({ organization, session,
   const renderRelatedObject = (row: AttentionNotification, asButton = false) => {
     const label = row.category === 'notifications' ? getNotificationActionLabel(row) : undefined;
     if (row.category === 'notifications') {
-      if (!label) return asButton ? <button type="button" aria-label={`Open notification: ${row.name}`} title={row.name} className={NOTIFICATION_OPEN_BUTTON_CLASS_NAME} onClick={() => { setError(''); setOpenedNotification({ id: row.id, organizationId: row.organizationId }); }}>Open</button> : '—';
+      if (!label) {
+        const destination = ({ Bank: ['bank', 'Open bank'], OCR: ['documents', 'Open documents'], Documents: ['documents', 'Open documents'], Invoices: ['documents', 'Open invoices'], Reconciliation: ['services', 'Open reconciliation'] } as Record<string, string[]>)[getNotificationModuleLabel(row)];
+        return asButton ? <button type="button" title={row.name} className={NOTIFICATION_OPEN_BUTTON_CLASS_NAME} onClick={async () => {
+          setError('');
+          if (destination && onOpenModule && row.organizationId) {
+            try { await onOpenModule(row.organizationId, destination[0]); } catch (error) { setError(error instanceof Error ? error.message : 'This module is unavailable.'); }
+          } else setOpenedNotification({ id: row.id, organizationId: row.organizationId });
+        }}>Open</button> : '—';
+      }
       const sourceTaskId = getNotificationSourceTaskId(row);
       if (sourceTaskId) {
-        const taskName = sectionActions.reminders.find(task => task.id === sourceTaskId && task.organizationId === row.organizationId)?.name || row.name;
+        const taskName = getNotificationRelatedObjectLabel(row, sectionActions.reminders);
         return <button type="button" role={asButton ? undefined : 'link'} aria-label={`${label}: ${taskName}`} title={taskName} className={asButton
           ? NOTIFICATION_OPEN_BUTTON_CLASS_NAME
-          : 'max-w-full truncate text-left text-[#007EA7] hover:underline'} onClick={() => openSourceTask(row)}>{asButton ? 'Open' : label}</button>;
+          : 'max-w-full truncate text-left text-[#007EA7] hover:underline'} onClick={() => openSourceTask(row)}>{asButton ? 'Open' : taskName}</button>;
       }
     }
-    return row.relatedObject ? <RelatedObjectLink object={row.relatedObject} organizationId={row.organizationId} label={label} variant={asButton ? 'button' : 'link'} onOpen={onOpenRelatedObject} onError={setError} /> : asButton ? null : '—';
+    return row.relatedObject ? <RelatedObjectLink object={row.relatedObject} organizationId={row.organizationId} label={asButton ? label : row.category === 'notifications' ? getNotificationRelatedObjectLabel(row) : undefined} variant={asButton ? 'button' : 'link'} onOpen={onOpenRelatedObject} onError={setError} /> : asButton ? null : '—';
   };
   useLayoutEffect(() => {
     if (activeTab === 'notifications' && pendingScrollRestore.current && scrollRef.current) {
@@ -286,19 +293,9 @@ export default function OrganizationRequiredActionsView({ organization, session,
     }
   }, [activeTab]);
   return <div className="flex min-h-screen flex-col gap-6 pb-24 pt-12" style={{ paddingLeft: 'clamp(24px, 5vw, 72px)', paddingRight: 'clamp(24px, 5vw, 72px)' }}>
-    <PageHeader title="Notifications & Tasks" actions={<>{onBack && <PageActionButton onClick={onBack}>Back</PageActionButton>}{activeTab === 'reminders' && <PageActionButton disabled={!canEdit || Boolean(organization && !canAccessOrganization(organization.id))} onClick={createTask}>+ New task</PageActionButton>}</>} />
-    <SystemBreadcrumb items={[...(organization ? ['Companies', organization.name] : []), 'Notifications & Tasks', activeTab === 'notifications' ? 'Notifications' : 'Tasks']} />
-    <div role="tablist" aria-label="Notifications and tasks" className="flex shrink-0 flex-row border-b border-[#E5EDF9]">
-      {SECTIONS.map(section => <button key={section.id} type="button" role="tab" id={`notification-section-${section.id}`} aria-controls="notification-section-content" aria-selected={activeTab === section.id} tabIndex={activeTab === section.id ? 0 : -1} onClick={() => changeTab(section.id)} onKeyDown={event => {
-        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-        event.preventDefault();
-        const next = event.key === 'Home' ? 'notifications' : event.key === 'End' ? 'reminders' : activeTab === 'notifications' ? 'reminders' : 'notifications';
-        changeTab(next); document.getElementById(`notification-section-${next}`)?.focus();
-      }} className={`relative border-b-2 px-4 pb-3 font-montserrat text-[14px] font-medium leading-5 transition-colors ${activeTab === section.id ? 'border-[#007EA7] text-[#007EA7]' : 'border-transparent text-[#7288A3] hover:text-[#10233A]'}`}>
-        {section.label} <span aria-live="polite" className="tabular-nums">({tabCounts[section.id]})</span>
-      </button>)}
-    </div>
-    <div role="tabpanel" id="notification-section-content" aria-labelledby={`notification-section-${activeTab}`} className="flex min-h-0 flex-1 flex-col gap-6">
+    <PageHeader title={<span className="inline-flex items-center gap-3"><span>{activeTab === 'notifications' ? 'Notifications' : 'Tasks'}</span><span aria-live="polite" aria-label={activeTab === 'notifications' ? `${tabCounts.notifications} unread notifications` : `${tabCounts.reminders} open tasks`} title={activeTab === 'notifications' ? 'Unread notifications' : 'Open tasks'} className="inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full bg-[#E65050] px-2 font-montserrat text-[12px] font-semibold leading-6 tabular-nums text-white">{tabCounts[activeTab]}</span></span>} actions={<>{onBack && <PageActionButton onClick={onBack}>Back</PageActionButton>}{activeTab === 'reminders' && <PageActionButton disabled={!canEdit || Boolean(organization && !canAccessOrganization(organization.id))} onClick={createTask}>+ New task</PageActionButton>}</>} />
+    <SystemBreadcrumb items={[...(organization ? ['Companies', organization.name] : []), activeTab === 'notifications' ? 'Notifications' : 'Tasks']} />
+    <div id="notification-section-content" className="flex min-h-0 flex-1 flex-col gap-6">
     {activeTab === 'reminders' && sourceTaskFocus && <div className="flex items-center gap-3"><PageActionButton onClick={returnToNotifications}>Back to notifications</PageActionButton><span className="font-montserrat text-[12px] text-[#7288A3]">Source task · {organizations.find(company => company.id === sourceTaskFocus.organizationId)?.name ?? '—'}</span></div>}
     <div className="flex flex-wrap items-center gap-1">
       <OcrSearchField value={query} onChange={value => { setQuery(value); setPage(1); }} />
@@ -317,6 +314,7 @@ export default function OrganizationRequiredActionsView({ organization, session,
             <ColumnSortButton columnLabel={column.label} direction={directionFor(column.key)} onDirectionChange={direction => changeSort(column.key, direction)} />
             <ResizeHandle onMouseDown={event => startResize(columns.findIndex(item => item.key === column.key), event)} />
           </div>)}
+          {activeTab === 'notifications' && <div style={{ width: actionWidth }} className="system-table-row-actions shrink-0 bg-white px-2 font-montserrat text-[12px] text-[#10233A]">Action</div>}
         </div>
         {sortedRows.slice(0, currentPage * TABLE_BATCH_SIZE).map((row, index) => {
           const notificationRead = row.category === 'notifications' && isNotificationRead(row, effectiveSession.email);
@@ -325,9 +323,9 @@ export default function OrganizationRequiredActionsView({ organization, session,
           const permissions = task && currentSession ? getTaskPermissions(task, currentSession) : null;
           const actionVisibility = task && currentSession ? getTaskActionVisibility(task, currentSession) : null;
           return <div key={row.category === 'notifications' ? JSON.stringify([row.category, row.organizationId ?? '', row.id]) : `${row.organizationId ?? ''}:${row.actionId || `${row.category}:${row.id}`}`} className={`flex h-9 items-center rounded-lg ${index % 2 === 0 ? 'bg-[#F8FDFF]' : ''}`}>
-          {visible.map(column => <div key={column.key} title={valueFor(row, column.key)} className="flex-shrink-0 truncate px-3 font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A]" style={{ width: column.width }}>{column.key === 'dueDate' && task ? <>
+          {visible.map(column => <div key={column.key} title={valueFor(row, column.key)} className="flex-shrink-0 truncate px-3 font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A]" style={{ width: column.width }}>{column.key === 'severity' ? <span className={`inline-flex items-center gap-1.5 ${valueFor(row, column.key) === 'Critical' ? 'text-[#B93846]' : valueFor(row, column.key) === 'Warning' ? 'text-[#966000]' : 'text-[#7288A3]'}`}>{['Critical', 'Warning'].includes(valueFor(row, column.key)) ? <AlertTriangle size={15} /> : <Info size={15} />}{valueFor(row, column.key)}</span> : column.key === 'dueDate' && task ? <>
             <span>{valueFor(row, column.key)}</span>{dueGroup && <span className={`ml-2 text-[10px] ${dueGroup === 'Overdue' ? 'text-[#D75B67]' : 'text-[#7288A3]'}`}>{dueGroup}</span>}
-          </> : column.key === 'relatedObject' ? renderRelatedObject(row) : valueFor(row, column.key)}</div>)}
+          </> : column.key === 'priority' && task ? <span className={`inline-flex items-center rounded px-2 py-0.5 text-[11px] font-medium ${task.priority === 'Urgent' ? 'bg-[#FDEBEC] text-[#B93846]' : task.priority === 'High' ? 'bg-[#FFF3DE] text-[#966000]' : task.priority === 'Low' ? 'bg-[#F0F3F6] text-[#7288A3]' : 'bg-[#E6F2F6] text-[#007EA7]'}`}>{task.priority ?? 'Normal'}</span> : column.key === 'relatedObject' ? renderRelatedObject(row) : valueFor(row, column.key)}</div>)}
           <div style={{ width: actionWidth }} className={`system-table-row-actions flex shrink-0 items-center gap-1 px-2 ${activeTab === 'notifications' ? 'justify-start' : 'justify-end'} ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
             {row.category === 'notifications' && renderRelatedObject(row, true)}
             {row.category === 'notifications' && <button type="button" title={notificationRead ? 'Read — click to mark as unread' : 'Unread — click to mark as read'} aria-label={`${notificationRead ? 'Mark as unread' : 'Mark as read'}: ${row.name}`} onClick={() => toggleRead(row)} className={`flex h-7 w-7 shrink-0 items-center justify-center rounded border-2 hover:border-[#007EA7] hover:text-[#007EA7] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#007EA7] ${notificationRead ? 'border-[#D3E1EC] bg-white text-[#7288A3]' : 'border-[#D3E1EC] bg-[#E6F2F6] text-[#007EA7]'}`}>{notificationRead ? <MailCheck size={16} aria-hidden="true" /> : <Mail size={16} aria-hidden="true" />}</button>}
@@ -406,7 +404,7 @@ export default function OrganizationRequiredActionsView({ organization, session,
         <div className="flex flex-col gap-1"><span>Organization</span><SearchableSelect selectionIndicator="checkbox" ariaLabel="Organization" value={editor.organizationId ?? ''} disabled={Boolean(organization || editorOriginal.current?.organizationId) || savingNotification} options={organizations.map(company => ({ value: company.id, label: company.name, description: company.company_code }))} placeholder="Select organization" onChange={id => { const company = organizations.find(item => item.id === id); setEditor({ ...editor, organizationId: company?.id, organizationName: company?.name, relatedObject: undefined }); }} /></div>
         <NotificationRelatedObjectField organization={organizations.find(company => company.id === editor.organizationId)} session={effectiveSession} value={editor.relatedObject} onChange={relatedObject => setEditor({ ...editor, relatedObject })} onOpen={onOpenRelatedObject} />
         <label>Description <span className="text-red-600">*</span><textarea required rows={5} className="mt-1 w-full rounded-lg border border-[#D3E1EC] p-3" value={editor.message} onChange={event => setEditor({ ...editor, message: event.target.value })} /></label>
-        <label className="flex items-center gap-2"><input type="checkbox" checked={editor.status === 'Active'} onChange={event => setEditor({ ...editor, status: event.target.checked ? 'Active' : 'Inactive' })} />Active</label>
+        <label className="flex flex-col gap-1">Status<SearchableSelect ariaLabel="Notification status" value={getNotificationStatus(editor)} options={['Active', 'Resolved'].map(value => ({ value, label: value }))} onChange={value => setEditor({ ...editor, notificationStatus: value === 'Active' ? 'Active' : 'Resolved', status: value === 'Active' ? 'Active' : 'Inactive', resolvedAt: value === 'Active' ? undefined : new Date().toISOString() })} /></label>
         {error && <p role="alert" className="text-[12px] text-red-600">{error}</p>}
         <footer className="mt-auto flex justify-end gap-2"><PageActionButton disabled={savingNotification} onClick={() => setEditor(null)}>Cancel</PageActionButton><button type="submit" disabled={savingNotification || !canEdit || !editorAccessible || !editor.name.trim() || !editor.type || !editor.message.trim()} className="rounded-md border-2 border-[#D3E1EC] px-3 py-1 font-semibold text-[#7288A3] disabled:opacity-40">{savingNotification ? 'Saving…' : 'Save'}</button></footer>
         </fieldset>

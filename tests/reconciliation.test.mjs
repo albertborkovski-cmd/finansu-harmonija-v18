@@ -21,6 +21,19 @@ const {
 } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
 
 const organizationId = 'organization-1';
+test('missing documents remain stored and cannot generate suggestions', () => {
+  const state = createDemoReconciliationState(organizationId);
+  const items = state.items.map(item => ({ ...item, missingDocument: true }));
+  assert.equal(suggestReconciliation(items).proposals.length, 0);
+  assert.ok(JSON.parse(JSON.stringify({ ...state, items })).items.every(item => item.missingDocument));
+});
+test('cash movements are classified by purpose and direction without matching customer debts', () => {
+  const payment = { kind: 'Payment', counterpartyId: '', counterpartyName: '', reference: '' };
+  assert.equal(getReconciliationRoute({ ...payment, side: 'Receivable', paymentPurpose: 'Grynųjų pinigų įnešimas' }).category, 'Cash deposit');
+  assert.equal(getReconciliationRoute({ ...payment, side: 'Payable', paymentPurpose: 'ATM withdrawal' }).category, 'Cash withdrawal');
+  assert.equal(getReconciliationRoute({ ...payment, side: 'Payable', paymentPurpose: 'Cash deposit' }).kind, 'unidentified');
+  assert.equal(isClientReconciliationItem({ ...payment, side: 'Payable', paymentPurpose: 'Cash withdrawal' }), false);
+});
 const referenceOnly = { uniqueAmount: false, partialReference: true, multipleReferences: true };
 const batch = { id: 'batch-1', at: '2026-09-14T10:00:00.000Z', actor: 'Accountant' };
 const reversedAt = '2026-09-14T11:00:00.000Z';

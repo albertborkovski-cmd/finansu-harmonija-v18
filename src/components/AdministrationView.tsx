@@ -1,3 +1,4 @@
+import { toggleFilteredSelection } from '../lib/tableSelection';
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
@@ -796,10 +797,7 @@ function AdminTablePage({
                 checked={allSelected}
                 label="Select all records"
                 onChange={() =>
-                  setSelected(
-                    allSelected
-                      ? new Set()
-                      : new Set(filtered.map((row) => row.id)),
+                  setSelected(current => toggleFilteredSelection(current, filtered.map((row) => row.id)),
                   )
                 }
               />

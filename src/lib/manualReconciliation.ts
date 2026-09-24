@@ -31,7 +31,7 @@ function isOpenItem(item: ReconciliationItem | undefined): item is Reconciliatio
     && isText(item.documentNumber) && typeof item.reference === 'string'
     && isDate(item.documentDate) && (item.dueDate === '' || isDate(item.dueDate))
     && isMinor(item.originalMinor) && isMinor(item.remainingMinor)
-    && item.remainingMinor > 0 && item.remainingMinor <= item.originalMinor;
+    && !item.missingDocument && item.remainingMinor > 0 && item.remainingMinor <= item.originalMinor;
 }
 
 function countIds(items: readonly ReconciliationItem[]) {
@@ -87,7 +87,7 @@ export function getManualReconciliationOptions(items: readonly ReconciliationIte
   return items.filter(item => item.id !== sourceId && item.organizationId === source.organizationId
     && counts.get(item.id) === 1 && isMinor(item.remainingMinor) && item.remainingMinor > 0 && item.remainingMinor <= item.originalMinor)
     .map(item => {
-      const reason = compatible.has(item.id) ? ''
+      const reason = item.missingDocument ? 'Missing document — awaiting document receipt' : compatible.has(item.id) ? ''
         : !isClientReconciliationItem(item) ? 'Accounting operation — use GL assignment'
         : item.counterpartyId !== source.counterpartyId ? 'Different counterparty'
         : item.currency !== source.currency ? 'Different currency'

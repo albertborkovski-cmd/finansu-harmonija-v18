@@ -19,6 +19,19 @@ const { TASK_REMINDER_OPTIONS } = await import(scheduleUrl);
 
 const now = '2026-09-15T09:00:00.000Z';
 const recordId = 'manual-task-1';
+test('priority is independently validated and persisted without changing status or reminder', () => {
+  const original = createTaskRecord(draft({ reminder: 'none' }), context(), recordId, now);
+  assert.equal(original.priority, 'Normal');
+  for (const priority of ['Low', 'Normal', 'High', 'Urgent']) {
+    const updated = updateTaskRecord(original, draft({ priority, reminder: 'none' }), context());
+    assert.equal(updated.priority, priority);
+    assert.equal(updated.taskStatus, original.taskStatus);
+    assert.equal(updated.reminder, original.reminder);
+    assert.equal(createTaskRecord(draft({ priority }), context(), recordId, now).priority, priority);
+  }
+  assert.ok(validateTaskDraft(draft({ priority: 'invalid' }), context()).priority);
+  assert.throws(() => createTaskRecord(draft({ priority: 'invalid' }), context(), recordId, now));
+});
 
 test('all supported related object kinds retain their canonical identity and organization when creating and editing', () => {
   for (const type of ['Document', 'Invoice', 'Bank operation', 'Reconciliation', 'Debt', 'Counterparty', 'Chat']) {
@@ -316,7 +329,7 @@ test('record retains the complete task metadata through the existing JSON persis
     id: recordId, name: 'Review the invoice', type: 'Review', message: 'Please review.',
     organizationId: 'company-1', organizationName: 'First Organization',
     assignedToId: 'external:client-1', assignedToName: 'First Client', assignedToEmail: 'client@example.com', assignedToAudience: 'External users',
-    dueDate: '2026-09-30', reminder: 'none', relatedObject: { id: 'document-1', organizationId: 'company-1', type: 'Document', label: 'Delivery document' },
+    dueDate: '2026-09-30', reminder: 'none', priority: 'Normal', relatedObject: { id: 'document-1', organizationId: 'company-1', type: 'Document', label: 'Delivery document' },
     source: 'Manual', createdByEmail: 'creator@example.com', createdByName: 'Task Creator', createdAt: now,
     status: 'Active', taskStatus: 'Open', requiresAction: true, daysTillRemind: '',
   });

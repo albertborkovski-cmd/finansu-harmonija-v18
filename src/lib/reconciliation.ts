@@ -9,9 +9,16 @@ export type ReconciliationItem = {
   side: 'Receivable' | 'Payable';
   documentNumber: string;
   reference: string;
+  paymentPurpose?: string;
+  missingDocument?: boolean;
+  missingDocumentMarkedAt?: string;
+  missingDocumentMarkedBy?: string;
   documentDate: string;
   dueDate: string;
   currency: string;
+  /** Units of exchangeRateCurrency per one unit of document currency. */
+  exchangeRate?: number;
+  exchangeRateCurrency?: string;
   originalMinor: number;
   remainingMinor: number;
 };
@@ -98,10 +105,18 @@ export function hasReconciliationClient(item: ReconciliationItem): boolean {
  */
 export function getReconciliationRoute(item: ReconciliationItem): ReconciliationRoute {
   if (item.kind !== 'Payment') return { kind: 'client', category: 'Counterparty settlement', reason: 'This document belongs to counterparty debt reconciliation.' };
-  const text = [item.payeeName, item.counterpartyName, item.reference]
+  const text = [item.payeeName, item.counterpartyName, item.reference, item.paymentPurpose]
     .filter(value => typeof value === 'string')
     .join('\n').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
   const matches = (pattern: string) => new RegExp(`(^|[^\\p{L}\\p{N}_])(?:${pattern})(?=$|[^\\p{L}\\p{N}_])`, 'u').test(text);
+  const cashIn = matches('cash deposit|cash paid in|grynuju (?:pinigu )?inesimas|grynuju (?:pinigu )?inesimo');
+  const cashOut = matches('cash withdrawal|atm withdrawal|grynuju (?:pinigu )?isemimas|grynuju (?:pinigu )?isemimo');
+  if (cashIn || cashOut) {
+    if (cashIn === cashOut || (cashIn && item.side !== 'Receivable') || (cashOut && item.side !== 'Payable')) {
+      return { kind: 'unidentified', category: 'Cash transaction · Needs review', reason: 'Cash wording conflicts with the bank transaction direction; review before assigning a GL account.' };
+    }
+    return { kind: 'accounting', category: cashIn ? 'Cash deposit' : 'Cash withdrawal', reason: 'Cash movement recognized from the bank payment purpose. Review and assign the cash/bank GL account; excluded from counterparty debt matching.' };
+  }
   if (matches('vmi|valstybine mokesciu inspekcija|state tax inspectorate|tax authority')) {
     return { kind: 'accounting', category: 'Tax authority', reason: 'Tax authority payment recognized from the payee or payment reference; assign a general-ledger account.' };
   }
@@ -168,6 +183,7 @@ export function suggestReconciliation(items: readonly ReconciliationItem[], rule
     const error = itemError(item);
     const id = item && typeof item.id === 'string' ? item.id : `invalid-item-${index + 1}`;
     if (error) { unmatched.set(id, error); return false; }
+    if (item.missingDocument) return false;
     if ((idCounts.get(item.id) ?? 0) > 1) { unmatched.set(id, 'Duplicate item ID.'); return false; }
     const route = getReconciliationRoute(item);
     if (route.kind !== 'client') { unmatched.set(id, route.reason); return false; }
@@ -330,6 +346,7 @@ export function applyReconciliation(state: ReconciliationState, proposals: reado
       if (invoiceIds.has(allocation.invoiceId)) throw new Error('Duplicate invoice allocation in one proposal.');
       invoiceIds.add(allocation.invoiceId);
       const { funding, invoice } = validateAllocation(byId, proposal.fundingId, allocation.invoiceId, allocation.amountMinor);
+      if (funding.missingDocument || invoice.missingDocument) throw new Error('A required document is missing. Confirm Document received before reconciliation.');
       if (!isClientReconciliationItem(funding) || !isClientReconciliationItem(invoice)) throw new Error('Accounting-only and unidentified payments cannot be matched to client invoices.');
       for (const item of [funding, invoice]) {
         if (!proposal.expectedRemaining || !Object.hasOwn(proposal.expectedRemaining, item.id)

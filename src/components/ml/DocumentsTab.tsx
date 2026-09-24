@@ -1,3 +1,4 @@
+import { toggleFilteredSelection } from '../../lib/tableSelection';
 import { useRef, useState } from 'react';
 import { usePersistentState } from '../../hooks/usePersistentState';
 import { RefreshCw, ExternalLink, Play, Settings, X, RotateCcw, ArrowLeftRight, ClipboardList, BarChart3, ClipboardCheck, Brush } from 'lucide-react';
@@ -92,11 +93,7 @@ export default function DocumentsTab({
   };
 
   const toggleAll = () => {
-    if (selectedRows.size === documents.length) {
-      setSelectedRows(new Set());
-    } else {
-      setSelectedRows(new Set(documents.map(d => d.id)));
-    }
+    setSelectedRows(current => toggleFilteredSelection(current, sortedRows.map(row => row.id)));
   };
 
   const toggleRunAction = (actionId: string) => {
@@ -163,7 +160,7 @@ export default function DocumentsTab({
             const realIndex = columns.findIndex(item => item.key === column.key);
             return (
                 <div data-table-header-select={column.key === 'name' ? "true" : undefined} key={column.key} className="relative flex flex-row items-center gap-[6px] flex-shrink-0" style={{ width: column.width }}>
-                  {column.key === 'name' && <Checkbox checked={selectedRows.size === documents.length && documents.length > 0} onChange={toggleAll} />}
+                  {column.key === 'name' && <Checkbox checked={sortedRows.length > 0 && sortedRows.every(row => selectedRows.has(row.id))} onChange={toggleAll} />}
                   <span className={`font-montserrat font-medium text-[12px] leading-[18px] ${column.key === 'name' ? 'text-[#10233A]' : 'text-[#7288A3]'}`}>{column.label}</span>
                   <ColumnSortButton columnLabel={column.label} direction={directionFor(column.key)} onDirectionChange={direction => { changeSort(column.key, direction); setCurrentPage(1); }} />
                   <ResizeHandle onMouseDown={(e) => startResize(realIndex, e)} />

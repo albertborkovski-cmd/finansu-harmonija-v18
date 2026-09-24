@@ -1,3 +1,4 @@
+import { toggleFilteredSelection } from '../../lib/tableSelection';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   RefreshCw,
@@ -121,8 +122,7 @@ export default function LogsTab({
 
   const toggleAll = () => {
     const visibleIds = filteredRuns.map(run => run.id);
-    const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedRows.has(id));
-    setSelectedRows(allSelected ? new Set() : new Set(visibleIds));
+    setSelectedRows(current => toggleFilteredSelection(current, visibleIds));
   };
 
   const removeRun = (runToRemove: RunEntry) => {

@@ -44,6 +44,7 @@ export default function NewTaskForm({ session, organizations, organizationContex
     assignedToId: task?.assignedToId ?? '',
     dueDate: task?.dueDate ?? '',
     reminder: task?.reminder ?? 'none',
+    priority: task?.priority ?? 'Normal',
     relatedObjectId: task?.relatedObject?.id ?? '',
     description: task?.message ?? '',
   }));
@@ -103,6 +104,7 @@ export default function NewTaskForm({ session, organizations, organizationContex
           : <SearchableSelect selectionIndicator="checkbox" ariaLabel="Organization" value={draft.organizationId} options={organizations.map(org => ({ value: org.id, label: org.name, description: org.company_code || undefined }))} placeholder="Select organization" disabled={saving} onChange={organizationId => { setDraft({ ...draft, organizationId, assignedToId: '', relatedObjectId: '' }); setRelatedModule(''); setError(''); }} />}</div>
         <div className="flex flex-col gap-1"><span>Assigned to <Required /></span><SearchableSelect selectionIndicator="checkbox" ariaLabel="Assigned to" value={draft.assignedToId} options={assignees.map(user => ({ value: user.id, label: user.name, description: `${user.audience} · ${user.email}` }))} placeholder="Select user" disabled={!organization || saving} emptyMessage="No active assigned users" onChange={assignedToId => setDraft({ ...draft, assignedToId })} />{!organization && <p className="text-[12px] text-[#7288A3]">Select an organization first.</p>}</div>
         <div className="flex flex-col gap-1"><span>Due date <Required /></span><fieldset disabled={saving} className="min-w-0"><ScheduleDatePicker value={draft.dueDate} onChange={dueDate => setDraft({ ...draft, dueDate })} ariaLabel="Due date" placeholder="YYYY-MM-DD" align="right" /></fieldset></div>
+        <div className="flex flex-col gap-1"><span>Priority</span><SearchableSelect selectionIndicator="checkbox" ariaLabel="Priority" value={draft.priority ?? 'Normal'} options={['Low', 'Normal', 'High', 'Urgent'].map(value => ({ value, label: value }))} disabled={saving} onChange={priority => setDraft({ ...draft, priority })} /></div>
         <div className="flex flex-col gap-1"><span>Reminder <span className="text-[#7288A3]">(optional)</span></span><SearchableSelect selectionIndicator="checkbox" ariaLabel="Reminder" value={draft.reminder ?? 'none'} options={TASK_REMINDER_OPTIONS} disabled={saving} onChange={reminder => setDraft({ ...draft, reminder })} /></div>
         <div className="flex flex-col gap-1">
           <span>Related object <span className="text-[#7288A3]">(optional)</span></span>

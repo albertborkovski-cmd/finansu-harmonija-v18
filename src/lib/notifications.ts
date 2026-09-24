@@ -12,6 +12,7 @@ export type RelatedObject = {
 };
 
 export interface OrganizationActionMetadata {
+  notificationStatus?: 'Active' | 'Resolved';
   organizationId?: string;
   organizationName?: string;
   requiresAction?: boolean;
@@ -26,6 +27,9 @@ export interface OrganizationActionMetadata {
 }
 
 export interface NotificationRow extends OrganizationActionMetadata {
+  severity?: 'Critical' | 'Warning' | 'Info';
+  outcome?: 'success' | 'failure';
+  eventKind?: 'process-error' | 'process-exception' | 'information';
   id: string;
   createdAt?: string;
   /** Generated signals cannot be edited or deleted from the notification center. */
@@ -41,7 +45,31 @@ export interface NotificationRow extends OrganizationActionMetadata {
   status: "Active" | "Inactive";
 }
 
+export function getNotificationStatus(row: OrganizationActionMetadata & { status: string }): 'Active' | 'Resolved' {
+  if (row.resolvedAt || row.notificationStatus === 'Resolved') return 'Resolved';
+  if (row.notificationStatus === 'Active') return 'Active';
+  return row.status === 'Active' ? 'Active' : 'Resolved';
+}
+
+/** Badge reflects active important system alerts, independently of personal read state. */
+export function isImportantNotification(row: AttentionNotification): boolean {
+  if (row.category !== 'notifications' || getNotificationStatus(row) !== 'Active') return false;
+  const notification = row as NotificationRow;
+  if (notification.requiresAction !== true || notification.origin !== 'system') return false;
+  if (notification.eventKind !== 'process-error' && notification.eventKind !== 'process-exception') return false;
+  if (notification.severity !== 'Critical' && notification.severity !== 'Warning') return false;
+  if (notification.sourceTaskId || notification.sourceChatId || notification.relatedObject?.type === 'Chat') return false;
+  if (/\b(tasks?|chats?|audit|action history)\b/i.test(notification.type)) return false;
+  // Legacy signals may lack outcome metadata. Routine success titles are never bell alerts.
+  const eventTitle = `${notification.type} ${notification.name}`;
+  const failureTitle = /\b(failed|failure|error|rejected|exception|not|unsuccessful)\b/i.test(eventTitle);
+  const successTitle = /\b(success|successful|successfully|succeeded|completed|uploaded|accepted|approved)\b/i.test(eventTitle);
+  if (notification.outcome === 'success' || (successTitle && !failureTitle)) return false;
+  return true;
+}
+
 export interface ReminderRow extends OrganizationActionMetadata {
+  priority?: 'Low' | 'Normal' | 'High' | 'Urgent';
   id: string;
   createdAt?: string;
   name: string;

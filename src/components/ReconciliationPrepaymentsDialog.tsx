@@ -6,16 +6,20 @@ import { ReconciliationDialog } from './ReconciliationDialogs';
 import SystemAddFilters from './SystemAddFilters';
 import type { ReconciliationItem } from '../lib/reconciliation';
 
+import { exchangeRate } from '../lib/reconciliationExchangeRate';
+import { paymentPurpose } from '../lib/reconciliationPaymentPurpose';
+
 type BalanceView = 'All' | 'Open' | 'Reconciled';
-type ColumnKey = 'documentNumber' | 'counterpartyName' | 'kind' | 'documentDate' | 'currency' | 'amount' | 'used' | 'remaining';
+type ColumnKey = 'exchangeRate' | 'documentNumber' | 'counterpartyName' | 'kind' | 'documentDate' | 'currency' | 'paymentPurpose' | 'used' | 'remaining';
 
 const COLUMNS: { key: ColumnKey; label: string; numeric?: boolean; width: number }[] = [
   { key: 'documentNumber', label: 'Document No.', width: 132 },
   { key: 'counterpartyName', label: 'Counterparty', width: 136 },
   { key: 'kind', label: 'Type', width: 66 },
   { key: 'documentDate', label: 'Date', width: 92 },
+  { key: 'exchangeRate', label: 'Exchange rate', width: 210 },
   { key: 'currency', label: 'Currency', width: 72 },
-  { key: 'amount', label: 'Amount', numeric: true, width: 78 },
+  { key: 'paymentPurpose', label: 'Payment purpose', width: 250 },
   { key: 'used', label: 'Used', numeric: true, width: 70 },
   { key: 'remaining', label: 'Remaining', numeric: true, width: 82 },
 ];
@@ -24,7 +28,8 @@ const formatAmount = (minor: number) => (minor / 100).toLocaleString('en-GB', { 
 
 function columnValue(item: ReconciliationItem, key: ColumnKey): string {
   switch (key) {
-    case 'amount': return formatAmount(item.originalMinor);
+    case 'exchangeRate': return exchangeRate(item);
+    case 'paymentPurpose': return paymentPurpose(item);
     case 'used': return formatAmount(item.originalMinor - item.remainingMinor);
     case 'remaining': return formatAmount(item.remainingMinor);
     default: return item[key];

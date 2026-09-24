@@ -1,3 +1,4 @@
+import { toggleFilteredSelection } from '../lib/tableSelection';
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { RefreshCw, X, UsersRound } from 'lucide-react';
 import ColumnSettingsPanel, { type ColConfig } from './ColumnSettingsPanel';
@@ -127,11 +128,7 @@ export default function OcrView({ onNavigateToAdministration }: { onNavigateToAd
   };
 
   const toggleAll = () => {
-    if (selectedRows.size === rows.length) {
-      setSelectedRows(new Set());
-    } else {
-      setSelectedRows(new Set(rows.map(r => r.id)));
-    }
+    setSelectedRows(current => toggleFilteredSelection(current, sortedRows.map(row => row.id)));
   };
 
   const handleTableScroll = () => {
@@ -210,7 +207,7 @@ export default function OcrView({ onNavigateToAdministration }: { onNavigateToAd
                       <div className="flex flex-row items-center gap-[6px] flex-1 min-w-0">
                         {idx === 0 && (
                           <>
-                            <Checkbox checked={selectedRows.size === rows.length && rows.length > 0} onChange={toggleAll} label="Select all automation processes" />
+                            <Checkbox checked={sortedRows.length > 0 && sortedRows.every(row => selectedRows.has(row.id))} onChange={toggleAll} label="Select all automation processes" />
                             <div className="flex flex-row items-center gap-[6px]">
                               <span className="font-montserrat font-medium text-[12px] leading-[18px] text-[#10233A] truncate">{col.label}</span>
                               <ColumnSortButton columnLabel={col.label} direction={directionFor(col.key)} onDirectionChange={direction => { changeSort(col.key, direction); setPage(1); }} />

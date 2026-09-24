@@ -77,8 +77,8 @@ export default function OrganizationEmailSettingsView() {
   const displayedTemplates = sortedRows.slice(0, currentPage * PAGE_SIZE);
   const visibleColumns = columns.filter((column) => column.visible);
   const tableWidth = visibleColumns.reduce((sum, column) => sum + column.width, 0) + 42 + ACTION_COLUMN_WIDTH;
-  const allDisplayedSelected = displayedTemplates.length > 0 && displayedTemplates.every((template) => selectedIds.has(template.id));
-  const someDisplayedSelected = !allDisplayedSelected && displayedTemplates.some((template) => selectedIds.has(template.id));
+  const allDisplayedSelected = sortedRows.length > 0 && sortedRows.every((template) => selectedIds.has(template.id));
+  const someDisplayedSelected = !allDisplayedSelected && sortedRows.some((template) => selectedIds.has(template.id));
 
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages);
@@ -134,7 +134,7 @@ export default function OrganizationEmailSettingsView() {
             <div data-table-header-select="true" className="flex h-9 w-[42px] flex-shrink-0 items-start justify-center px-3">
               <TableCheckbox checked={allDisplayedSelected} mixed={someDisplayedSelected} label="Select all email templates" onChange={() => setSelectedIds((current) => {
                 const next = new Set(current);
-                displayedTemplates.forEach((template) => allDisplayedSelected ? next.delete(template.id) : next.add(template.id));
+                sortedRows.forEach((template) => allDisplayedSelected ? next.delete(template.id) : next.add(template.id));
                 return next;
               })} />
             </div>

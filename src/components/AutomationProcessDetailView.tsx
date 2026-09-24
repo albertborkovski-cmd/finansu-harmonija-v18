@@ -1,3 +1,4 @@
+import { toggleFilteredSelection } from '../lib/tableSelection';
 import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { useState, useRef, useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -902,15 +903,7 @@ export function NodesTab({ refreshSignal, createSignal, bulkDeleteSignal, onSele
   const someSelected = selected.size > 0 && !allSelected;
 
   const toggleAll = () => {
-    if (allSelected) {
-      setSelected(new Set());
-    } else {
-      setSelected(current => {
-        const next = new Set(current);
-        filteredNodes.forEach(node => next.add(node.id));
-        return next;
-      });
-    }
+    setSelected(current => toggleFilteredSelection(current, filteredNodes.map(node => node.id)));
   };
 
   const editedNode = nodes.find(node => node.id === editNodeId);

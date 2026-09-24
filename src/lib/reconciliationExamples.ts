@@ -9,6 +9,7 @@ import {
 } from './reconciliation';
 
 export type ReconciliationItemStatus =
+  | 'Missing document'
   | 'Reconciled'
   | 'Partially reconciled'
   | 'Suggested'
@@ -117,6 +118,8 @@ export function augmentReconciliationExamples(state: ReconciliationState): Recon
     { prefix: choiceExpansionPrefix(state.organizationId), create: createChoiceReconciliationState },
     { prefix: depositExpansionPrefix(state.organizationId), create: createDepositReconciliationState },
     { prefix: accountingExpansionPrefix(state.organizationId), create: createAccountingReconciliationState },
+    { prefix: `${state.organizationId}:demo-cash-v1:`, create: createCashReconciliationState },
+    { prefix: `${state.organizationId}:demo-missing-v1:`, create: createMissingDocumentState },
   ];
   for (const expansion of expansions) {
     if (result.items.some(item => item.id.startsWith(expansion.prefix))
@@ -441,6 +444,39 @@ function createDepositReconciliationState(companyId: string): ReconciliationStat
 }
 
 /** Tax, payroll and bank charges are classifications, never client settlements. */
+function createMissingDocumentState(companyId: string): ReconciliationState {
+  const examples: { kind: ReconciliationItem['kind']; side: ReconciliationItem['side']; name: string; amount: number; reference: string }[] = [
+    { kind: 'Payment', side: 'Payable', name: 'Test Supplier A', amount: 121000, reference: 'Supplier invoice not provided for this bank payment.' },
+    { kind: 'Invoice', side: 'Receivable', name: 'Test Customer B', amount: 84500, reference: 'Customer reports payment; bank payment document not provided.' },
+    { kind: 'Advance', side: 'Payable', name: 'Test Supplier C', amount: 50000, reference: 'Supporting invoice for the advance has not been provided.' },
+  ];
+  return { version: 1, organizationId: companyId, batches: [], items: examples.map((example, index) => ({
+    id: `${companyId}:demo-missing-v1:${index + 1}`, organizationId: companyId,
+    counterpartyId: `${companyId}:demo-missing-counterparty:${index + 1}`, counterpartyName: example.name,
+    kind: example.kind, side: example.side, documentNumber: `TEST-MISSING-2026-${String(index + 1).padStart(3, '0')}`,
+    reference: example.reference, documentDate: `2026-09-${15 + index}`, dueDate: '2026-09-30', currency: 'EUR',
+    originalMinor: example.amount, remainingMinor: example.amount, missingDocument: true,
+    missingDocumentMarkedAt: '2026-09-22T08:00:00.000Z', missingDocumentMarkedBy: 'Demo accountant',
+  })) };
+}
+
+function createCashReconciliationState(companyId: string): ReconciliationState {
+  const examples = [
+    { purpose: 'Grynųjų pinigų įnešimas į banko sąskaitą', side: 'Receivable' as const, amount: 150000, currency: 'EUR' },
+    { purpose: 'Cash deposit at branch', side: 'Receivable' as const, amount: 320000, currency: 'EUR' },
+    { purpose: 'Grynųjų pinigų išėmimas bankomate', side: 'Payable' as const, amount: 50000, currency: 'EUR' },
+    { purpose: 'ATM withdrawal', side: 'Payable' as const, amount: 20000, currency: 'USD' },
+  ];
+  return { version: 1, organizationId: companyId, batches: [], items: examples.map((example, index) => ({
+    id: `${companyId}:demo-cash-v1:${index + 1}`, organizationId: companyId,
+    counterpartyId: '', counterpartyName: '', kind: 'Payment', side: example.side,
+    documentNumber: `TEST-CASH-2026-${String(index + 1).padStart(3, '0')}`,
+    reference: example.purpose, paymentPurpose: example.purpose,
+    documentDate: `2026-09-${18 + index}`, dueDate: '', currency: example.currency,
+    originalMinor: example.amount, remainingMinor: example.amount,
+  })) };
+}
+
 function createAccountingReconciliationState(companyId: string): ReconciliationState {
   if (!companyId.trim()) throw new Error('Organization ID is required for test data.');
   const examples = [
@@ -481,6 +517,7 @@ export function getReconciliationItemStatus(
   state: ReconciliationState,
   suggestions: ReconciliationSuggestions,
 ): ReconciliationItemStatus {
+  if (item.missingDocument) return 'Missing document';
   if (item.remainingMinor === 0) return 'Reconciled';
   if (item.remainingMinor < item.originalMinor) return 'Partially reconciled';
 

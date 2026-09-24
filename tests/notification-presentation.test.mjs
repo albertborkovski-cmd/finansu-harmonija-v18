@@ -9,7 +9,7 @@ function transpile(relativePath) {
   }).outputText;
 }
 const moduleUrl = source => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
-const { createNotificationColumns, formatNotificationDateTime, notificationMessage, isSystemNotification, getNotificationActionLabel, getNotificationSourceTaskId } = await import(moduleUrl(transpile('../src/lib/notificationPresentation.ts')));
+const { createNotificationColumns, formatNotificationDateTime, notificationMessage, isSystemNotification, getNotificationActionLabel, getNotificationSourceTaskId, getNotificationRelatedObjectLabel } = await import(moduleUrl(transpile('../src/lib/notificationPresentation.ts')));
 const notificationsUrl = moduleUrl(transpile('../src/lib/notifications.ts'));
 const { SAMPLE_NOTIFICATIONS, isNotificationRead, setNotificationRead } = await import(notificationsUrl);
 const scheduleUrl = moduleUrl(transpile('../src/lib/taskSchedule.ts').replace(/(['"])\.\/notifications\1/g, JSON.stringify(notificationsUrl)));
@@ -19,12 +19,29 @@ const legacyId = (values = ['company-1', 'task-1', 'assignee@example.com', '2026
 
 test('notification data columns exclude the contextual action rendered as a row button', () => {
   assert.deepEqual(createNotificationColumns(), [
-    { key: 'createdAt', label: 'Date / time', width: 180, visible: true },
-    { key: 'organization', label: 'Organization', width: 220, visible: true },
-    { key: 'type', label: 'Type', width: 140, visible: true },
+    { key: 'type', label: 'Module', width: 140, visible: true },
     { key: 'message', label: 'Message', width: 380, visible: true },
-    { key: 'status', label: 'Read / Unread', width: 150, visible: true },
+    { key: 'organization', label: 'Organization', width: 220, visible: true },
+    { key: 'createdAt', label: 'Time', width: 180, visible: true },
+    { key: 'severity', label: 'Severity', width: 120, visible: true },
+    { key: 'status', label: 'Resolved/Active', width: 150, visible: true },
+    { key: 'relatedObject', label: 'Related object', width: 240, visible: true },
   ]);
+});
+
+test('related object displays its number or name and never a generic action label', () => {
+  const row = { id: 'n1', organizationId: 'company-1', relatedObject: { id: 'invoice-1', recordId: 'record-1', organizationId: 'company-1', type: 'Invoice', label: ' INV-2026-001 ' } };
+  assert.equal(getNotificationRelatedObjectLabel(row), 'INV-2026-001');
+  assert.equal(getNotificationRelatedObjectLabel({ ...row, relatedObject: { ...row.relatedObject, label: '' } }), 'record-1');
+  assert.equal(getNotificationRelatedObjectLabel({ ...row, organizationId: 'company-2' }), '—');
+  assert.equal(getNotificationRelatedObjectLabel({ id: 'n1', organizationId: 'company-1' }), '—');
+});
+
+test('task signals show the primary task name within the same organization', () => {
+  const row = { id: 'n1', sourceTaskId: 'task-1', organizationId: 'company-1' };
+  const tasks = [{ id: 'task-1', organizationId: 'company-2', name: 'Other company task' }, { id: 'task-1', organizationId: 'company-1', name: 'Review INV-001' }];
+  assert.equal(getNotificationRelatedObjectLabel(row, tasks), 'Review INV-001');
+  assert.equal(getNotificationRelatedObjectLabel(row, tasks.slice(0, 1)), 'task-1');
 });
 
 test('organization context hides only the redundant organization column', () => {

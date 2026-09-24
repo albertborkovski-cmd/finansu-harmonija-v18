@@ -1,3 +1,5 @@
+import { toggleFilteredSelection } from '../lib/tableSelection';
+import { NONPROFIT_LEDGER_TEMPLATE } from '../lib/nonprofitLedgerTemplate';
 import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -137,6 +139,7 @@ const INITIAL_TEMPLATES: LedgerTemplate[] = [
     active: true,
     accounts: LITHUANIAN_LEDGER_ACCOUNTS,
   },
+  NONPROFIT_LEDGER_TEMPLATE,
 ];
 
 export function loadGeneralLedgerTemplateNames() {
@@ -530,17 +533,24 @@ export default function GeneralLedgerView({
   assignedTemplateName,
   companyName,
   companyId,
+  onBack,
 }: {
   assignedTemplateName?: string;
   companyName?: string;
   companyId?: string;
+  onBack?: () => void;
 } = {}) {
   const [fixedPage1, setFixedPage1] = useState(1);
   const [fixedPage0, setFixedPage0] = useState(1);
-  const [templates, setTemplates] = usePersistentState<LedgerTemplate[]>(
-    STORAGE_KEY,
-    INITIAL_TEMPLATES,
-  );
+  // Company views may read shared templates, but must never persist them.
+  const [templates, setTemplates] = useState<LedgerTemplate[]>(loadGeneralLedgerTemplates);
+  useEffect(() => {
+    if (companyId) return;
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(templates));
+    window.dispatchEvent(new CustomEvent('finansu-harmonija:persistent-state-changed', {
+      detail: { storageKey: STORAGE_KEY },
+    }));
+  }, [companyId, templates]);
   const [companyLedgerCustomizations, setCompanyLedgerCustomizations] =
     usePersistentState<CompanyLedgerCustomizations>(
       companyId
@@ -549,6 +559,15 @@ export default function GeneralLedgerView({
       {},
     );
   useEffect(() => {
+    if (companyId) return;
+    const key = 'finansu-harmonija:v17:nonprofit-ledger-added';
+    if (window.localStorage.getItem(key)) return;
+    setTemplates(current => current.some(template => template.id === NONPROFIT_LEDGER_TEMPLATE.id)
+      ? current : [...current, NONPROFIT_LEDGER_TEMPLATE]);
+    window.localStorage.setItem(key, 'done');
+  }, [companyId, setTemplates]);
+  useEffect(() => {
+    if (companyId) return;
     if (window.localStorage.getItem(HIERARCHY_MIGRATION_KEY) === "done") return;
     setTemplates((current) => {
       const templateIndex = current.findIndex(
@@ -582,7 +601,7 @@ export default function GeneralLedgerView({
       return next;
     });
     window.localStorage.setItem(HIERARCHY_MIGRATION_KEY, "done");
-  }, [setTemplates]);
+  }, [setTemplates, companyId]);
   useEffect(() => {
     window.dispatchEvent(new CustomEvent("general-ledger-updated"));
   }, [templates]);
@@ -836,6 +855,7 @@ export default function GeneralLedgerView({
   };
 
   const saveTemplate = (draft: LedgerTemplate) => {
+    if (companyId) return;
     const next = { ...draft, name: draft.name.trim(), updatedAt: today() };
     if (!next.name) return;
     setTemplates((current) =>
@@ -967,8 +987,8 @@ export default function GeneralLedgerView({
         }}
       >
         <PageHeader
-          title={companyName ?? selectedTemplate.name}
-          leading={assignedTemplateName === undefined ? <HeaderBackButton onClick={() => { setSelectedTemplateId(null); setQuery(""); }} label="Back to General ledger templates" /> : undefined}
+          title={onBack ? selectedTemplate.name : companyName ?? selectedTemplate.name}
+          leading={onBack ? <HeaderBackButton onClick={onBack} label="Back to Accounting setup" /> : assignedTemplateName === undefined ? <HeaderBackButton onClick={() => { setSelectedTemplateId(null); setQuery(""); }} label="Back to General ledger templates" /> : undefined}
           actions={
             <div className="flex items-center gap-2">
               <PageActionButton
@@ -1008,7 +1028,7 @@ export default function GeneralLedgerView({
               <span className="text-[#A1B6C6]">/</span>
               <span>{companyName}</span>
               <span className="text-[#A1B6C6]">/</span>
-              <span>Company/Client information</span>
+              <span>{onBack ? 'Manage company / Accounting setup' : 'Company/Client information'}</span>
               <span className="text-[#A1B6C6]">/</span>
               <span className="text-[#A1B6C6]">GL account</span>
             </>
@@ -1051,7 +1071,7 @@ export default function GeneralLedgerView({
             />
           </div>
           <div className="flex items-center gap-4">
-            {companyName && (
+            {companyName && !onBack && (
               <span className="hidden max-w-[320px] truncate whitespace-nowrap font-montserrat text-[12px] font-semibold text-[#10233A] lg:inline">
                 {selectedTemplate.name}
               </span>
@@ -1389,10 +1409,7 @@ export default function GeneralLedgerView({
                 checked={allSelected}
                 label="Select all templates"
                 onChange={() =>
-                  setSelectedIds(
-                    allSelected
-                      ? new Set()
-                      : new Set(sortedTemplates.map((item) => item.id)),
+                  setSelectedIds(current => toggleFilteredSelection(current, sortedTemplates.map((item) => item.id)),
                   )
                 }
               />

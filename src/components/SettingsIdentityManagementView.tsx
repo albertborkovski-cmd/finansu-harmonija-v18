@@ -1,9 +1,11 @@
+import { toggleFilteredSelection } from '../lib/tableSelection';
 import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Check,
   ChevronDown,
+  Copy,
   Eye,
   EyeOff,
   FileText,
@@ -56,11 +58,11 @@ const ROLE_COLUMNS: ColConfig[] = [
   { key: "name", label: "Name", width: 270, visible: true },
   { key: "description", label: "Description", width: 360, visible: true },
   { key: "assignedUsers", label: "Assigned users", width: 300, visible: true },
-  { key: "permissions", label: "Permissions", width: 360, visible: true },
+  { key: "lastUpdate", label: "Last Update", width: 180, visible: true },
   { key: "createdBy", label: "Created by", width: 180, visible: true },
-  { key: "creationDate", label: "Creation date", width: 180, visible: true },
+  { key: "permissions", label: "Permissions", width: 360, visible: false },
+  { key: "creationDate", label: "Creation date", width: 180, visible: false },
   { key: "updatedBy", label: "Updated By", width: 180, visible: false },
-  { key: "lastUpdate", label: "Last Update", width: 180, visible: false },
 ];
 
 const USER_COLUMNS: ColConfig[] = [
@@ -89,6 +91,14 @@ const INTERNAL_USER_COLUMNS: ColConfig[] = [
 ];
 
 const PERMISSIONS = ["CREATE", "READ", "UPDATE", "DELETE", "ACTION"];
+const VISIBLE_ACTION_PERMISSIONS = PERMISSIONS.filter(permission => permission !== 'ACTION');
+// Navigation groups, retained documents and audit records are not physically deletable.
+const NON_DELETABLE_MENU_IDS = new Set([
+  'global-dashboard', 'dashboard', 'uploaded-documents', 'notifications',
+  'settings-analytics', 'ocr-all-documents-processed', 'ocr-all-documents-uploaded',
+  'ocr-review-approve-documents', 'ocr-review-analytics', 'ocr-admin-activity',
+]);
+const allowsRoleDelete = (node: RoleAccessNode) => !node.children?.length && !NON_DELETABLE_MENU_IDS.has(node.id);
 const DIRECTORY_ROWS_PER_PAGE = TABLE_BATCH_SIZE;
 const INVITATION_TEMPLATES = [
   {
@@ -386,10 +396,12 @@ function CheckBox({
   checked,
   onChange,
   label,
+  disabled = false,
 }: {
   checked: boolean;
   onChange: () => void;
   label: string;
+  disabled?: boolean;
 }) {
   return (
     <button
@@ -397,11 +409,13 @@ function CheckBox({
       role="checkbox"
       aria-checked={checked}
       aria-label={label}
+      disabled={disabled}
+      title={disabled ? 'Physical deletion is not available for this item' : undefined}
       onClick={(event) => {
         event.stopPropagation();
         onChange();
       }}
-      className={`flex h-[18px] w-[18px] items-center justify-center rounded-[6px] border ${checked ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
+      className={`flex h-[18px] w-[18px] items-center justify-center rounded-[6px] border disabled:cursor-not-allowed disabled:border-[#D3E1EC] disabled:bg-[#E5EDF9] ${checked ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
     >
       {checked && <Check size={12} className="text-white" />}
     </button>
@@ -420,25 +434,28 @@ function RoleAccessTree({
   locked,
   depth = 0,
   onToggle,
+  actionPermissions,
+  onToggleAction,
 }: {
   nodes: RoleAccessNode[];
   access: MenuAccessMap;
   locked: boolean;
   depth?: number;
   onToggle: (node: RoleAccessNode, key: "view" | "edit") => void;
+  actionPermissions: Record<string, string[]>;
+  onToggleAction: (nodeId: string, action: string) => void;
 }) {
   return (
     <div className="flex flex-col gap-1">
-      {nodes.map((node) => {
+      {nodes.filter(node => node.label?.trim() && node.id !== 'notifications' && node.id !== 'info').map((node) => {
         const permission = access[node.id] ?? { view: false, edit: false };
         const hasChildren = Boolean(node.children?.length);
         return (
           <div key={node.id}>
             <div
-              className={`grid min-h-10 grid-cols-[minmax(0,1fr)_70px_70px] items-center rounded-lg border ${depth === 0 ? "border-[#D3E1EC] bg-white" : "border-transparent bg-[#F8FBFD]"}`}
-              style={{ marginLeft: depth * 22 }}
+              className={`grid min-h-10 grid-cols-[minmax(240px,1fr)_repeat(6,76px)] items-center rounded-md border [&>button]:justify-self-center ${depth === 0 ? "border-[#D3E1EC] bg-white" : "border-transparent bg-[#F8FBFD]"}`}
             >
-              <div className="flex min-w-0 items-center gap-2 px-3">
+              <div className="flex min-w-0 items-center gap-2 px-3" style={{ paddingLeft: 12 + depth * 22 }}>
                 {hasChildren ? (
                   <ChevronDown
                     size={14}
@@ -447,24 +464,28 @@ function RoleAccessTree({
                 ) : (
                   <span className="h-[14px] w-[14px] flex-shrink-0" />
                 )}
-                <span className={`truncate font-montserrat text-[13px] text-[#10233A] ${hasChildren ? "font-semibold" : "font-medium"}`}>
+                <span className="truncate font-montserrat text-[12px] font-medium leading-[18px] text-[#10233A]" title={node.label}>
                   {node.label}
                 </span>
               </div>
-              <CheckBox
+              <div className="flex h-10 items-center justify-center border-l border-[#E5EDF9]"><CheckBox
                 checked={permission.view}
                 label={`View ${node.label}`}
                 onChange={() => {
                   if (!locked) onToggle(node, "view");
                 }}
-              />
-              <CheckBox
+              /></div>
+              <div className="flex h-10 items-center justify-center border-l border-[#E5EDF9]"><CheckBox
                 checked={permission.edit}
                 label={`Edit ${node.label}`}
                 onChange={() => {
                   if (!locked) onToggle(node, "edit");
                 }}
-              />
+              /></div>
+              {VISIBLE_ACTION_PERMISSIONS.map(action => {
+                const unavailable = action === 'DELETE' && !allowsRoleDelete(node);
+                return <div key={action} className="flex h-10 items-center justify-center border-l border-[#E5EDF9]"><CheckBox disabled={unavailable} checked={!unavailable && (locked || (actionPermissions[node.id] ?? []).includes(action))} label={`${action} ${node.label}`} onChange={() => { if (!locked && !unavailable) onToggleAction(node.id, action); }} /></div>;
+              })}
             </div>
             {hasChildren && permission.view && (
               <div className="mt-1">
@@ -474,6 +495,8 @@ function RoleAccessTree({
                   locked={locked}
                   depth={depth + 1}
                   onToggle={onToggle}
+                  actionPermissions={actionPermissions}
+                  onToggleAction={onToggleAction}
                 />
               </div>
             )}
@@ -487,11 +510,13 @@ function RoleAccessTree({
 function RolePanel({
   audience = "Internal users",
   initial,
+  template,
   onClose,
   onSave,
 }: {
   audience?: Audience;
   initial?: DirectoryRow;
+  template?: DirectoryRow;
   onClose: () => void;
   onSave: (row: DirectoryRow) => void;
 }) {
@@ -499,20 +524,28 @@ function RolePanel({
   const isSystemAdministrator = isSystemAdministratorRole(
     initial?.name ?? name,
   );
-  const [description, setDescription] = useState(initial?.description ?? "");
+  const configuration = initial ?? template;
+  const [actionPermissions, setActionPermissions] = useState<Record<string, string[]>>(() => {
+    try {
+      if (configuration?.actionPermissions) return JSON.parse(configuration.actionPermissions);
+    } catch { /* Older roles use the shared action configuration. */ }
+    const inherited = (configuration?.permissions ?? '').split(',').map(value => value.trim()).filter(value => PERMISSIONS.includes(value));
+    return Object.fromEntries(flattenRoleAccessTree(ROLE_ACCESS_TREE).map(node => [node.id, [...inherited]]));
+  });
+  const [description, setDescription] = useState(configuration?.description ?? "");
   const [permissions, setPermissions] = useState(
-    (initial?.permissions ?? "")
+    (configuration?.permissions ?? "")
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean),
   );
   const [menuAccess, setMenuAccess] = useState<MenuAccessMap>(() => {
     try {
-      const moduleAccess = initial?.moduleAccess
-        ? (JSON.parse(initial.moduleAccess) as AccessMap)
+      const moduleAccess = configuration?.moduleAccess
+        ? (JSON.parse(configuration.moduleAccess) as AccessMap)
         : deriveModuleAccess({});
-      return initial?.menuAccess
-        ? (JSON.parse(initial.menuAccess) as MenuAccessMap)
+      return configuration?.menuAccess
+        ? (JSON.parse(configuration.menuAccess) as MenuAccessMap)
         : createMenuAccessFromModules(moduleAccess);
     } catch {
       return createMenuAccessFromModules(deriveModuleAccess({}));
@@ -522,15 +555,36 @@ function RolePanel({
     () => loadRows(audience, "Users"),
     [audience],
   );
+  const [assignedUsersOpen, setAssignedUsersOpen] = useState(false);
+  const [assignedUsersQuery, setAssignedUsersQuery] = useState('');
+  const assignedUsersRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!assignedUsersOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!assignedUsersRef.current?.contains(event.target as Node)) setAssignedUsersOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setAssignedUsersOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOutside);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [assignedUsersOpen]);
+  const filteredAssignedUsers = availableUsers.filter(user =>
+    `${user.fullName ?? ''} ${user.username ?? ''} ${user.email ?? ''}`.toLocaleLowerCase().includes(assignedUsersQuery.trim().toLocaleLowerCase()),
+  );
   const [assignedUserIds, setAssignedUserIds] = useState<string[]>(() =>
-    availableUsers
+    initial ? availableUsers
       .filter((user) =>
         (user.roles ?? "")
           .split(",")
           .map((value) => value.trim())
           .includes(initial?.name ?? ""),
       )
-      .map((user) => user.id),
+      .map((user) => user.id) : [],
   );
   useEffect(() => {
     if (isSystemAdministrator) {
@@ -544,13 +598,10 @@ function RolePanel({
         ? current.filter((id) => id !== userId)
         : [...current, userId],
     );
-  const toggle = (permission: string) =>
-    setPermissions((current) =>
-      current.includes(permission)
-        ? current.filter((value) => value !== permission)
-        : [...current, permission],
-    );
-  const setMenuPermission = (node: RoleAccessNode, key: "view" | "edit") =>
+  const setMenuPermission = (node: RoleAccessNode, key: "view" | "edit") => {
+    if (key === 'edit' && !menuAccess[node.id]?.edit) {
+      setActionPermissions(current => ({ ...current, [node.id]: [...new Set([...(current[node.id] ?? []), 'READ'])] }));
+    }
     setMenuAccess((current) => {
       const next = { ...current };
       const currentPermission = next[node.id] ?? { view: false, edit: false };
@@ -564,11 +615,34 @@ function RolePanel({
       }
       return next;
     });
+  };
+  const setActionPermission = (nodeId: string, action: string) => {
+    const selected = actionPermissions[nodeId] ?? [];
+    const enabling = !selected.includes(action);
+    setActionPermissions(current => {
+      const next = new Set(current[nodeId] ?? []);
+      if (enabling) {
+        next.add(action);
+        if (action === 'CREATE' || action === 'DELETE' || action === 'UPDATE') next.add('READ');
+      } else {
+        next.delete(action);
+        if (action === 'READ') {
+          next.delete('CREATE');
+          next.delete('DELETE');
+          next.delete('UPDATE');
+        }
+      }
+      return { ...current, [nodeId]: [...next] };
+    });
+    if (action === 'READ' && !enabling) {
+      setMenuAccess(current => ({ ...current, [nodeId]: { ...current[nodeId], edit: false } }));
+    }
+  };
   return (
     <div className="relative flex min-h-full min-w-0 flex-col items-start gap-8 overflow-y-auto bg-white px-4 py-14 sm:px-8 lg:px-[72px]">
       <div className="flex w-full max-w-[1440px] flex-col gap-6">
         <PageHeader
-          title={initial ? "Edit Role" : "Create Role"}
+          title={initial ? "Edit Role" : "Create new role"}
           leading={
             <button
               type="button"
@@ -587,7 +661,7 @@ function RolePanel({
           <span>/</span>
           <span>Roles</span>
           <span>/</span>
-          <span>{initial ? "Edit Role" : "Create Role"}</span>
+          <span>{initial ? "Edit Role" : "Create new role"}</span>
         </div>
         <div className="flex w-full max-w-[1180px] flex-col gap-5 rounded-xl border border-[#DDE7F0] bg-[#FBFDFE] p-5">
           <div className="flex items-center justify-end">
@@ -602,9 +676,10 @@ function RolePanel({
           </div>
           <label className="flex flex-col gap-1.5">
             <span className="font-montserrat text-[12px] font-medium text-[#10233A]">
-              Name <span className="text-[#D64545]">*</span>
+              Role name <span className="text-[#D64545]">*</span>
             </span>
             <input
+              required
               value={name}
               readOnly={isSystemAdministrator}
               aria-readonly={isSystemAdministrator}
@@ -623,19 +698,6 @@ function RolePanel({
             />
           </label>
           <div className="flex flex-col gap-2">
-            <div className="grid grid-cols-[1fr_70px_70px] items-center border-b border-[#D3E1EC] pb-2 font-montserrat text-[12px] font-semibold text-[#10233A]">
-              <span>Menu access</span>
-              <span>VIEW</span>
-              <span>EDIT</span>
-            </div>
-            <RoleAccessTree
-              nodes={ROLE_ACCESS_TREE}
-              access={menuAccess}
-              locked={isSystemAdministrator}
-              onToggle={setMenuPermission}
-            />
-          </div>
-          <div className="flex flex-col gap-2">
             <span className="font-montserrat text-[12px] font-semibold text-[#10233A]">
               Assigned users
             </span>
@@ -645,9 +707,30 @@ function RolePanel({
                 membership remains explicit per user.
               </span>
             )}
-            <div className="rounded-lg border border-[#D3E1EC] p-2">
-              {availableUsers.length ? (
-                availableUsers.map((user) => (
+            <div ref={assignedUsersRef} className="relative">
+              <div className="relative h-10 w-full rounded-lg border border-[#D3E1EC] bg-white hover:border-[#007EA7] focus-within:border-[#007EA7]">
+                <input
+                  aria-label="Assigned users"
+                  aria-expanded={assignedUsersOpen}
+                  autoComplete="off"
+                  placeholder="Select users"
+                  value={assignedUsersQuery}
+                  onFocus={() => setAssignedUsersOpen(true)}
+                  onClick={() => setAssignedUsersOpen(true)}
+                  onChange={event => { setAssignedUsersQuery(event.target.value); setAssignedUsersOpen(true); }}
+                  className="h-full w-full rounded-lg bg-transparent pl-3 pr-36 font-montserrat text-[13px] text-[#10233A] outline-none placeholder:text-[#7288A3]"
+                />
+                <span className="pointer-events-none absolute right-10 top-0 flex h-full w-24 items-center justify-end font-montserrat text-[12px] tabular-nums text-[#7288A3]">
+                  {assignedUserIds.length ? `${assignedUserIds.length} selected` : ''}
+                </span>
+                <button type="button" aria-label="Toggle assigned users" aria-expanded={assignedUsersOpen} onClick={() => setAssignedUsersOpen(value => !value)} className="absolute right-0 top-0 flex h-full w-9 items-center justify-center text-[#7288A3]">
+                  <ChevronDown size={17} className={assignedUsersOpen ? 'rotate-180' : ''} />
+                </button>
+              </div>
+              {assignedUsersOpen && <div className="absolute left-0 right-0 top-full z-30 mt-1 rounded-lg border border-[#D3E1EC] bg-white p-2 shadow-lg">
+                <div className="max-h-60 overflow-y-auto overscroll-contain">
+              {filteredAssignedUsers.length ? (
+                filteredAssignedUsers.map((user) => (
                   <button
                     key={user.id}
                     type="button"
@@ -675,9 +758,28 @@ function RolePanel({
                 ))
               ) : (
                 <span className="block px-2 py-3 font-montserrat text-[12px] text-[#7288A3]">
-                  No users available
+                  {availableUsers.length ? 'No users found' : 'No users available'}
                 </span>
               )}
+                </div>
+              </div>}
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <div className="flex min-w-[714px] flex-col gap-2">
+              <div className="grid grid-cols-[minmax(240px,1fr)_repeat(6,76px)] grid-rows-[32px_32px] items-center rounded-md border border-[#D3E1EC] bg-[#F0F6FA] font-montserrat text-[12px] font-medium leading-[18px] text-[#7288A3]">
+                <span className="col-start-1 row-start-1 row-span-2 px-3 text-[#10233A]">Menu access</span>
+                <span className="col-start-2 col-span-6 row-start-1 border-l border-[#D3E1EC] text-center text-[#10233A]">Action permissions</span>
+                {['View', 'Edit', ...VISIBLE_ACTION_PERMISSIONS.map(action => action.charAt(0) + action.slice(1).toLowerCase())].map((label, index) => <span key={label} style={{ gridColumn: index + 2, gridRow: 2 }} className="flex h-full items-center justify-center border-l border-t border-[#D3E1EC]">{label}</span>)}
+              </div>
+              <RoleAccessTree
+                nodes={ROLE_ACCESS_TREE}
+                access={menuAccess}
+                locked={isSystemAdministrator}
+                onToggle={setMenuPermission}
+                actionPermissions={actionPermissions}
+                onToggleAction={setActionPermission}
+              />
             </div>
           </div>
           {isSystemAdministrator && (
@@ -687,34 +789,6 @@ function RolePanel({
               <span>Roles: <b>All internal and external</b></span>
             </div>
           )}
-          <div className="flex flex-col gap-2">
-            <span className="font-montserrat text-[12px] font-medium text-[#10233A]">
-              Action permissions
-            </span>
-            <div className="grid grid-cols-2">
-              {PERMISSIONS.map((permission) => (
-                <button
-                  key={permission}
-                  type="button"
-                  onClick={() => {
-                    if (!isSystemAdministrator) toggle(permission);
-                  }}
-                  className="flex h-9 items-center gap-2 rounded-md px-2 text-left hover:bg-[#F8FDFF]"
-                >
-                  <CheckBox
-                    checked={permissions.includes(permission)}
-                    label={`${permission} permission`}
-                    onChange={() => {
-                      if (!isSystemAdministrator) toggle(permission);
-                    }}
-                  />
-                  <span className="font-montserrat text-[13px] text-[#10233A]">
-                    {permission}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
         <div className="flex justify-end gap-3 pt-6">
           <button
@@ -729,6 +803,20 @@ function RolePanel({
             disabled={!name.trim()}
             onClick={() => {
               const roleName = name.trim();
+              const savedMenuAccess = {
+                ...menuAccess,
+                notifications: { view: true, edit: true },
+                info: { view: true, edit: true },
+              };
+              const savedActionPermissions: Record<string, string[]> = {
+                ...actionPermissions,
+                notifications: [...PERMISSIONS],
+                info: [...PERMISSIONS],
+              };
+              const normalizedActionPermissions = Object.fromEntries(flattenRoleAccessTree(ROLE_ACCESS_TREE).map(node => [
+                node.id,
+                (isSystemAdministrator ? PERMISSIONS : savedActionPermissions[node.id] ?? []).filter(action => action !== 'DELETE' || allowsRoleDelete(node)),
+              ]));
               saveRoleAssignments(
                 audience,
                 initial?.name ?? roleName,
@@ -738,6 +826,7 @@ function RolePanel({
               onSave({
                 id: initial?.id ?? `role-${Date.now()}`,
                 name: roleName,
+                actionPermissions: JSON.stringify(normalizedActionPermissions),
                 description: description.trim() || "—",
                 permissions: isSystemAdministrator
                   ? PERMISSIONS.join(", ")
@@ -747,23 +836,23 @@ function RolePanel({
                 moduleAccess: JSON.stringify(
                   isSystemAdministrator
                     ? createFullAccess()
-                    : deriveModuleAccess(menuAccess),
+                    : deriveModuleAccess(savedMenuAccess),
                 ),
                 menuAccess: JSON.stringify(
-                  isSystemAdministrator ? createFullMenuAccess() : menuAccess,
+                  isSystemAdministrator ? createFullMenuAccess() : savedMenuAccess,
                 ),
-                managedOrganizations: isSystemAdministrator ? "ALL" : "—",
-                managedUsers: isSystemAdministrator ? "ALL" : "—",
-                managedRoles: isSystemAdministrator ? "ALL" : "—",
+                managedOrganizations: isSystemAdministrator ? "ALL" : configuration?.managedOrganizations ?? "—",
+                managedUsers: isSystemAdministrator ? "ALL" : configuration?.managedUsers ?? "—",
+                managedRoles: isSystemAdministrator ? "ALL" : configuration?.managedRoles ?? "—",
                 createdBy: initial?.createdBy ?? "Administrator",
                 creationDate: initial?.creationDate ?? timestamp(),
                 updatedBy: "Administrator",
                 lastUpdate: timestamp(),
               });
             }}
-            className="h-10 rounded-lg bg-[#007EA7] px-5 font-montserrat text-[14px] font-semibold text-white disabled:bg-[#E5EDF9] disabled:text-[#A1B6C6]"
+            className={`h-10 rounded-lg px-5 font-montserrat text-[14px] font-semibold transition-colors disabled:cursor-not-allowed disabled:bg-[#E5EDF9] disabled:text-[#A1B6C6] ${initial ? 'border-2 border-[#D3E1EC] bg-white text-[#7288A3] hover:border-[#A1B6C6] enabled:active:border-[#007EA7] enabled:active:bg-[#007EA7] enabled:active:text-white' : 'bg-[#007EA7] text-white'}`}
           >
-            Save
+            {initial ? 'Save change' : 'Save role'}
           </button>
         </div>
       </div>
@@ -1613,12 +1702,16 @@ export default function SettingsIdentityManagementView({
   createOnOpen = false,
   onCreateOpened,
   organizationScope,
+  initialRoleFilter,
+  onOpenRoleUsers,
 }: {
   audience: Audience;
   section: Section;
   createOnOpen?: boolean;
   onCreateOpened?: () => void;
   organizationScope?: Company;
+  initialRoleFilter?: string;
+  onOpenRoleUsers?: (roleName: string) => void;
 }) {
   const key = storageKey(audience, section);
   const defaults =
@@ -1635,6 +1728,7 @@ export default function SettingsIdentityManagementView({
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<DirectoryRow | "new" | null>(null);
+  const [roleTemplate, setRoleTemplate] = useState<DirectoryRow | undefined>();
   const [columns, setColumns] = useState<ColConfig[]>(defaults);
   const [showColumns, setShowColumns] = useState(false);
   const [addFilterOpen, setAddFilterOpen] = useState(false);
@@ -1678,13 +1772,13 @@ export default function SettingsIdentityManagementView({
     setColumns(defaults);
     setSelected(new Set());
     setQuery("");
-    setActiveFilterKeys([]);
+    setActiveFilterKeys(section === 'Users' && initialRoleFilter ? ['roles'] : []);
     setPendingFilterKeys([]);
-    setFilterValues({});
+    setFilterValues(section === 'Users' && initialRoleFilter ? { roles: [initialRoleFilter] } : {});
     setAddFilterOpen(false);
     setOpenValueFilter(null);
     setPage(1);
-  }, [audience, defaults, key, section]);
+  }, [audience, defaults, key, section, initialRoleFilter]);
   useEffect(() => {
     const refreshRelationships = () => setRows(loadRows(audience, section));
     window.addEventListener(
@@ -1842,6 +1936,13 @@ export default function SettingsIdentityManagementView({
     });
     setSelected(new Set());
   };
+  const duplicateRole = (source: DirectoryRow) => {
+    setRoleTemplate({
+      ...source,
+      ...(isSystemAdministratorRole(source.name) ? { menuAccess: JSON.stringify(createFullMenuAccess()) } : {}),
+    });
+    setEditing('new');
+  };
   const save = (row: DirectoryRow) => {
     setRows((current) => {
       const nextRows =
@@ -1856,6 +1957,7 @@ export default function SettingsIdentityManagementView({
       return nextRows;
     });
     setEditing(null);
+    setRoleTemplate(undefined);
   };
 
   if (editing) {
@@ -1863,7 +1965,8 @@ export default function SettingsIdentityManagementView({
       <RolePanel
         audience={audience}
         initial={editing === "new" ? undefined : editing}
-        onClose={() => setEditing(null)}
+        template={editing === 'new' ? roleTemplate : undefined}
+        onClose={() => { setEditing(null); setRoleTemplate(undefined); }}
         onSave={save}
       />
     ) : (
@@ -2188,10 +2291,7 @@ export default function SettingsIdentityManagementView({
                     checked={allSelected}
                     label="Select all records"
                     onChange={() =>
-                      setSelected(
-                        allSelected
-                          ? new Set()
-                          : new Set(filtered.map((row) => row.id)),
+                      setSelected(current => toggleFilteredSelection(current, filtered.map((row) => row.id)),
                       )
                     }
                   />
@@ -2220,7 +2320,7 @@ export default function SettingsIdentityManagementView({
                     </div>
                   );
                 })}
-                <div className="h-full w-[72px] flex-shrink-0 bg-white" />
+                <div className={`h-full flex-shrink-0 bg-white ${section === 'Roles' && audience === 'Internal users' ? 'w-[104px]' : 'w-[72px]'}`} />
               </div>
               <div className="flex flex-col gap-0.5">
                 {displayedRows.map((row, index) => (
@@ -2248,14 +2348,25 @@ export default function SettingsIdentityManagementView({
                         style={{ width: column.width }}
                         className="flex-shrink-0 overflow-hidden px-3"
                       >
-                        <span className="block truncate font-montserrat text-[12px] font-normal text-[#10233A]">
+                        {section === 'Roles' && column.key === 'assignedUsers' && onOpenRoleUsers ? <button type="button" className="font-montserrat text-[12px] text-[#007EA7] hover:underline" aria-label={`View users assigned to ${row.name}`} onClick={() => onOpenRoleUsers(row.name)}>{row.assignedUsers || '0'}</button> : <span className="block truncate font-montserrat text-[12px] font-normal text-[#10233A]">
                           {row[column.key] || "—"}
-                        </span>
+                        </span>}
                       </div>
                     ))}
                     <div
-                      className={`system-table-row-actions flex h-full w-[72px] flex-shrink-0 items-center justify-end gap-1 pr-1 ${index % 2 ? "bg-white" : "bg-[#F8FDFF]"} group-hover:bg-[#E7F4F9]`}
+                      className={`system-table-row-actions flex h-full ${section === 'Roles' && audience === 'Internal users' ? 'w-[104px]' : 'w-[72px]'} flex-shrink-0 items-center justify-end gap-1 pr-1 ${index % 2 ? "bg-white" : "bg-[#F8FDFF]"} group-hover:bg-[#E7F4F9]`}
                     >
+                      {section === 'Roles' && audience === 'Internal users' && (
+                        <button
+                          type="button"
+                          aria-label={`Duplicate ${row.name}`}
+                          title="Duplicate"
+                          onClick={() => duplicateRole(row)}
+                          className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] transition-colors hover:border-[#007EA7] hover:text-[#007EA7] group-hover:bg-[#E7F4F9]"
+                        >
+                          <Copy size={15} />
+                        </button>
+                      )}
                       <button
                         type="button"
                         aria-label={`Edit ${row.name || row.fullName || row.username || row.email}`}

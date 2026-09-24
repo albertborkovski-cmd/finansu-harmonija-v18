@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef } from 'react';
 import { X } from 'lucide-react';
-import type { AttentionNotification } from '../lib/notifications';
-import { formatNotificationDateTime, getNotificationModuleLabel, notificationMessage } from '../lib/notificationPresentation';
+import { getNotificationStatus, type AttentionNotification } from '../lib/notifications';
+import { formatNotificationDateTime, getNotificationModuleLabel, getNotificationRelatedObjectLabel, notificationMessage } from '../lib/notificationPresentation';
 import { PageActionButton } from './PageHeader';
 
 interface Props {
@@ -60,6 +60,8 @@ export default function NotificationDetailsPanel({ notification, organizationNam
     { label: 'Type', value: getNotificationModuleLabel(notification) },
     { label: 'Organization', value: organizationName.trim() || '—' },
     { label: 'Date / time', value: formatNotificationDateTime(notification) },
+    { label: 'Status', value: getNotificationStatus(notification) },
+    { label: 'Related object', value: getNotificationRelatedObjectLabel(notification) },
     { label: 'Read status', value: read ? 'Read' : 'Unread' },
     { label: 'Message', value: notificationMessage(notification) },
   ];

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import useAppTableFooterPosition from '../hooks/useAppTableFooterPosition';
+import useFrozenTableHeaders from '../hooks/useFrozenTableHeaders';
 
 interface HorizontalTableScrollbarProps {
   scrollRef?: RefObject<HTMLElement>;
@@ -17,6 +18,7 @@ interface HorizontalTableScrollbarProps {
  */
 export default function HorizontalTableScrollbar({ scrollRef, className = '', fixed = true }: HorizontalTableScrollbarProps) {
   const rootRef = useRef<HTMLDivElement>(null);
+  useFrozenTableHeaders(scrollRef, rootRef);
   const trackRef = useRef<HTMLDivElement>(null);
   const [ratio, setRatio] = useState(0);
   const [thumbRatio, setThumbRatio] = useState(1);

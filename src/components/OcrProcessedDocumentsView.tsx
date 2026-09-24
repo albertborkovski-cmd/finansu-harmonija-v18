@@ -1,6 +1,7 @@
+import { toggleFilteredSelection } from '../lib/tableSelection';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowDownToLine, Check, FileText, Pencil, Play, Search } from "lucide-react";
+import { ArrowDownToLine, Check, FileText, Pencil, Play } from "lucide-react";
 import type { Company, DbDocument } from "../lib/supabase";
 import { loadOcrDocumentSource } from "../lib/ocrDocumentSource";
 import { usePersistentState } from "../hooks/usePersistentState";
@@ -143,8 +144,8 @@ function OrganizationSidebar({
   };
 
   return (
-    <aside className="w-[248px] flex-shrink-0 self-start overflow-hidden rounded-xl border border-[#D3E1EC] bg-white shadow-[0_2px_8px_rgba(16,35,58,0.04)]">
-      <div className="border-b border-[#E5EDF9] px-4 pb-3 pt-4">
+    <aside className="w-full flex-shrink-0 self-start overflow-hidden rounded-lg border border-[#D3E1EC] bg-white lg:flex lg:max-h-full lg:w-[224px] lg:flex-col">
+      <div className="shrink-0 border-b border-[#E5EDF9] px-4 pb-3 pt-4">
         <div className="flex items-center justify-between gap-3">
           <h2 className="font-montserrat text-[14px] font-semibold text-[#10233A]">
             Organizations
@@ -156,25 +157,20 @@ function OrganizationSidebar({
         <p className="mt-1 font-montserrat text-[11px] font-medium leading-[16px] text-[#7288A3]">
           Choose which organizations to display
         </p>
-        <label className="mt-3 flex h-9 items-center gap-2 rounded-lg bg-[#F2F7FC] px-3 focus-within:ring-1 focus-within:ring-[#007EA7]">
-          <Search size={15} className="flex-shrink-0 text-[#7288A3]" />
-          <input
-            type="search"
-            value={organizationQuery}
-            onChange={(event) => setOrganizationQuery(event.target.value)}
-            placeholder="Search organizations"
-            className="min-w-0 flex-1 bg-transparent font-montserrat text-[12px] font-medium text-[#10233A] outline-none placeholder:text-[#7288A3]"
-            aria-label="Search organizations"
-          />
-        </label>
+        <OcrSearchField
+          ariaLabel="Search organizations"
+          value={organizationQuery}
+          onChange={setOrganizationQuery}
+          className="mt-3 !w-full !min-w-0 !max-w-full"
+        />
       </div>
-      <div className="p-2">
+      <div className="flex min-h-0 flex-col p-2">
         <button
           type="button"
           onClick={() => onChange(
             allSelected ? [] : organizations.map((organization) => organization.id),
           )}
-          className={`flex min-h-10 w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors ${allSelected ? "bg-[#E7F4F9]" : "hover:bg-[#F2F7FC]"}`}
+          className={`flex min-h-10 w-full shrink-0 items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors ${allSelected ? "bg-[#E7F4F9]" : "hover:bg-[#F2F7FC]"}`}
         >
           <SelectorCheck checked={allSelected} />
           <span className="min-w-0 flex-1 font-montserrat text-[12px] font-semibold text-[#10233A]">
@@ -184,8 +180,8 @@ function OrganizationSidebar({
             {organizations.length}
           </span>
         </button>
-        <div className="mx-2 my-2 h-px bg-[#E5EDF9]" />
-        <div className="max-h-[calc(100vh-330px)] overflow-y-auto pr-0.5">
+        <div className="mx-2 my-2 h-px shrink-0 bg-[#E5EDF9]" />
+        <div className="min-h-0 max-h-[calc(100dvh-250px)] overflow-y-auto overscroll-y-contain pr-0.5">
           <div className="flex flex-col gap-0.5">
             {visibleOrganizations.map((organization) => {
               const checked = selectedIds.includes(organization.id);
@@ -456,7 +452,7 @@ export function ProcessedDocumentsTable({
   const someRowsSelected = selectable && !allRowsSelected && sortedRows.some((row) => selectedRowIds.has(row.id));
 
   const toggleAllRows = () => {
-    setSelectedRowIds(allRowsSelected ? new Set() : new Set(sortedRows.map((row) => row.id)));
+    setSelectedRowIds(current => toggleFilteredSelection(current, sortedRows.map(row => row.id)));
   };
 
   const toggleRow = (rowId: string) => {
@@ -502,11 +498,11 @@ export function ProcessedDocumentsTable({
   return (
     <>
       {importActionContainer && importAction ? createPortal(importAction, importActionContainer) : null}
-    <div className={`flex min-h-full min-w-0 flex-col bg-white ${embedded ? "gap-6" : "gap-8 px-4 py-14 sm:px-8 lg:px-[72px]"}`}>
+    <div className={`flex min-w-0 flex-col bg-white ${embedded ? "min-h-full gap-4" : "min-h-full gap-4 px-4 py-10 sm:px-8 lg:h-dvh lg:min-h-0 lg:overflow-hidden lg:px-[56px]"}`}>
       {!embedded && <PageHeader title="Processed documents" />}
       {!embedded && <OcrBreadcrumb items={["All documents", "Processed documents"]} />}
 
-      <div className="flex min-h-0 flex-1 items-stretch gap-6">
+      <div className="flex min-h-0 flex-1 flex-col items-stretch gap-4 lg:flex-row">
         {!embedded && (
           <OrganizationSidebar
             organizations={organizations}
@@ -514,8 +510,8 @@ export function ProcessedDocumentsTable({
             onChange={setSelectedOrganizationIds}
           />
         )}
-        <div className="flex min-w-0 flex-1 flex-col gap-8">
-          <div className="system-table-toolbar flex h-7 min-h-7 flex-nowrap items-center gap-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
+          <div className="system-table-toolbar flex min-h-8 shrink-0 flex-wrap items-center gap-x-1 gap-y-2">
             <OcrSearchField ariaLabel={reviewOnly ? "Search documents requiring review" : "Search processed documents"} value={query} onChange={setQuery} />
             <SystemAddFilters
               columns={filterColumns}
@@ -525,16 +521,16 @@ export function ProcessedDocumentsTable({
               onValuesChange={setFilterValues}
               persistenceKey={reviewOnly ? "finansu-harmonija:v12:ml:need-review-documents:filters" : "finansu-harmonija:v12:ocr:processed-documents:filters"}
             />
-            <div className="ml-auto flex h-7 items-center gap-4">
+            <div className="ml-auto flex h-7 shrink-0 items-center gap-3">
               {!importActionContainer && importAction}
               <ColumnSettingsButton onClick={() => setShowColumns(true)} />
               <RefreshAllButton onRefresh={() => void loadData()} />
             </div>
           </div>
 
-          <div ref={tableScrollRef} className="min-h-0 flex-1 overflow-x-auto scrollbar-hide">
+          <div ref={tableScrollRef} className={`min-h-0 flex-1 overflow-x-auto overscroll-contain scrollbar-hide ${!embedded ? 'lg:overflow-y-auto' : ''}`}>
             <div style={{ minWidth: visibleColumns.reduce((sum, column) => sum + column.width, (selectable ? 42 : 0) + rowActionsWidth) }}>
-          <div className="mb-3 flex h-9 items-center">
+          <div className="mb-1 flex h-10 items-center border-b border-[#D3E1EC]">
             {selectable && (
               <div data-table-header-select="true" className="flex w-[42px] flex-shrink-0 items-center justify-center">
                 <SelectionCheckbox checked={allRowsSelected} mixed={someRowsSelected} label="Select all documents" onChange={toggleAllRows} />
@@ -546,7 +542,7 @@ export function ProcessedDocumentsTable({
                 <div
                   key={column.key}
                   style={{ width: column.width }}
-                  className={`relative flex flex-shrink-0 items-center gap-1 px-3 font-montserrat text-[12px] font-medium text-[#10233A] ${visibleIndex ? "border-l border-[#D3E1EC]" : ""}`}
+                  className={`relative flex flex-shrink-0 items-center gap-1 px-3 font-montserrat text-[12px] font-medium text-[#7288A3] ${visibleIndex ? "border-l border-[#D3E1EC]" : ""}`}
                 >
                   <span className="truncate">{column.label}</span>
                   <ColumnSortButton

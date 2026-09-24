@@ -45,12 +45,25 @@ export function getNotificationModuleLabel(row: Pick<NotificationRow, 'id' | 'ty
 /** A notification is an event signal, not a second copy of its source record. */
 export function createNotificationColumns(organizationContext = false): ColConfig[] {
   return [
-    { key: 'createdAt', label: 'Date / time', width: 180, visible: true },
-    { key: 'organization', label: 'Organization', width: 220, visible: !organizationContext },
-    { key: 'type', label: 'Type', width: 140, visible: true },
+    { key: 'type', label: 'Module', width: 140, visible: true },
     { key: 'message', label: 'Message', width: 380, visible: true },
-    { key: 'status', label: 'Read / Unread', width: 150, visible: true },
+    { key: 'organization', label: 'Organization', width: 220, visible: !organizationContext },
+    { key: 'createdAt', label: 'Time', width: 180, visible: true },
+    { key: 'severity', label: 'Severity', width: 120, visible: true },
+    { key: 'status', label: 'Resolved/Active', width: 150, visible: true },
+    { key: 'relatedObject', label: 'Related object', width: 240, visible: true },
   ];
+}
+
+/** Show source identity, never a generic navigation label or an object from another company. */
+export function getNotificationRelatedObjectLabel(
+  row: Pick<NotificationRow, 'id' | 'organizationId' | 'sourceTaskId' | 'relatedObject'>,
+  tasks: readonly { id: string; organizationId?: string; name: string }[] = [],
+): string {
+  const taskId = getNotificationSourceTaskId(row);
+  if (taskId) return tasks.find(task => task.id === taskId && task.organizationId === row.organizationId)?.name.trim() || taskId;
+  if (!row.organizationId?.trim() || row.relatedObject?.organizationId !== row.organizationId) return '—';
+  return row.relatedObject.label?.trim() || row.relatedObject.recordId || row.relatedObject.id || '—';
 }
 
 export function formatNotificationDateTime(row: Pick<NotificationRow, 'createdAt' | 'id'>): string {

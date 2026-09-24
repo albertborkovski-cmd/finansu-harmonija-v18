@@ -1,3 +1,4 @@
+import { toggleFilteredSelection } from '../lib/tableSelection';
 import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, FileText, Pencil, X } from "lucide-react";
@@ -882,8 +883,7 @@ export default function OrganizationReferenceValuesView({
   };
 
   const allVisibleSelected =
-    displayedRecords.length > 0 &&
-    displayedRecords.every(({ index }) => selected.has(index));
+    visibleRecords.length > 0 && visibleRecords.every(({ index }) => selected.has(index));
   const visibleColumns = columns.filter((column) => column.visible);
   const tableWidth =
     42 + visibleColumns.reduce((sum, column) => sum + column.width, 0) + 72;
@@ -901,8 +901,7 @@ export default function OrganizationReferenceValuesView({
       const subtypeTotalPages = Math.max(1, Math.ceil(visibleSubtypeRecords.length / recordsPerPage));
       const displayedSubtypes = visibleSubtypeRecords.slice(0, currentPage * recordsPerPage);
       const allSubtypesSelected =
-        displayedSubtypes.length > 0 &&
-        displayedSubtypes.every(({ index }) => selected.has(index));
+        visibleSubtypeRecords.length > 0 && visibleSubtypeRecords.every(({ index }) => selected.has(index));
 
       return (
         <main
@@ -996,11 +995,7 @@ export default function OrganizationReferenceValuesView({
                     checked={allSubtypesSelected}
                     label="Select all subdocument types"
                     onChange={() =>
-                      setSelected(
-                        allSubtypesSelected
-                          ? new Set()
-                          : new Set(displayedSubtypes.map(({ index }) => index)),
-                      )
+                      setSelected(current => toggleFilteredSelection(current, visibleSubtypeRecords.map(({ index }) => index)))
                     }
                   />
                 </div>
@@ -1208,11 +1203,7 @@ export default function OrganizationReferenceValuesView({
                 checked={allVisibleSelected}
                 label="Select all records"
                 onChange={() =>
-                  setSelected(
-                    allVisibleSelected
-                      ? new Set()
-                      : new Set(displayedRecords.map(({ index }) => index)),
-                  )
+                  setSelected(current => toggleFilteredSelection(current, visibleRecords.map(({ index }) => index)))
                 }
               />
             </div>

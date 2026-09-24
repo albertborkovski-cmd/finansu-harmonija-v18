@@ -37,7 +37,7 @@ interface CompanyDetailProps {
 
 const mainMenuItems = [
   { id: 'overview',      label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'notifications', label: 'Notifications & Tasks', icon: Bell },
+  { id: 'notifications', label: 'Tasks', icon: Bell },
   { id: 'documents',     label: 'All documents', icon: Files },
   { id: 'gl-journal',    label: 'GL journal', icon: BookOpenText },
   { id: 'bank',          label: 'Bank', icon: Landmark },

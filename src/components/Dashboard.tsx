@@ -7,6 +7,11 @@ import {
   type ReactNode,
 } from "react";
 import Sidebar from "./Sidebar";
+import { Bell, X, ArrowRight } from 'lucide-react';
+import NotificationDetailsPanel from './NotificationDetailsPanel';
+import { ensureImportantNotificationExamples, linkImportantNotificationExamples } from '../lib/importantNotificationExamples';
+import { formatNotificationDateTime, getNotificationModuleLabel, getNotificationRelatedObjectLabel, notificationMessage } from '../lib/notificationPresentation';
+import RelatedObjectLink from './RelatedObjectLink';
 import { canAccessAssignedOrganization } from '../lib/linkedSettingsData';
 import { useOrganizationAccessRevision } from './useOrganizationAccessRevision';
 import ProfileSettings from "./ProfileSettings";
@@ -61,8 +66,8 @@ import { userProfileStorageKey } from "../lib/currentUser";
 import { useAttentionNotifications } from "../hooks/useAttentionNotifications";
 import { useVisibleNotificationRecords } from '../hooks/useVisibleNotificationRecords';
 import { getDashboardAttentionNotifications } from '../lib/notificationAttention';
-import { type NotificationTab, type RelatedObject } from "../lib/notifications";
-import { resolveRelatedObject, loadRelatedObjectChats } from '../lib/relatedObjects';
+import { getNotificationTabCounts, getRelevantActionsForTab, isImportantNotification, isNotificationRead, type AttentionNotification, type NotificationTab, type RelatedObject } from "../lib/notifications";
+import { resolveRelatedObject, loadRelatedObjectChats, loadRelatedObjects } from '../lib/relatedObjects';
 
 interface DashboardProps {
   onLogout: () => void;
@@ -126,9 +131,43 @@ function ReadOnlyBoundary({
 }
 
 export default function Dashboard({ onLogout, session }: DashboardProps) {
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notificationsExpanded, setNotificationsExpanded] = useState(false);
+  const [notificationDetails, setNotificationDetails] = useState<AttentionNotification | null>(null);
+  const [notificationNavigationError, setNotificationNavigationError] = useState('');
   const organizationAccessRevision = useOrganizationAccessRevision();
   const notificationRecords = useAttentionNotifications(true);
   const visibleNotifications = useVisibleNotificationRecords(notificationRecords, session);
+  const demoAlertCompany = visibleNotifications.organizations.find(company => company.name === 'Alice Stone') ?? visibleNotifications.organizations[0];
+  useEffect(() => {
+    let cancelled = false;
+    if (import.meta.env.DEV && demoAlertCompany && visibleNotifications.session && canViewMenu(visibleNotifications.session, 'notifications')) {
+      ensureImportantNotificationExamples(demoAlertCompany, visibleNotifications.session.email);
+      const current = visibleNotifications.session;
+      void loadRelatedObjects(demoAlertCompany, current).then(objects => {
+        if (!cancelled) linkImportantNotificationExamples(demoAlertCompany.id, current.email, objects);
+      }).catch(() => { /* Keep alerts readable if their source catalog is unavailable. */ });
+    }
+    return () => { cancelled = true; };
+  }, [demoAlertCompany, visibleNotifications.session]);
+  const notificationCounts = getNotificationTabCounts(visibleNotifications.records, visibleNotifications.session ?? session);
+  const activeImportantNotifications = getRelevantActionsForTab(visibleNotifications.records, visibleNotifications.session ?? session, 'notifications')
+    .filter(isImportantNotification);
+  const importantNotificationCount = activeImportantNotifications.length;
+  const importantNotificationBadge = importantNotificationCount > 5 ? '5+' : String(importantNotificationCount);
+  const recentNotifications = [...activeImportantNotifications]
+    .sort((left, right) => {
+      const leftRank = 'severity' in left && left.severity === 'Critical' ? 0 : 1;
+      const rightRank = 'severity' in right && right.severity === 'Critical' ? 0 : 1;
+      return leftRank - rightRank || (Date.parse(right.createdAt ?? '') || 0) - (Date.parse(left.createdAt ?? '') || 0);
+    })
+    .slice(0, 5);
+  useEffect(() => {
+    if (!notificationsOpen) return;
+    const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setNotificationsOpen(false); };
+    document.addEventListener('keydown', close);
+    return () => document.removeEventListener('keydown', close);
+  }, [notificationsOpen]);
   const attentionNotifications = visibleNotifications.session
     ? getDashboardAttentionNotifications(visibleNotifications.records, visibleNotifications.session) : [];
   const [notificationTarget, setNotificationTarget] = useState<{ tab: NotificationTab; query: string; organization?: { id: string; name: string }; requiresAction?: boolean; openTasksOnly?: boolean; returnCompany?: { company: Company; menu: string } }>({ tab: "notifications", query: "" });
@@ -172,6 +211,7 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
     useState<SecurityAccessTarget | null>(null);
   const [securityAccessReturnMenu, setSecurityAccessReturnMenu] =
     useState("ocr");
+  const [directoryRoleFilter, setDirectoryRoleFilter] = useState<string | undefined>();
   const [userDirectoryCreateRequest, setUserDirectoryCreateRequest] = useState<
     "Internal users" | "External users" | null
   >(null);
@@ -342,7 +382,8 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
   }, [activeMenu, session]);
 
   const handleMenuClick = (menu: string) => {
-    if (menu === "notifications") setNotificationTarget({ tab: "notifications", query: "" });
+    setDirectoryRoleFilter(undefined);
+    if (menu === "notifications") setNotificationTarget({ tab: "reminders", query: "" });
     if (menu !== "profile" && !canViewMenu(session, menu)) return;
     relatedChatReturnScroll.current = null;
     setRelatedChat(null);
@@ -384,7 +425,7 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
     setSelectedCompany(company);
   };
 
-  const openRelatedObject = async (object: RelatedObject) => {
+  const openRelatedObject = async (object: RelatedObject, editDocument = false) => {
     let currentSession = parseSession(JSON.stringify(session));
     if (!currentSession) throw new Error('Your session is no longer valid.');
     const { data, error } = await supabase.from('companies').select('*');
@@ -406,7 +447,7 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
       return;
     }
     if (resolved.type === 'Document' || resolved.type === 'Invoice') {
-      openCompany(company, 'documents', resolved.recordId ?? resolved.id, 'view');
+      openCompany(company, 'documents', resolved.recordId ?? resolved.id, editDocument && canEditMenu(currentSession, 'dashboard') ? 'edit' : 'view');
       return;
     }
     openCompany(company);
@@ -522,7 +563,7 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
           notificationsContent={canViewMenu(session, 'notifications') ? <OrganizationRequiredActionsView
             organization={{ id: selectedCompany.id, name: selectedCompany.name }}
             session={session}
-            initialTab={selectedCompanyMenu === 'notifications' && notificationTarget.organization?.id === selectedCompany.id ? notificationTarget.tab : 'notifications'}
+            initialTab="reminders"
             initialOpenTasksOnly={selectedCompanyMenu === 'notifications' && notificationTarget.organization?.id === selectedCompany.id && notificationTarget.openTasksOnly}
             onOpenRelatedObject={openRelatedObject}
           /> : undefined}
@@ -619,6 +660,7 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
           allCompanies
           attentionNotifications={canViewMenu(session, "notifications") ? attentionNotifications : undefined}
           onOpenNotifications={canViewMenu(session, "notifications") ? (tab = "reminders", query = "") => {
+            if (tab === 'notifications') { setNotificationsOpen(true); return; }
             setNotificationTarget({ tab, query, openTasksOnly: tab === 'reminders' && !query });
             setActiveMenu("notifications");
           } : undefined}
@@ -640,7 +682,7 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
       );
     if (activeMenu === "messages")
       return <ChatsView currentUserName={currentUserName} conversation={selectedChat} onOpenDocument={openDocumentInOrganization} />;
-    if (activeMenu === "notifications") return <OrganizationRequiredActionsView key={`${notificationTarget.organization?.id ?? 'all'}:${notificationTarget.tab}:${notificationTarget.query}:${Boolean(notificationTarget.requiresAction)}:${Boolean(notificationTarget.openTasksOnly)}`} organization={notificationTarget.organization} session={session} initialTab={notificationTarget.tab} initialQuery={notificationTarget.query} initialRequiresAction={notificationTarget.requiresAction} initialOpenTasksOnly={notificationTarget.openTasksOnly} onOpenRelatedObject={openRelatedObject} onBack={notificationTarget.organization ? () => {
+    if (activeMenu === "notifications") return <OrganizationRequiredActionsView key={`${notificationTarget.organization?.id ?? 'all'}:${notificationTarget.tab}:${notificationTarget.query}:${Boolean(notificationTarget.requiresAction)}:${Boolean(notificationTarget.openTasksOnly)}`} organization={notificationTarget.organization} session={session} initialTab="reminders" initialQuery={notificationTarget.query} initialRequiresAction={notificationTarget.requiresAction} initialOpenTasksOnly={notificationTarget.openTasksOnly} onOpenRelatedObject={openRelatedObject} onBack={notificationTarget.organization ? () => {
       setActiveMenu('dashboard');
       if (notificationTarget.returnCompany) openCompany(notificationTarget.returnCompany.company, notificationTarget.returnCompany.menu);
     } : undefined} />;
@@ -721,6 +763,11 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
               userDirectoryCreateRequest === settingsSection.audience
             }
             onCreateOpened={() => setUserDirectoryCreateRequest(null)}
+            initialRoleFilter={settingsSection.section === 'Users' ? directoryRoleFilter : undefined}
+            onOpenRoleUsers={roleName => {
+              handleMenuClick(settingsSection.audience === 'Internal users' ? 'settings-internal-users' : 'settings-external-users');
+              setDirectoryRoleFilter(roleName);
+            }}
           />
         );
       }
@@ -790,11 +837,51 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
 
   return (
     <>
+    {canViewMenu(session, 'notifications') && <button type="button" aria-expanded={notificationsOpen} aria-label={`Notifications, ${importantNotificationCount} active important alerts`} title="Notifications" onClick={() => { setNotificationsExpanded(false); setNotificationsOpen(value => !value); }} className="fixed right-4 top-2 z-40 flex h-9 w-9 items-center justify-center rounded-md border border-[#D3E1EC] bg-white text-[#7288A3] shadow-sm hover:text-[#007EA7]">
+      <Bell size={20} />
+      {importantNotificationCount > 0 && <span className="absolute -right-1 -top-1 flex min-w-4 items-center justify-center rounded-full bg-[#E65050] px-1 font-montserrat text-[10px] leading-4 text-white">{importantNotificationBadge}</span>}
+    </button>}
+    {notificationDetails && <NotificationDetailsPanel notification={notificationDetails} organizationName={notificationDetails.organizationName ?? '—'} read={isNotificationRead(notificationDetails, session.email)} onClose={() => setNotificationDetails(null)} />}
+    {notificationsOpen && !notificationsExpanded && <div className="fixed inset-0 z-[100]" onClick={() => setNotificationsOpen(false)}>
+      <section role="dialog" aria-label="Recent notifications" onClick={event => event.stopPropagation()} className="absolute right-4 top-12 flex max-h-[calc(100dvh-64px)] w-[420px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-xl border border-[#D3E1EC] bg-white font-montserrat shadow-xl">
+        <header className="flex items-start justify-between gap-3 border-b border-[#E5EDF9] px-4 py-3">
+          <div><h2 className="flex items-center gap-2 text-[16px] font-semibold text-[#10233A]">Notifications{importantNotificationCount > 0 && <span className="rounded-full bg-[#E65050] px-1.5 text-[11px] leading-5 text-white">{importantNotificationBadge}</span>}</h2><p className="mt-1 text-[11px] text-[#7288A3]">Active alerts requiring attention</p></div>
+          <button type="button" onClick={() => setNotificationsExpanded(true)} className="whitespace-nowrap pt-1 text-[12px] font-semibold text-[#007EA7] hover:underline">View all</button>
+        </header>
+        <div className="min-h-0 overflow-y-auto p-2">
+          {recentNotifications.map(row => <article key={`${row.organizationId}:${row.id}`} className="mb-2 rounded-lg border border-[#E5EDF9] p-3 last:mb-0 hover:bg-[#F8FDFF]">
+            <div className="flex items-start gap-3"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#E6F2F6] text-[#007EA7]"><Bell size={15} /></span><div className="min-w-0 flex-1">
+              <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 text-[10px] leading-4 text-[#7288A3]"><span className="font-medium">{getNotificationModuleLabel(row)}</span><span>{row.organizationName || '—'}</span></div>
+              <span className={`mt-1 inline-flex rounded px-1.5 text-[10px] font-semibold leading-5 ${'severity' in row && row.severity === 'Critical' ? 'bg-[#FDEBEC] text-[#B93846]' : 'bg-[#FFF3DE] text-[#966000]'}`}>{'severity' in row ? row.severity : ''}</span>
+              <p className="mt-1 break-words text-[12px] font-semibold leading-[18px] text-[#10233A]">{row.name}</p>
+              {notificationMessage(row) !== row.name && <p className="mt-1 line-clamp-2 break-words text-[11px] leading-4 text-[#7288A3]">{notificationMessage(row)}</p>}
+              {getNotificationRelatedObjectLabel(row) !== '—' && <p className="mt-1 truncate text-[11px] text-[#7288A3]" title={getNotificationRelatedObjectLabel(row)}>Related object: {getNotificationRelatedObjectLabel(row)}</p>}
+              <div className="mt-2 flex items-center justify-between gap-2"><time className="text-[10px] text-[#7288A3]">{formatNotificationDateTime(row)}</time>{row.relatedObject && row.relatedObject.organizationId === row.organizationId ? <RelatedObjectLink object={row.relatedObject} organizationId={row.organizationId} variant="button" onError={setNotificationNavigationError} onOpen={async object => { await openRelatedObject(object, true); setNotificationsOpen(false); }} /> : <button type="button" onClick={() => { setNotificationsOpen(false); setNotificationDetails(row); }} className="h-7 rounded-md border border-[#D3E1EC] bg-white px-3 text-[11px] font-semibold text-[#007EA7] hover:bg-[#E6F2F6]">View details</button>}</div>
+            </div></div>
+          </article>)}
+          {!recentNotifications.length && <p className="px-4 py-8 text-center text-[12px] text-[#7288A3]">No active critical or warning notifications.</p>}
+          {notificationNavigationError && <p role="alert" className="px-3 py-2 text-[12px] text-[#B93846]">{notificationNavigationError}</p>}
+        </div>
+        <footer className="border-t border-[#E5EDF9] p-3"><button type="button" onClick={() => setNotificationsExpanded(true)} className="flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[#E5EDF9] text-[12px] font-semibold text-[#007EA7] hover:bg-[#D3E1EC]">View all notifications <ArrowRight size={15} /></button></footer>
+      </section>
+    </div>}
+    {notificationsOpen && notificationsExpanded && <div className="fixed inset-0 z-[100] flex justify-end bg-[#10233A]/25" onClick={() => setNotificationsOpen(false)}>
+      <div role="dialog" aria-modal="true" aria-label="Notifications" className="relative h-full w-full max-w-[1400px] overflow-y-auto bg-white shadow-xl" onClick={event => event.stopPropagation()}>
+        <button type="button" aria-label="Close notifications" onClick={() => setNotificationsOpen(false)} className="absolute right-4 top-3 z-50 rounded-md p-2 text-[#7288A3] hover:bg-[#E5EDF9]"><X size={20} /></button>
+        <OrganizationRequiredActionsView organization={selectedCompany ?? undefined} session={session} initialTab="notifications" onOpenModule={async (organizationId, menu) => {
+          const company = visibleNotifications.organizations.find(candidate => candidate.id === organizationId);
+          const current = parseSession(JSON.stringify(session));
+          if (!company || !current || !current.access.companies.view || !canAccessAssignedOrganization(company, current)) throw new Error('This organization is no longer accessible.');
+          openCompany(company, menu);
+          setNotificationsOpen(false);
+        }} onOpenRelatedObject={async object => { await openRelatedObject(object, true); setNotificationsOpen(false); }} />
+      </div>
+    </div>}
     {companyContent}
     <div style={{ display: selectedCompany ? 'none' : undefined }} className="flex h-screen overflow-hidden">
       <div className="flex-shrink-0 overflow-y-auto">
         <Sidebar
-          notificationCount={attentionNotifications.length}
+          notificationCount={notificationCounts.reminders}
           isExpanded={isMenuExpanded}
           onToggle={() => setIsMenuExpanded(!isMenuExpanded)}
           activeMenu={displayedMenu}

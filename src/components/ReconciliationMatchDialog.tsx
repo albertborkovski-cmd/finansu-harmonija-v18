@@ -10,6 +10,9 @@ import { ReconciliationDialog } from './ReconciliationDialogs';
 import { buildManualReconciliation, getManualReconciliationCandidates, getManualReconciliationOptions, parseManualReconciliationAmount } from '../lib/manualReconciliation';
 import type { ReconciliationItem, ReconciliationProposal } from '../lib/reconciliation';
 
+import { exchangeRate } from '../lib/reconciliationExchangeRate';
+import { paymentPurpose } from '../lib/reconciliationPaymentPurpose';
+
 const formatAmount = (minor: number) => (minor / 100).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const amountInputValue = (minor: number) => {
   const digits = String(minor).padStart(3, '0');
@@ -45,6 +48,8 @@ export default function ReconciliationMatchDialog({ item, items, onConfirm, onCl
     { key: 'client', label: 'Counterparty', width: 180, visible: true },
     { key: 'type', label: 'Type', width: 140, visible: true },
     { key: 'date', label: 'Date', width: 125, visible: true },
+    { key: 'exchangeRate', label: 'Exchange rate', width: 210, visible: true },
+    { key: 'paymentPurpose', label: 'Payment purpose', width: 250, visible: true },
     { key: 'amount', label: 'Open amount', width: 145, visible: true },
     { key: 'toMatch', label: 'To match', width: 130, visible: true },
     { key: 'remaining', label: 'Remaining', width: 140, visible: true },
@@ -54,7 +59,7 @@ export default function ReconciliationMatchDialog({ item, items, onConfirm, onCl
     ] : []),
   ]);
   const { startResize } = useColumnResize(columns, setColumns, 'reconciliation-select-records');
-  const orderedColumns = ['document', 'client', 'type', 'date', 'amount', 'toMatch', 'remaining', ...(showAllOpenRecords ? ['currency', 'availability'] : [])].map(key => columns.find(column => column.key === key)!);
+  const orderedColumns = ['document', 'client', 'type', 'date', 'exchangeRate', 'paymentPurpose', 'amount', 'toMatch', 'remaining', ...(showAllOpenRecords ? ['currency', 'availability'] : [])].map(key => columns.find(column => column.key === key)!);
   const source = items.find(candidate => candidate.id === item.id) ?? item;
   const options = useMemo(() => showAllOpenRecords ? getManualReconciliationOptions(items, item.id) : getManualReconciliationCandidates(items, item.id).map(item => ({ item, reason: '' })), [items, item.id, showAllOpenRecords]);
   const candidates = useMemo(() => options.map(option => option.item), [options]);
@@ -90,9 +95,11 @@ export default function ReconciliationMatchDialog({ item, items, onConfirm, onCl
       case 'document': return candidate.documentNumber;
       case 'client': return candidate.counterpartyName || '—';
       case 'type': return itemType(candidate);
+      case 'exchangeRate': return exchangeRate(candidate);
       case 'currency': return candidate.currency;
       case 'availability': return unavailable.get(candidate.id) || 'Available';
       case 'date': return candidate.documentDate;
+      case 'paymentPurpose': return paymentPurpose(candidate);
       case 'amount': return formatAmount(candidate.remainingMinor);
       case 'toMatch': {
         if (selectedIds.includes(candidate.id) && Object.hasOwn(amountInputs, candidate.id)) {
@@ -107,7 +114,7 @@ export default function ReconciliationMatchDialog({ item, items, onConfirm, onCl
   };
   const filterColumns = [
     { key: 'document', label: 'Document No.' }, { key: 'client', label: 'Counterparty' }, { key: 'type', label: 'Type' },
-    { key: 'date', label: 'Date' }, { key: 'amount', label: 'Open amount' },
+    { key: 'exchangeRate', label: 'Exchange rate' }, { key: 'paymentPurpose', label: 'Payment purpose' }, { key: 'date', label: 'Date' }, { key: 'amount', label: 'Open amount' },
     { key: 'toMatch', label: 'To match' }, { key: 'remaining', label: 'Remaining' },
     ...(showAllOpenRecords ? [{ key: 'currency', label: 'Currency' }, { key: 'availability', label: 'Availability' }] : []),
   ].map(column => ({ ...column, options: [...new Set(candidates.map(candidate => filterValue(candidate, column.key)))].sort() }));
@@ -116,7 +123,7 @@ export default function ReconciliationMatchDialog({ item, items, onConfirm, onCl
     if (!matchesSourceType(candidate, sourceType)) return false;
     if (!activeFilters.every(key => !filterValues[key]?.length || filterValues[key].includes(filterValue(candidate, key)))) return false;
     const allocation = allocationMap.get(candidate.id)?.amountMinor ?? 0;
-    const text = [candidate.documentNumber, candidate.counterpartyName, candidate.currency, unavailable.get(candidate.id) || 'Available', itemType(candidate), candidate.documentDate, formatAmount(candidate.remainingMinor), formatAmount(allocation), formatAmount(candidate.remainingMinor - allocation)].join(' ').toLocaleLowerCase();
+    const text = [exchangeRate(candidate), paymentPurpose(candidate), candidate.documentNumber, candidate.counterpartyName, candidate.currency, unavailable.get(candidate.id) || 'Available', itemType(candidate), candidate.documentDate, formatAmount(candidate.remainingMinor), formatAmount(allocation), formatAmount(candidate.remainingMinor - allocation)].join(' ').toLocaleLowerCase();
     return terms.every(term => text.includes(term) || text.replace(/,/g, '').includes(term.replace(/,/g, '')));
   });
   const remaining = result.preview?.sourceRemainingMinor ?? source.remainingMinor;
@@ -190,7 +197,7 @@ export default function ReconciliationMatchDialog({ item, items, onConfirm, onCl
               <td className="rounded-l-lg pl-2 align-middle"><input type="checkbox" aria-label={`Match ${candidate.documentNumber}`} checked={checked} disabled={disabled} onChange={() => toggle(candidate.id)} className="block h-[18px] w-[18px] cursor-pointer rounded border border-[#A1B6C6] accent-[#007EA7] disabled:cursor-not-allowed" /></td>
               <td className="truncate pr-3" title={candidate.documentNumber}><button type="button" aria-pressed={checked} disabled={disabled} onClick={() => toggle(candidate.id)} className="block max-w-full truncate text-left">{candidate.documentNumber}</button></td>
               <td className="truncate pr-3" title={candidate.counterpartyName}>{candidate.counterpartyName || '—'}</td>
-              <td className="truncate pr-3" title={itemType(candidate)}>{itemType(candidate)}</td><td className="pr-3">{candidate.documentDate}</td>
+              <td className="truncate pr-3" title={itemType(candidate)}>{itemType(candidate)}</td><td className="pr-3">{candidate.documentDate}</td><td className="truncate pr-3" title={exchangeRate(candidate)}>{exchangeRate(candidate)}</td><td className="truncate pr-3" title={paymentPurpose(candidate)}>{paymentPurpose(candidate)}</td>
               <td className="pr-3 text-left tabular-nums">{formatAmount(candidate.remainingMinor)}</td>
               <td className="pr-3"><input type="text" inputMode="decimal" autoComplete="off" aria-label={`Amount to match ${candidate.documentNumber}`} aria-invalid={invalid} title={`Enter an amount up to ${formatAmount(Math.min(source.remainingMinor, candidate.remainingMinor))} ${source.currency}`} disabled={!checked || busy} value={checked && Object.hasOwn(amountInputs, candidate.id) ? amountInputs[candidate.id] : amountInputValue(amount)} onFocus={event => event.currentTarget.select()} onChange={event => setAmountInputs(previous => ({ ...previous, [candidate.id]: event.target.value }))} onBlur={() => normalizeAmount(candidate.id)} className={`h-7 w-full min-w-0 rounded border bg-white px-2 text-left text-[12px] leading-[18px] tabular-nums outline-none focus:border-[#007EA7] focus:ring-1 focus:ring-[#007EA7]/20 disabled:border-transparent disabled:bg-transparent disabled:text-[#7288A3] ${invalid ? 'border-red-500 text-red-700' : 'border-[#D3E1EC] text-[#007EA7]'}`} /></td>
               <td className="rounded-r-lg pr-3 text-left tabular-nums">{result.preview ? formatAmount(candidate.remainingMinor - amount) : '—'}</td>

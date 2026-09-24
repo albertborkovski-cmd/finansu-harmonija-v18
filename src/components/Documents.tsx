@@ -2051,7 +2051,7 @@ export default function Documents({
   }
 
   function toggleAll() {
-    const pageIds = pageDocs.map((d) => d.id);
+    const pageIds = sortedDocs.map((d) => d.id);
     const allSelected = pageIds.every((id) => selectedIds.has(id));
     const next = new Set(selectedIds);
     if (allSelected) pageIds.forEach((id) => next.delete(id));
@@ -2254,7 +2254,6 @@ export default function Documents({
                 onChange={(value) => {
                   setSelectedPeriod(value || null);
                   setCurrentPage(1);
-                  setSelectedIds(new Set());
                 }}
               />
             </div>
@@ -2280,7 +2279,6 @@ export default function Documents({
                 onChange={(value) => {
                   setSelectedCounterparty(value || null);
                   setCurrentPage(1);
-                  setSelectedIds(new Set());
                 }}
               />
             </div>
@@ -2429,7 +2427,6 @@ export default function Documents({
                 onChange={(value) => {
                   setSelectedStatus(value || null);
                   setCurrentPage(1);
-                  setSelectedIds(new Set());
                 }}
               />
             </div>
@@ -2477,7 +2474,6 @@ export default function Documents({
                       [key]: value,
                     }));
                     setCurrentPage(1);
-                    setSelectedIds(new Set());
                   }}
                 />
               </div>
@@ -2580,7 +2576,6 @@ export default function Documents({
               setOpenDynamicMenu(null);
               setShowRangeAmountMenu(false);
               setCurrentPage(1);
-              setSelectedIds(new Set());
             }}
             className="flex h-7 flex-shrink-0 items-center gap-1 whitespace-nowrap rounded bg-[#E5EDF9] px-2 py-[5px] font-montserrat text-[12px] font-medium leading-[18px] text-[#7288A3] hover:bg-[#DCE7F6]"
           >
@@ -2633,8 +2628,8 @@ export default function Documents({
                 <input
                   type="checkbox"
                   checked={
-                    pageDocs.length > 0 &&
-                    pageDocs.every((d) => selectedIds.has(d.id))
+                    sortedDocs.length > 0 &&
+                    sortedDocs.every((d) => selectedIds.has(d.id))
                   }
                   onChange={toggleAll}
                   className="w-[18px] h-[18px] rounded border border-[#A1B6C6] accent-[#007EA7] cursor-pointer"

@@ -1,3 +1,4 @@
+import { toggleFilteredSelection } from '../../lib/tableSelection';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
@@ -849,7 +850,7 @@ export default function ModelsView() {
             <div ref={tableScrollRef} className="overflow-x-auto scrollbar-hide">
               <div style={{ minWidth: versionTableMinWidth }}>
                 <div className="system-table-header-row mb-4 grid h-5 items-center font-montserrat text-[12px] font-medium leading-[18px] text-[#10233A]" style={{ gridTemplateColumns: versionGrid }}>
-                  {visibleVersionColumns.map((column, index) => <div data-table-header-select={column.key === 'version' ? "true" : undefined} key={column.key} className={`flex h-5 min-w-0 items-center gap-[6px] px-3 ${index > 0 ? 'border-l border-[#D3E1EC]' : ''}`}>{column.key === 'version' && <Checkbox checked={allVersionsSelected} label="Select all model versions" onChange={() => setSelectedVersions(allVersionsSelected ? new Set() : new Set(visibleVersions.map((version) => version.version)))} />}<span className="truncate">{column.label}</span></div>)}<div />
+                  {visibleVersionColumns.map((column, index) => <div data-table-header-select={column.key === 'version' ? "true" : undefined} key={column.key} className={`flex h-5 min-w-0 items-center gap-[6px] px-3 ${index > 0 ? 'border-l border-[#D3E1EC]' : ''}`}>{column.key === 'version' && <Checkbox checked={allVersionsSelected} label="Select all model versions" onChange={() => setSelectedVersions(current => toggleFilteredSelection(current, visibleVersions.map((version) => version.version)))} />}<span className="truncate">{column.label}</span></div>)}<div />
                 </div>
                 {visibleVersions.slice(0, currentPage * TABLE_BATCH_SIZE).map((version, index) => (
                   <div key={version.version} className={`grid h-9 items-center rounded-lg font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} hover:bg-[#E7F4F9]`} style={{ gridTemplateColumns: versionGrid }}>
@@ -910,7 +911,7 @@ export default function ModelsView() {
                       <Checkbox
                         checked={allVisibleSelected}
                         label="Select all models"
-                        onChange={() => setSelected(allVisibleSelected ? new Set() : new Set(filteredModels.map((model) => model.id)))}
+                        onChange={() => setSelected(current => toggleFilteredSelection(current, filteredModels.map((model) => model.id)))}
                       />
                     )}
                     <span className="truncate">{column.label}</span>

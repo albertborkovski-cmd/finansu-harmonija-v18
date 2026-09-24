@@ -1,3 +1,4 @@
+import { toggleFilteredSelection } from '../lib/tableSelection';
 import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Trash2, UsersRound, X } from 'lucide-react';
@@ -264,7 +265,7 @@ function RoleDetails({ role, onBack }: { role: RoleRecord; onBack: () => void })
               <div data-table-header-select="true" className="flex w-[42px] flex-shrink-0 items-center px-3">
                 <RoleCheckbox
                   checked={allSelected}
-                  onChange={() => setSelected(allSelected ? new Set() : new Set(visibleDetails.map(item => item.id)))}
+                  onChange={() => setSelected(current => toggleFilteredSelection(current, visibleDetails.map(item => item.id)))}
                   label="Select all group permissions"
                 />
               </div>
@@ -329,7 +330,7 @@ function RoleDetails({ role, onBack }: { role: RoleRecord; onBack: () => void })
           </div> : activeTab === 'users' ? <div style={{ minWidth: visibleUserColumns.reduce((sum, column) => sum + column.width, 0) + 88 }}>
             <div className="flex h-11 items-center border-b border-[#E5EDF9]">
               <div data-table-header-select="true" className="flex w-[42px] flex-shrink-0 items-center px-3">
-                <RoleCheckbox checked={allSelected} onChange={() => setSelected(allSelected ? new Set() : new Set(assignedUsers.map(user => user.id)))} label="Select all assigned users" />
+                <RoleCheckbox checked={allSelected} onChange={() => setSelected(current => toggleFilteredSelection(current, assignedUsers.map(user => user.id)))} label="Select all assigned users" />
               </div>
               {visibleUserColumns.map((column, index) => (
                 <div key={column.key} className="flex h-11 flex-shrink-0 items-center px-3" style={{ width: column.width }}>

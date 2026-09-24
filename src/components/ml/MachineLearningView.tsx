@@ -1,3 +1,4 @@
+import { toggleFilteredSelection } from '../../lib/tableSelection';
 import { useMemo, useRef, useState } from 'react';
 import { RefreshCw, Users, ArrowLeft, BrainCircuit } from 'lucide-react';
 import { useColumnResize, ResizeHandle } from '../useColumnResize';
@@ -133,7 +134,7 @@ function GroupManagementView({ documentSet, onBack, onOpenDocumentSet }: { docum
             <div className="flex h-5 items-center px-3 font-montserrat text-[12px] font-medium leading-[18px] text-[#7288A3]">
               {visibleGroupColumns.map((column) => (
                 <div key={column.key} className={`flex flex-shrink-0 items-center gap-3 ${column.key === 'name' ? 'text-[#10233A]' : ''}`} style={{ width: column.width }}>
-                  {column.key === 'name' && <Checkbox checked={selectedMembers.size === members.length && members.length > 0} onChange={() => setSelectedMembers(selectedMembers.size === members.length ? new Set() : new Set(members.map((member) => member.id)))} />}
+                  {column.key === 'name' && <Checkbox checked={members.length > 0 && members.every(member => selectedMembers.has(member.id))} onChange={() => setSelectedMembers(current => toggleFilteredSelection(current, members.map((member) => member.id)))} />}
                   <span>{column.label}</span>
                   <ColumnSortButton columnLabel={column.label} direction={groupDirectionFor(column.key)} onDirectionChange={direction => { changeGroupSort(column.key, direction); setGroupPage(1); }} />
                 </div>
@@ -223,11 +224,7 @@ export default function MachineLearningView({
   };
 
   const toggleAll = () => {
-    if (selectedRows.size === documentSets.length) {
-      setSelectedRows(new Set());
-    } else {
-      setSelectedRows(new Set(documentSets.map(s => s.id)));
-    }
+    setSelectedRows(current => toggleFilteredSelection(current, sortedSets.map(row => row.id)));
   };
 
   if (managedSet) {
@@ -404,7 +401,7 @@ export default function MachineLearningView({
                       <div className="flex flex-row items-center gap-[6px] flex-1 min-w-0">
                         {col.key === 'name' && (
                           <>
-                            <Checkbox checked={selectedRows.size === documentSets.length && documentSets.length > 0} onChange={toggleAll} />
+                            <Checkbox checked={sortedSets.length > 0 && sortedSets.every(row => selectedRows.has(row.id))} onChange={toggleAll} />
                             <div className="flex flex-row items-center gap-[6px]">
                               <span className="font-montserrat font-medium text-[12px] leading-[18px] text-[#10233A] truncate">{col.label}</span>
                               <ColumnSortButton columnLabel={col.label} direction={directionFor(col.key)} onDirectionChange={direction => { changeSort(col.key, direction); setCurrentPage(1); }} />

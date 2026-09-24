@@ -11,6 +11,7 @@ import { HeaderBackButton, SystemBreadcrumb } from './SystemNavigation';
 import CompanyClientInformation, { ClientField } from './CompanyClientInformation';
 import { loadOrganizationReferenceValues } from './OrganizationReferenceValuesView';
 import { loadCompanyLogo, saveCompanyLogo } from '../lib/companyBranding';
+import GeneralLedgerView from './GeneralLedgerView';
 
 const SECTIONS = [
   'General & status',
@@ -78,6 +79,7 @@ export default function ManageCompanyView({
   onCompanyUpdated?: (company: Company) => void;
 }) {
   const [section, setSection] = useState<Section>('General & status');
+  const [ledgerTemplate, setLedgerTemplate] = useState<string | null>(null);
   const [pendingStatus, setPendingStatus] = useState<CompanyStatus | null>(null);
   const [statusReason, setStatusReason] = useState('');
   const [statusError, setStatusError] = useState('');
@@ -133,7 +135,9 @@ export default function ManageCompanyView({
   };
 
   return (
-    <div className="flex min-h-full flex-col gap-8 bg-white px-4 py-14 sm:px-8 lg:px-[72px]">
+    <>
+    {ledgerTemplate && <GeneralLedgerView key={`${company.id}:${ledgerTemplate}`} companyId={company.id} companyName={company.name} assignedTemplateName={ledgerTemplate} onBack={() => setLedgerTemplate(null)} />}
+    <div style={{ display: ledgerTemplate ? 'none' : undefined }} className="flex min-h-full flex-col gap-8 bg-white px-4 py-14 sm:px-8 lg:px-[72px]">
       <PageHeader
         title="Manage company"
       />
@@ -289,7 +293,7 @@ export default function ManageCompanyView({
 
       {section === 'Setup & integration' && <OrganizationSetupIntegration key={company.id} company={company} embedded />}
 
-      {section === 'Accounting setup' && <CompanyClientInformation key={company.id} company={company} activeTab="Client information" organizationMode additionalSettingsOnly onCompanyUpdated={onCompanyUpdated} />}
+      {section === 'Accounting setup' && <CompanyClientInformation key={company.id} company={company} activeTab="Client information" organizationMode additionalSettingsOnly onCompanyUpdated={onCompanyUpdated} onEditGeneralLedger={setLedgerTemplate} />}
 
       {section === 'Bank setup' && <CompanyClientInformation key={`banking-${company.id}`} company={company} activeTab="Client information" organizationMode bankInformationOnly onCompanyUpdated={onCompanyUpdated} />}
 
@@ -342,5 +346,6 @@ export default function ManageCompanyView({
         </div>
       )}
     </div>
+    </>
   );
 }

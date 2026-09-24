@@ -1,3 +1,4 @@
+import { toggleFilteredSelection } from '../lib/tableSelection';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { usePersistentState } from '../hooks/usePersistentState';
 import { MoreVertical } from 'lucide-react';
@@ -102,7 +103,7 @@ export default function CompanyDebtsView({ companyName = "", initialRecordId, on
   );
 
   const toggleAll = () => {
-    setSelectedRows(current => current.size === sortedRows.length ? new Set() : new Set(sortedRows.map(row => row.id)));
+    setSelectedRows(current => toggleFilteredSelection(current, sortedRows.map(row => row.id)));
   };
 
   const toggleRow = (id: string) => {
@@ -193,7 +194,7 @@ export default function CompanyDebtsView({ companyName = "", initialRecordId, on
         <div className="min-w-max">
           <div className="mb-1 flex h-8 items-center border-b border-[#E5EDF9] pl-3 pr-2">
             <div data-table-header-select="true" className="flex w-[30px] flex-shrink-0 items-center">
-              <input type="checkbox" aria-label="Select all debts" checked={sortedRows.length > 0 && selectedRows.size === sortedRows.length} onChange={toggleAll} className="h-[18px] w-[18px] cursor-pointer rounded border border-[#A1B6C6] accent-[#007EA7]" />
+              <input type="checkbox" aria-label="Select all debts" checked={sortedRows.length > 0 && sortedRows.every(row => selectedRows.has(row.id))} onChange={toggleAll} className="h-[18px] w-[18px] cursor-pointer rounded border border-[#A1B6C6] accent-[#007EA7]" />
             </div>
             {visibleColumns.map(column => {
               const columnIndex = columns.findIndex(item => item.key === column.key);
