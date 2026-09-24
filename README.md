@@ -1,6 +1,6 @@
-# Finansų harmonija V17
+# Finansų harmonija V18
 
-Užfiksuota V17 testavimo versija (žyma `v17`). Tolesni pakeitimai atliekami tik V18 kataloge. V17 ir ankstesnės versijos nebekeičiamos.
+Aktyvi V18 versija iš užfiksuotos V17 (`33258134b61c6b780851c080f12724774a1935b7`, žyma `v17`). Tolesni pakeitimai atliekami tik V18 kataloge. V17 ir ankstesnės versijos nebekeičiamos.
 
 Testavimas: https://albertborkovski-cmd.github.io/finansu-harmonija-v17/
 
@@ -15,7 +15,7 @@ npm ci
 npm run dev
 ```
 
-Vietinis V17 adresas: http://127.0.0.1:5198/
+Vietinis V18 adresas: http://127.0.0.1:5199/
 
 V13 testavimo nuoroda: https://albertborkovski-cmd.github.io/finansu-harmonija-v13/
 

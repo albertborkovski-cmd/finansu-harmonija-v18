@@ -1,7 +1,9 @@
-# Frozen V17 release
+# Active V18 workspace
 
-V17 is frozen for testing (tag v17). Do not make further application changes here.
-All future improvements belong in ../V18 only. Read ../V18/AGENTS.md before editing.
+V18 is active. All future application improvements belong here only.
+V18 local URL: http://127.0.0.1:5199/.
+V17 is frozen at commit 33258134b61c6b780851c080f12724774a1935b7 (tag v17).
+Never modify V17 or earlier repositories or add them as V18 remotes.
 V17 testing: https://albertborkovski-cmd.github.io/finansu-harmonija-v17/.
 Table scrolling rule: data rows scroll inside a bounded viewport and column headers stay visible. Use the shared HorizontalTableScrollbar / useFrozenTableHeaders contract for system tables.
 Table selection rule: select-all affects every eligible filtered record, not only loaded rows. Store explicit stable record IDs. Search, filtering and clearing filters must preserve selection. Deselect-all removes only filtered IDs; use src/lib/tableSelection.ts for this behavior.
