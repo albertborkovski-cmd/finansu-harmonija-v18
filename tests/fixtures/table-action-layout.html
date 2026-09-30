@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Table actions layout regression</title>
+    <link rel="stylesheet" href="/src/index.css" />
+    <style>
+      body { margin: 24px; background: #f5f8fb; color: #10233a; }
+      h1 { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+      p { max-width: 800px; margin-bottom: 16px; }
+      #controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+      #controls button { padding: 6px 10px; border: 1px solid #7892a6; border-radius: 5px; background: white; }
+      #layout-result { display: block; white-space: pre-wrap; margin-bottom: 16px; }
+      #layout-result[data-status="pass"] { color: #146b43; }
+      #layout-result[data-status="fail"] { color: #a12222; }
+      #cases { display: grid; gap: 20px; }
+      .fixture-case { padding: 12px; background: white; width: fit-content; max-width: 100%; border: 1px solid #c2d3e0; }
+      .fixture-case h2 { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+      .fixture-viewport { max-width: 100%; overflow: auto; outline: 1px solid #7892a6; }
+      .fixture-row { height: 44px; align-items: center; box-sizing: border-box; }
+      .fixture-header { background: #e5edf9; font-weight: 600; }
+      .fixture-data { background: #f8fdff; }
+      .fixture-cell { box-sizing: border-box; padding: 8px; border-right: 1px solid #b5c9d7; white-space: nowrap; overflow: hidden; }
+      .fixture-actions { display: flex; align-items: center; width: 96px; height: 100%; padding: 8px; box-sizing: border-box; gap: 4px; background: #ddf5e7; }
+      .fixture-actions button { width: 28px; height: 28px; border: 1px solid #368864; border-radius: 4px; background: white; font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <h1>Final-column actions: live layout regression</h1>
+    <p>This isolated fixture loads the real V18 stylesheet. Green action cells must sit at the viewport right edge when data is narrow, and follow all data without overlays when data overflows.</p>
+    <div id="controls">
+      <button id="hide-column">Hide last data column</button>
+      <button id="add-column">Add data column</button>
+      <button id="resize-column">Resize first data column</button>
+      <button id="resize-viewport">Toggle viewport width</button>
+      <button id="scroll-end">Scroll all to end</button>
+      <button id="reset">Reset</button>
+      <button id="check-layout">Check layout</button>
+    </div>
+    <output id="layout-result" aria-live="polite">Checking layout…</output>
+    <main id="cases"></main>
+    <script type="module">
+      const actionWidth = 96;
+      const specs = [
+        { id: 'flex-narrow', title: 'Flex: one narrow column', layout: 'flex', widths: [180], actionClass: 'system-table-row-actions' },
+        { id: 'flex-wide', title: 'Flex: overflowing columns (legacy explicit class)', layout: 'flex', widths: [280, 260, 300, 240], actionClass: 'table-row-actions' },
+        { id: 'grid-narrow', title: 'Grid: one narrow column', layout: 'grid', widths: [180], actionClass: 'system-table-row-actions' },
+        { id: 'grid-wide', title: 'Grid: overflowing columns', layout: 'grid', widths: [280, 260, 300, 240], actionClass: 'system-table-row-actions' },
+      ];
+      let viewportWidth = 640;
+      let cases = [];
+
+      function createRow(spec, kind) {
+        const row = document.createElement('div');
+        row.id = `${spec.id}-${kind}`;
+        // Flex relies on the production :has selector; grid uses the shared row surface.
+        row.className = `${spec.layout} ${spec.layout === 'grid' ? 'system-table-row' : ''} fixture-row fixture-${kind === 'header' ? 'header' : 'data'}`;
+        row.style.display = spec.layout;
+        if (spec.layout === 'grid') {
+          row.style.gridTemplateColumns = `${spec.widths.map(width => `${width}px`).join(' ')} minmax(${actionWidth}px, 1fr)`;
+        }
+        spec.widths.forEach((width, index) => {
+          const cell = document.createElement('div');
+          cell.className = 'fixture-cell';
+          cell.dataset.columnIndex = index;
+          cell.style.width = `${width}px`;
+          if (spec.layout === 'flex') cell.style.flex = `0 0 ${width}px`;
+          cell.textContent = `${kind === 'header' ? 'Column' : 'Value'} ${index + 1} (${width}px)`;
+          row.append(cell);
+        });
+        const actions = document.createElement('div');
+        actions.id = `${spec.id}-${kind}-actions`;
+        actions.className = `${spec.actionClass} fixture-actions`;
+        actions.setAttribute('aria-label', `${spec.title} ${kind} actions`);
+        if (kind === 'header') {
+          actions.textContent = 'Actions';
+        } else {
+          for (const [label, text] of [['Edit', '✎'], ['Delete', '×']]) {
+            const button = document.createElement('button');
+            button.setAttribute('aria-label', label);
+            button.textContent = text;
+            actions.append(button);
+          }
+        }
+        row.append(actions);
+        return row;
+      }
+
+      function render() {
+        const container = document.getElementById('cases');
+        container.replaceChildren();
+        cases.forEach(spec => {
+          const section = document.createElement('section');
+          section.className = 'fixture-case';
+          const title = document.createElement('h2');
+          title.textContent = spec.title;
+          const viewport = document.createElement('div');
+          viewport.id = `${spec.id}-viewport`;
+          viewport.className = 'fixture-viewport';
+          viewport.style.width = `${viewportWidth}px`;
+          viewport.append(createRow(spec, 'header'), createRow(spec, 'row'));
+          section.append(title, viewport);
+          container.append(section);
+        });
+        requestAnimationFrame(checkLayout);
+      }
+
+      function measure(spec) {
+        const viewport = document.getElementById(`${spec.id}-viewport`);
+        const row = document.getElementById(`${spec.id}-row`);
+        const header = document.getElementById(`${spec.id}-header`);
+        const actions = document.getElementById(`${spec.id}-row-actions`);
+        const headerActions = document.getElementById(`${spec.id}-header-actions`);
+        const lastCell = actions.previousElementSibling;
+        const box = element => element.getBoundingClientRect();
+        const dataWidth = spec.widths.reduce((sum, width) => sum + width, 0);
+        return {
+          id: spec.id,
+          viewportWidth: viewport.clientWidth,
+          contentWidth: viewport.scrollWidth,
+          scrollLeft: viewport.scrollLeft,
+          dataWidth,
+          rowLeft: box(row).left,
+          rowRight: box(row).right,
+          rowWidth: box(row).width,
+          headerWidth: box(header).width,
+          actionsLeft: box(actions).left,
+          actionsRight: box(actions).right,
+          actionsWidth: box(actions).width,
+          headerActionsLeft: box(headerActions).left,
+          headerActionsRight: box(headerActions).right,
+          lastCellRight: box(lastCell).right,
+          position: getComputedStyle(actions).position,
+          finalChild: actions === row.lastElementChild,
+        };
+      }
+
+      function checkLayout() {
+        const failures = [];
+        const measurements = cases.map(measure);
+        const near = (actual, expected) => Math.abs(actual - expected) <= 1;
+        measurements.forEach(value => {
+          const expect = (condition, message) => { if (!condition) failures.push(`${value.id}: ${message}`); };
+          const expectedWidth = Math.max(value.viewportWidth, value.dataWidth + actionWidth);
+          expect(value.finalChild, 'actions are the final child');
+          expect(value.position === 'static', 'actions remain in normal flow');
+          expect(near(value.actionsWidth, actionWidth), 'actions retain their fixed width');
+          expect(near(value.rowWidth, expectedWidth), 'row covers viewport and complete overflowing content');
+          expect(near(value.headerWidth, value.rowWidth), 'header and row have matching widths');
+          expect(near(value.headerActionsLeft, value.actionsLeft) && near(value.headerActionsRight, value.actionsRight), 'header and row action bounds align');
+          expect(value.actionsLeft >= value.lastCellRight - 1, 'actions do not overlap the last data column');
+          expect(near(value.actionsRight, value.rowRight), 'actions align with the final right edge');
+          if (value.dataWidth + actionWidth > value.viewportWidth) {
+            expect(near(value.actionsLeft, value.lastCellRight), 'overflowing actions directly follow the last data column');
+          }
+        });
+        const result = document.getElementById('layout-result');
+        result.dataset.status = failures.length ? 'fail' : 'pass';
+        result.textContent = failures.length
+          ? `FAIL (${failures.length})\n${failures.join('\n')}`
+          : `PASS — ${measurements.length} cases: final actions, right alignment, overflow, matching headers, fixed action widths.`;
+        window.tableActionFixture.lastResult = { passed: failures.length === 0, failures, measurements };
+        return window.tableActionFixture.lastResult;
+      }
+
+      const reset = () => {
+        viewportWidth = 640;
+        cases = specs.map(spec => ({ ...spec, widths: [...spec.widths] }));
+        render();
+      };
+      document.getElementById('hide-column').addEventListener('click', () => {
+        cases.forEach(spec => { if (spec.widths.length > 1) spec.widths.pop(); });
+        render();
+      });
+      document.getElementById('add-column').addEventListener('click', () => {
+        cases.forEach(spec => spec.widths.push(220));
+        render();
+      });
+      document.getElementById('resize-column').addEventListener('click', () => {
+        cases.forEach(spec => { spec.widths[0] = spec.widths[0] < 480 ? 480 : 120; });
+        render();
+      });
+      document.getElementById('resize-viewport').addEventListener('click', () => {
+        viewportWidth = viewportWidth === 640 ? 320 : 640;
+        render();
+      });
+      document.getElementById('scroll-end').addEventListener('click', () => {
+        cases.forEach(spec => {
+          const viewport = document.getElementById(`${spec.id}-viewport`);
+          viewport.scrollLeft = viewport.scrollWidth;
+        });
+        requestAnimationFrame(checkLayout);
+      });
+      document.getElementById('reset').addEventListener('click', reset);
+      document.getElementById('check-layout').addEventListener('click', checkLayout);
+      window.addEventListener('resize', () => requestAnimationFrame(checkLayout));
+      window.tableActionFixture = { checkLayout, reset, measureAll: () => cases.map(measure), lastResult: null };
+      reset();
+    </script>
+  </body>
+</html>

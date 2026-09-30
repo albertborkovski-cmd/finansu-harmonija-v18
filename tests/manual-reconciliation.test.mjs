@@ -13,7 +13,7 @@ function moduleUrl(path) {
 
 const engineUrl = moduleUrl('../src/lib/reconciliation.ts');
 const { getManualReconciliationCandidates, getManualReconciliationOptions, buildManualReconciliation, parseManualReconciliationAmount } = await import(moduleUrl('../src/lib/manualReconciliation.ts'));
-const { applyReconciliation, reverseReconciliation } = await import(engineUrl);
+const { applyReconciliation, reverseReconciliation, parseReconciliationState, getReconciliationEntrySide, suggestReconciliation } = await import(engineUrl);
 const organizationId = 'organization-1';
 const batch = { id: 'manual-batch-1', at: '2026-09-14T10:00:00.000Z', actor: 'Accountant' };
 
@@ -40,24 +40,21 @@ function funding(id = 'payment-1', patch = {}) {
   return invoice(id, { kind: 'Payment', documentNumber: `PAY-${id}`, dueDate: '', ...patch });
 }
 
-test('edit browser shows all open counterparties and types, but hides closed and other-organization records', () => {
+test('edit browser permits other counterparties but hides same-type, closed and other-organization records', () => {
   const items = [invoice(), funding(), funding('other-party', { counterpartyId: 'other', counterpartyName: 'Other party' }), invoice('same-type'), funding('closed', { remainingMinor: 0 }), funding('foreign', { organizationId: 'foreign' })];
   const before = JSON.stringify(items);
   const rows = getManualReconciliationOptions(items, 'invoice-1');
-  assert.deepEqual(new Set(rows.map(row => row.item.id)), new Set(['payment-1', 'other-party', 'same-type']));
+  assert.deepEqual(new Set(rows.map(row => row.item.id)), new Set(['payment-1', 'other-party']));
   assert.equal(rows[0].reason, '');
-  assert.equal(rows.find(row => row.item.id === 'other-party').reason, 'Different counterparty');
-  assert.equal(rows.find(row => row.item.id === 'same-type').reason, 'Requires an opposite document type');
+  assert.equal(rows.find(row => row.item.id === 'other-party').reason, '');
   assert.equal(JSON.stringify(items), before);
-  assert.throws(() => buildManualReconciliation(items, 'invoice-1', ['other-party']));
+  assert.equal(buildManualReconciliation(items, 'invoice-1', ['other-party']).totalMinor, 10000);
 });
 
-test('edit browser explains currency, direction and accounting exclusions without making them selectable', () => {
+test('edit browser hides currency, same GL side and accounting exclusions', () => {
   const items = [invoice(), funding('usd', { currency: 'USD' }), funding('outgoing', { side: 'Payable' }), funding('tax', { counterpartyId: '', counterpartyName: '', payeeName: 'VMI' })];
   const rows = getManualReconciliationOptions(items, 'invoice-1');
-  assert.equal(rows.find(row => row.item.id === 'usd').reason, 'Different currency');
-  assert.equal(rows.find(row => row.item.id === 'outgoing').reason, 'Different receivable / payable side');
-  assert.equal(rows.find(row => row.item.id === 'tax').reason, 'Accounting operation — use GL assignment');
+  assert.deepEqual(rows, []);
   assert.equal(getManualReconciliationCandidates(items, 'invoice-1').length, 0);
 });
 
@@ -84,6 +81,61 @@ function deepFreeze(value) {
   }
   return value;
 }
+
+test('GL entry side follows the counterparty posting of sales, purchases and each funding kind', () => {
+  assert.equal(getReconciliationEntrySide(invoice()), 'Debit');
+  assert.equal(getReconciliationEntrySide(invoice('purchase', { side: 'Payable' })), 'Credit');
+  for (const kind of ['Payment', 'Credit note', 'Advance', 'Deposit']) {
+    assert.equal(getReconciliationEntrySide(funding('incoming', { kind })), 'Credit');
+    assert.equal(getReconciliationEntrySide(funding('outgoing', { kind, side: 'Payable' })), 'Debit');
+  }
+});
+
+test('every source kind exposes only opposite GL entries, with no sales-to-sales or purchases-to-purchases', () => {
+  const items = ['Invoice', 'Payment', 'Credit note', 'Advance', 'Deposit'].flatMap(kind => ['Receivable', 'Payable'].map(side => invoice(`${kind}-${side}`, { kind, side })));
+  for (const source of items) {
+    const expected = items.filter(item => item.id !== source.id && getReconciliationEntrySide(item) !== getReconciliationEntrySide(source));
+    const options = getManualReconciliationOptions(items, source.id);
+    assert.deepEqual(new Set(options.map(row => row.item.id)), new Set(expected.map(item => item.id)));
+    assert.ok(options.every(row => row.reason === ''));
+    for (const item of items) {
+      if (expected.includes(item)) {
+        const preview = buildManualReconciliation(items, source.id, [item.id]);
+        const next = applyReconciliation(state(items), preview.proposals, batch);
+        assert.equal(balances(next)[source.id], 0);
+        assert.equal(balances(next)[item.id], 0);
+        assert.deepEqual(parseReconciliationState(JSON.stringify(next), organizationId), next);
+        const restored = reverseReconciliation(next, batch.id, '2026-09-14T11:00:00.000Z');
+        assert.deepEqual(restored.items, items);
+      } else {
+        assert.throws(() => buildManualReconciliation(items, source.id, [item.id]), /eligible/);
+      }
+    }
+  }
+});
+
+test('manual sale-to-purchase offset supports multiple counterparties and editable partial amounts without crossing accounting organizations', () => {
+  const input = deepFreeze(state([
+    invoice('sale', { originalMinor: 30000, remainingMinor: 30000 }),
+    invoice('purchase-a', { side: 'Payable', counterpartyId: 'buyer-a', counterpartyName: 'Buyer A' }),
+    invoice('purchase-b', { side: 'Payable', counterpartyId: 'buyer-b', counterpartyName: 'Buyer B' }),
+    funding('bank', { counterpartyId: 'payer-c', counterpartyName: 'Payer C' }),
+  ]));
+  const preview = buildManualReconciliation(input.items, 'sale', ['purchase-a', 'purchase-b', 'bank'], { 'purchase-a': 4000, 'purchase-b': 6000, bank: 8000 });
+  const next = applyReconciliation(input, preview.proposals, batch);
+  assert.deepEqual(balances(next), { sale: 12000, 'purchase-a': 6000, 'purchase-b': 4000, bank: 2000 });
+  assert.deepEqual(parseReconciliationState(JSON.stringify(next), organizationId), next);
+  assert.deepEqual(reverseReconciliation(next, batch.id, '2026-09-14T11:00:00.000Z').items, input.items);
+  const foreign = invoice('foreign-purchase', { side: 'Payable', organizationId: 'other-ledger' });
+  assert.ok(!getManualReconciliationCandidates([...input.items, foreign], 'sale').some(item => item.id === foreign.id));
+  assert.throws(() => buildManualReconciliation([...input.items, foreign], 'sale', [foreign.id]), /eligible/);
+});
+
+test('broader manual candidates do not create automatic cross-counterparty suggestions', () => {
+  const items = [invoice(), funding('other-party', { counterpartyId: 'other', counterpartyName: 'Other party', reference: 'INV-invoice-1' })];
+  assert.equal(getManualReconciliationCandidates(items, 'invoice-1').length, 1);
+  assert.equal(suggestReconciliation(items).proposals.length, 0);
+});
 
 test('exact manual match supports every funding kind from either source direction', () => {
   for (const kind of ['Payment', 'Credit note', 'Advance', 'Deposit']) {
@@ -114,13 +166,13 @@ test('manual deposits expose only compatible invoices and retain unreleased bala
     invoice('other-side', { side: 'Payable' }),
     funding('bank'), funding('another-deposit', { kind: 'Deposit' }),
   ]));
-  assert.deepEqual(getManualReconciliationCandidates(input.items, 'deposit').map(row => row.id), ['invoice-a', 'invoice-b']);
+  assert.deepEqual(getManualReconciliationCandidates(input.items, 'deposit').map(row => row.id), ['invoice-a', 'invoice-b', 'other-counterparty']);
   const preview = buildManualReconciliation(input.items, 'deposit', ['invoice-a', 'invoice-b'], { 'invoice-a': 2500, 'invoice-b': 4250 });
   assert.equal(preview.totalMinor, 6750);
   assert.equal(preview.sourceRemainingMinor, 18250);
   assert.equal(preview.proposals.length, 1);
   assert.deepEqual(preview.proposals[0].allocations, [{ invoiceId: 'invoice-a', amountMinor: 2500 }, { invoiceId: 'invoice-b', amountMinor: 4250 }]);
-  for (const id of ['other-company', 'other-counterparty', 'other-currency', 'other-side', 'bank', 'another-deposit']) {
+  for (const id of ['other-company', 'other-currency', 'other-side', 'bank', 'another-deposit']) {
     assert.throws(() => buildManualReconciliation(input.items, 'deposit', [id]), /not eligible/);
   }
 });
@@ -229,10 +281,9 @@ test('candidates sort by due date or document date, then document number and ID 
   assert.equal(rows[0].id, 'source');
 });
 
-test('manual matching enforces company, counterparty ID, currency, side and opposite kind', () => {
+test('manual matching enforces accounting company, currency and opposite GL entry side', () => {
   for (const patch of [
     { organizationId: 'organization-2' },
-    { counterpartyId: 'different-counterparty-with-same-name' },
     { currency: 'USD' },
     { side: 'Payable' },
     { kind: 'Invoice' },

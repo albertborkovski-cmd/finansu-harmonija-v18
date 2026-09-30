@@ -25,7 +25,7 @@ function loadModels(): ModelRecord[] {
   try {
     const stored = window.localStorage.getItem(STORAGE_KEY);
     const parsed = stored ? JSON.parse(stored) : null;
-    return Array.isArray(parsed) && parsed.length ? parsed : INITIAL_MODELS;
+    return Array.isArray(parsed) ? parsed : INITIAL_MODELS;
   } catch {
     return INITIAL_MODELS;
   }

@@ -9,6 +9,8 @@ const { outputText } = ts.transpileModule(source, {
 });
 const {
   getNotificationTabCounts,
+  getNotificationStatus,
+  setNotificationStatus,
   getTaskStatus,
   isNotificationRead,
   setNotificationRead,
@@ -19,6 +21,21 @@ const session = { email: 'accountant@example.com', roleNames: ['Accountant'] };
 const otherSession = { email: 'colleague@example.com', roleNames: ['Accountant'] };
 const now = '2026-09-15T09:00:00.000Z';
 const later = '2026-09-15T10:00:00.000Z';
+
+test('resolving and reopening updates status and active count without changing reading history', () => {
+  const original = Object.freeze(record('status-toggle', 'notifications', { readAtByEmail: { [session.email]: now } }));
+  const resolved = setNotificationStatus(original, 'Resolved', later);
+  assert.equal(getNotificationStatus(resolved), 'Resolved');
+  assert.equal(resolved.resolvedAt, later);
+  assert.equal(getNotificationTabCounts([resolved], session).notifications, 0);
+  const reopened = setNotificationStatus(resolved, 'Active');
+  assert.equal(getNotificationStatus(reopened), 'Active');
+  assert.equal(reopened.resolvedAt, undefined);
+  assert.equal(getNotificationTabCounts([reopened], session).notifications, 1);
+  assert.deepEqual(reopened.readAtByEmail, original.readAtByEmail);
+  assert.equal(original.status, 'Active');
+  assert.equal(original.resolvedAt, undefined);
+});
 
 function record(id, category = 'notifications', patch = {}) {
   return {
@@ -69,7 +86,7 @@ test('task lifecycle prefers valid explicit states and resolves legacy records c
   }
 });
 
-test('unread notifications include every type even when inactive, resolved, or non-actionable', () => {
+test('active notifications include every type but exclude inactive and resolved records', () => {
   const rows = [
     record('system', 'notifications', { type: 'System' }),
     record('transaction', 'notifications', { type: 'Transaction' }),
@@ -81,7 +98,7 @@ test('unread notifications include every type even when inactive, resolved, or n
     record('read', 'notifications', { readAtByEmail: { [session.email]: now } }),
     record('task-with-read-receipt', 'reminders', { readAtByEmail: { [session.email]: now } }),
   ];
-  assert.deepEqual(getNotificationTabCounts(rows, session), { notifications: 7, reminders: 1 });
+  assert.deepEqual(getNotificationTabCounts(rows, session), { notifications: 6, reminders: 1 });
 });
 
 test('read receipts are per user and matching ignores email case and surrounding whitespace', () => {
@@ -92,7 +109,7 @@ test('read receipts are per user and matching ignores email case and surrounding
   assert.equal(isNotificationRead(notification, '  Accountant@Example.Com  '), true);
   assert.equal(isNotificationRead(notification, otherSession.email), false);
   assert.equal(isNotificationRead(record('legacy'), session.email), false);
-  assert.deepEqual(getNotificationTabCounts([notification], session), { notifications: 0, reminders: 0 });
+  assert.deepEqual(getNotificationTabCounts([notification], session), { notifications: 1, reminders: 0 });
   assert.deepEqual(getNotificationTabCounts([notification], otherSession), { notifications: 1, reminders: 0 });
 });
 
@@ -135,7 +152,7 @@ test('reading one event does not read later events for the same primary action',
   const changed = record('changed', 'notifications', { actionId: 'task-1' });
   assert.deepEqual(getNotificationTabCounts([first, changed], session), { notifications: 2, reminders: 0 });
   const readFirst = setNotificationRead(first, session.email, true, now);
-  assert.deepEqual(getNotificationTabCounts([readFirst, changed], session), { notifications: 1, reminders: 0 });
+  assert.deepEqual(getNotificationTabCounts([readFirst, changed], session), { notifications: 2, reminders: 0 });
   assert.equal(isNotificationRead(changed, session.email), false);
   assert.deepEqual(getNotificationTabCounts([readFirst, changed], otherSession), { notifications: 2, reminders: 0 });
 });
@@ -167,16 +184,26 @@ test('read and unread updates are immutable and preserve all other users and rec
   assert.deepEqual(updatedFields, originalFields);
 });
 
-test('reading a notification decrements only that user count and marking unread restores it', () => {
+test('reading and marking unread never change the active notification count', () => {
   let notification = record('notification');
   assert.deepEqual(getNotificationTabCounts([notification], session), { notifications: 1, reminders: 0 });
   notification = setNotificationRead(notification, session.email, true, now);
-  assert.deepEqual(getNotificationTabCounts([notification], session), { notifications: 0, reminders: 0 });
+  assert.deepEqual(getNotificationTabCounts([notification], session), { notifications: 1, reminders: 0 });
   assert.deepEqual(getNotificationTabCounts([notification], otherSession), { notifications: 1, reminders: 0 });
   notification = setNotificationRead(notification, otherSession.email, true, later);
   notification = setNotificationRead(notification, session.email, false, later);
   assert.deepEqual(getNotificationTabCounts([notification], session), { notifications: 1, reminders: 0 });
-  assert.deepEqual(getNotificationTabCounts([notification], otherSession), { notifications: 0, reminders: 0 });
+  assert.deepEqual(getNotificationTabCounts([notification], otherSession), { notifications: 1, reminders: 0 });
+});
+
+test('notification counts track Active and Resolved exactly as the status column', () => {
+  const active = record('active', 'notifications', { notificationStatus: 'Active', status: 'Inactive' });
+  const resolved = { ...active, notificationStatus: 'Resolved', status: 'Active' };
+  assert.equal(getNotificationTabCounts([active], session).notifications, 1);
+  assert.equal(getNotificationTabCounts([resolved], session).notifications, 0);
+  assert.equal(getNotificationTabCounts([{ ...active, resolvedAt: now }], session).notifications, 0);
+  const many = Array.from({ length: 9 }, (_, index) => ({ ...active, id: String(index) }));
+  assert.equal(getNotificationTabCounts(many, session).notifications, 9);
 });
 
 test('completing, reopening, and cancelling synchronize lifecycle fields and counts without mutation', () => {

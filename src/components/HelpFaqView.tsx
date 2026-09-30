@@ -5,7 +5,6 @@ import {
   X,
   Copy,
   Eye,
-  Trash2,
 } from "lucide-react";
 import ColumnSettingsPanel, { type ColConfig } from "./ColumnSettingsPanel";
 import HorizontalTableScrollbar from "./HorizontalTableScrollbar";
@@ -20,6 +19,8 @@ import { usePersistentState } from "../hooks/usePersistentState";
 import SystemAddFilters from "./SystemAddFilters";
 import { PageHeader } from "./PageHeader";
 import { SystemBreadcrumb } from "./SystemNavigation";
+import { RowDeleteButton } from './DeleteButtons';
+import { isInactiveRecord } from '../lib/recordLifecycle';
 
 interface ActionRow {
   id: string;
@@ -254,6 +255,7 @@ export default function HelpFaqView() {
               {sortedRows.slice(0, currentPage * TABLE_BATCH_SIZE).map((row, rowIndex) => (
                 <div
                   key={row.id}
+                  data-record-inactive={isInactiveRecord(row) || undefined}
                   className={`flex flex-row items-center pl-3 gap-3 h-9 rounded-lg min-w-fit ${
                     selectedRow?.id === row.id
                       ? "bg-[#E7F4F9]"
@@ -292,22 +294,16 @@ export default function HelpFaqView() {
                     >
                       <Eye size={14} />
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => {
+                    <RowDeleteButton linked inactive={isInactiveRecord(row)} label={`Deactivate ${row.actionType}`}
+                      onDelete={() => {
                         setRows((current) =>
-                          current.filter((item) => item.id !== row.id),
+                          current.map(item => item.id === row.id ? { ...item, status: 'Inactive' } : item),
                         );
                         setSelectedRow((current) =>
                           current?.id === row.id ? null : current,
                         );
                       }}
-                      title="DELETE"
-                      aria-label={`DELETE ${row.actionType}`}
-                      className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] transition-colors hover:border-[#D75B67] hover:text-[#D75B67]"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    />
                   </div>
                 </div>
               ))}

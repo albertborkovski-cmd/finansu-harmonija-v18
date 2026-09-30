@@ -51,17 +51,17 @@ export default function ExecutionModelOptionsModal({ onClose, onSelect }: { onCl
 
           <div className="flex min-h-0 flex-1 flex-col justify-between gap-12">
             <div className="flex h-[396px] flex-col gap-4 overflow-hidden">
-              <div className="grid h-5 grid-cols-[minmax(170px,278px)_84px_minmax(180px,250px)_minmax(90px,140px)_36px] items-center px-3 font-montserrat text-[12px] font-medium leading-[18px] text-[#7288A3]">
+              <div className="grid h-5 grid-cols-[minmax(170px,278px)_84px_minmax(180px,250px)_minmax(90px,140px)_minmax(36px,1fr)] items-center px-3 font-montserrat text-[12px] font-medium leading-[18px] text-[#7288A3]">
                 <span className="flex items-center gap-1.5 text-[#10233A]">Name</span><span>Version</span><span>Description</span><span>Status</span><span />
               </div>
               <div ref={tableScrollRef} className="flex h-[360px] flex-col overflow-y-auto">
                 {filteredOptions.slice(0, page * TABLE_BATCH_SIZE).map((option, index) => (
-                  <div key={option.id} className={`grid h-9 flex-shrink-0 grid-cols-[minmax(170px,278px)_84px_minmax(180px,250px)_minmax(90px,140px)_36px] items-center rounded-lg font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
+                  <div key={option.id} className={`grid h-9 flex-shrink-0 grid-cols-[minmax(170px,278px)_84px_minmax(180px,250px)_minmax(90px,140px)_minmax(36px,1fr)] items-center rounded-lg font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
                     <span className="truncate px-3">{option.name}</span>
                     <span className="truncate px-[10px]">{option.version}</span>
                     <span className="truncate px-[10px]">{option.description}</span>
                     <span className="flex items-center gap-1 px-[10px]"><span className="h-1.5 w-1.5 rounded-full bg-[#0ED8A8]" />{option.status}</span>
-                    <span className="flex h-9 items-center p-1"><button type="button" aria-label={`Select execution model ${index + 1}`} onClick={() => onSelect(option)} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] hover:border-[#007EA7] hover:text-[#007EA7]"><Target size={16} /></button></span>
+                    <span className="system-table-row-actions flex h-9 items-center justify-end p-1"><button type="button" aria-label={`Select execution model ${index + 1}`} onClick={() => onSelect(option)} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] hover:border-[#007EA7] hover:text-[#007EA7]"><Target size={16} /></button></span>
                   </div>
                 ))}
                 {filteredOptions.length === 0 && <div className="flex h-24 items-center justify-center font-montserrat text-[14px] font-medium text-[#7288A3]">No results found</div>}

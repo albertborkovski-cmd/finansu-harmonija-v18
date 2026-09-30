@@ -136,7 +136,7 @@ export default function ReconciliationTable({ scope, rows, defaultColumns, selec
             </div>
             <ResizeHandle onMouseDown={(event) => startResize(columns.findIndex((entry) => entry.key === column.key), event)} />
           </div>)}
-          <div role="columnheader" style={{ width: ACTIONS_COLUMN_WIDTH }} className="h-9 shrink-0"><span className="sr-only">Actions</span></div>
+          <div role="columnheader" style={{ width: ACTIONS_COLUMN_WIDTH }} className="system-table-row-actions h-9 shrink-0"><span className="sr-only">Actions</span></div>
         </div>
         {sortedRows.slice(0, batch * TABLE_BATCH_SIZE).map((row, index) => <div key={row.id} role="row" className={`group flex ${row.expanded ? 'min-h-[60px] py-1' : 'h-9'} w-full items-center rounded-lg pl-3 text-[12px] font-normal leading-[18px] transition-colors hover:bg-[#E7F4F9] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
           <div role="cell" className="flex h-full w-[30px] shrink-0 items-center">

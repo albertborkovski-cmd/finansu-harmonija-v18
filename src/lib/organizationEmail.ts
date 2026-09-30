@@ -81,13 +81,21 @@ function readArray<T>(key: string): T[] | null {
   }
 }
 
-export function loadOrganizationEmailTemplates() {
-  return readArray<OrganizationEmailTemplate>(TEMPLATE_KEY) ?? DEFAULT_TEMPLATES.map((template) => ({ ...template }));
+export function loadOrganizationEmailTemplates(organizationId?: string) {
+  const defaults = readArray<OrganizationEmailTemplate>(TEMPLATE_KEY) ?? DEFAULT_TEMPLATES.map((template) => ({ ...template }));
+  if (!organizationId) return defaults;
+  const key = `${TEMPLATE_KEY}:company:${organizationId}`;
+  const saved = readArray<OrganizationEmailTemplate>(key);
+  if (saved !== null) return saved;
+  // Copy legacy templates once; company changes never update the shared originals.
+  if (typeof window !== 'undefined') window.localStorage.setItem(key, JSON.stringify(defaults));
+  return defaults;
 }
 
-export function saveOrganizationEmailTemplates(templates: OrganizationEmailTemplate[]) {
-  window.localStorage.setItem(TEMPLATE_KEY, JSON.stringify(templates));
-  window.dispatchEvent(new CustomEvent('organization-email-settings-updated'));
+export function saveOrganizationEmailTemplates(templates: OrganizationEmailTemplate[], organizationId?: string) {
+  const key = organizationId ? `${TEMPLATE_KEY}:company:${organizationId}` : TEMPLATE_KEY;
+  window.localStorage.setItem(key, JSON.stringify(templates));
+  window.dispatchEvent(new CustomEvent('organization-email-settings-updated', { detail: { organizationId } }));
 }
 
 export function loadOrganizationEmailHistory() {

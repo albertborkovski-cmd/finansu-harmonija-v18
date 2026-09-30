@@ -1,3 +1,5 @@
+import { isInactiveRecord, isRecordLinked } from './recordLifecycle';
+
 export type OcrFieldValidationLevel = "red" | "yellow" | "green";
 
 export type OcrFieldValidationRule = {
@@ -8,6 +10,9 @@ export type OcrFieldValidationRule = {
   level: OcrFieldValidationLevel;
   description?: string;
   confidenceThreshold?: number;
+  inactive?: boolean;
+  enabled?: boolean;
+  required?: boolean;
 };
 
 export const DEFAULT_OCR_CONFIDENCE_THRESHOLD = 90;
@@ -22,7 +27,7 @@ export function requiresMesoWorkerReview(
   rule: OcrFieldValidationRule,
   confidence: number,
 ) {
-  return rule.level === "red" && confidence < ocrConfidenceThreshold(rule);
+  return rule.enabled !== false && !isInactiveRecord(rule) && rule.level === "red" && confidence < ocrConfidenceThreshold(rule);
 }
 
 export const OCR_FIELD_VALIDATION_STORAGE_KEY = "finansu-harmonija:v12:ocr:field-validation";
@@ -60,7 +65,7 @@ export const DEFAULT_OCR_FIELD_VALIDATION_RULES: OcrFieldValidationRule[] = [
   { key: "status", label: "Status", type: "OCR", subtype: "OCR", level: "yellow" },
 ];
 
-export function loadOcrFieldValidationRules(): OcrFieldValidationRule[] {
+function readOcrFieldValidationRules(): OcrFieldValidationRule[] {
   try {
     const deletedKeys = new Set<string>(JSON.parse(
       window.localStorage.getItem(OCR_FIELD_VALIDATION_DELETED_KEY) ?? "[]",
@@ -90,12 +95,36 @@ export function loadOcrFieldValidationRules(): OcrFieldValidationRule[] {
   }
 }
 
-export function saveOcrFieldValidationRules(rules: OcrFieldValidationRule[]) {
+export function loadOcrFieldValidationRules(options: { includeInactive?: boolean; documentType?: string } = {}): OcrFieldValidationRule[] {
+  let rules = readOcrFieldValidationRules();
+  if (options.documentType) {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(`${OCR_FIELD_VALIDATION_STORAGE_KEY}:type:${encodeURIComponent(options.documentType)}`) ?? 'null');
+      if (Array.isArray(saved)) rules = saved;
+    } catch { /* Retain the shared defaults if no valid type configuration exists. */ }
+  }
+  return options.includeInactive ? rules : rules.filter(rule => !isInactiveRecord(rule));
+}
+
+export function isOcrFieldValidationRuleLinked(rule: OcrFieldValidationRule) {
+  return DEFAULT_OCR_FIELD_VALIDATION_RULES.some(defaultRule => defaultRule.key === rule.key)
+    || isRecordLinked({ ...rule, id: rule.key, name: rule.label }, OCR_FIELD_VALIDATION_STORAGE_KEY);
+}
+
+export function removeOrDeactivateOcrFieldValidationRules(rules: OcrFieldValidationRule[], keys: Set<string>) {
+  return rules.flatMap(rule => {
+    if (!keys.has(rule.key) || isInactiveRecord(rule)) return [rule];
+    return isOcrFieldValidationRuleLinked(rule) ? [{ ...rule, inactive: true }] : [];
+  });
+}
+
+export function saveOcrFieldValidationRules(rules: OcrFieldValidationRule[], documentType?: string) {
   const normalizedRules = rules.map((rule) => ({
     ...rule,
     confidenceThreshold: ocrConfidenceThreshold(rule),
   }));
-  window.localStorage.setItem(OCR_FIELD_VALIDATION_STORAGE_KEY, JSON.stringify(normalizedRules));
+  const key = documentType ? `${OCR_FIELD_VALIDATION_STORAGE_KEY}:type:${encodeURIComponent(documentType)}` : OCR_FIELD_VALIDATION_STORAGE_KEY;
+  window.localStorage.setItem(key, JSON.stringify(normalizedRules));
   window.dispatchEvent(new CustomEvent(OCR_FIELD_VALIDATION_CHANGED_EVENT));
 }
 

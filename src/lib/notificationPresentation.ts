@@ -66,10 +66,26 @@ export function getNotificationRelatedObjectLabel(
   return row.relatedObject.label?.trim() || row.relatedObject.recordId || row.relatedObject.id || '—';
 }
 
-export function formatNotificationDateTime(row: Pick<NotificationRow, 'createdAt' | 'id'>): string {
+export function notificationTimestamp(row: Pick<NotificationRow, 'createdAt' | 'id'>): number {
   const createdAt = row.createdAt?.trim();
   // Older locally created records sometimes carry their creation time only in the ID.
-  const timestamp = createdAt ? Date.parse(createdAt) : Number(row.id.match(/-(\d{13})$/)?.[1] ?? Number.NaN);
+  return createdAt ? Date.parse(createdAt) : Number(row.id.match(/-(\d{13})$/)?.[1] ?? Number.NaN);
+}
+
+export function formatNotificationAge(row: Pick<NotificationRow, 'createdAt' | 'id'>, now = Date.now()): string {
+  const timestamp = notificationTimestamp(row);
+  if (!Number.isFinite(timestamp) || !Number.isFinite(now)) return '—';
+  const minutes = Math.floor(Math.max(0, now - timestamp) / 60000);
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} ${days === 1 ? 'day' : 'days'} ago`;
+}
+
+export function formatNotificationDateTime(row: Pick<NotificationRow, 'createdAt' | 'id'>): string {
+  const timestamp = notificationTimestamp(row);
   if (!Number.isFinite(timestamp)) return '—';
   const date = new Date(timestamp);
   const pad = (value: number) => String(value).padStart(2, '0');

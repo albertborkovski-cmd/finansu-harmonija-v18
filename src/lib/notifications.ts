@@ -51,6 +51,10 @@ export function getNotificationStatus(row: OrganizationActionMetadata & { status
   return row.status === 'Active' ? 'Active' : 'Resolved';
 }
 
+export function setNotificationStatus<T extends OrganizationActionMetadata & { status: string }>(row: T, notificationStatus: 'Active' | 'Resolved', now = new Date().toISOString()): T {
+  return { ...row, notificationStatus, status: notificationStatus === 'Active' ? 'Active' : 'Inactive', resolvedAt: notificationStatus === 'Resolved' ? now : undefined };
+}
+
 /** Badge reflects active important system alerts, independently of personal read state. */
 export function isImportantNotification(row: AttentionNotification): boolean {
   if (row.category !== 'notifications' || getNotificationStatus(row) !== 'Active') return false;
@@ -256,7 +260,7 @@ export function setTaskStatus<T extends OrganizationActionMetadata & { status: '
 /** Counts cover all permission-visible records, independent of search, filters and loaded rows. */
 export function getNotificationTabCounts(rows: AttentionNotification[], session: { email: string; roleNames: string[] }): Record<NotificationTab, number> {
   return {
-    notifications: getRelevantActionsForTab(rows, session, 'notifications').filter(row => !isNotificationRead(row, session.email)).length,
+    notifications: getRelevantActionsForTab(rows, session, 'notifications').filter(row => getNotificationStatus(row) === 'Active').length,
     reminders: getRelevantActionsForTab(rows, session, 'reminders').filter(row => getTaskStatus(row) === 'Open').length,
   };
 }

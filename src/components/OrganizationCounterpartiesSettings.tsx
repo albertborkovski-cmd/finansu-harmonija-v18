@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
-import { Check, Plus, Trash2, X } from "lucide-react";
+import { Check, Plus, X } from "lucide-react";
+import { RowDeleteButton } from './DeleteButtons';
+import { isInactiveRecord, isRecordLinked, removeOrDeactivateRecords } from '../lib/recordLifecycle';
 import SearchableSelect from "./SearchableSelect";
 
 type FieldRule = {
@@ -9,6 +11,7 @@ type FieldRule = {
 };
 
 type ExportIntegration = {
+  active?: boolean;
   id: string;
   name: string;
   apiUrl: string;
@@ -531,6 +534,7 @@ export default function OrganizationCounterpartiesSettings({
                 settings.exportIntegrations.map((integration) => (
                   <div
                     key={integration.id}
+                    data-record-inactive={isInactiveRecord(integration) || undefined}
                     className="grid grid-cols-[1fr_1.5fr_44px] items-center gap-3 border-b border-[#EEF3F7] px-2 py-2"
                   >
                     <input
@@ -570,26 +574,22 @@ export default function OrganizationCounterpartiesSettings({
                       }
                       className="h-9 rounded-lg border border-[#D3E1EC] px-3 font-montserrat text-[13px] font-medium text-[#10233A] outline-none focus:border-[#007EA7]"
                     />
-                    <button
-                      type="button"
-                      aria-label={`Delete ${integration.name}`}
-                      onClick={() => {
+                    <RowDeleteButton
+                      label={`Delete ${integration.name}`}
+                      linked={settings.exportFormat === integration.name || isRecordLinked(integration)}
+                      inactive={isInactiveRecord(integration)}
+                      onDelete={() => {
                         const exportIntegrations =
-                          settings.exportIntegrations.filter(
-                            (item) => item.id !== integration.id,
-                          );
+                          removeOrDeactivateRecords(settings.exportIntegrations, new Set([integration.id]), undefined, undefined, item => settings.exportFormat === item.name);
                         update({
                           exportIntegrations,
                           exportFormat:
-                            settings.exportFormat === integration.name
+                            !exportIntegrations.some(item => item.id === integration.id) && settings.exportFormat === integration.name
                               ? (exportIntegrations[0]?.name ?? "")
                               : settings.exportFormat,
                         });
                       }}
-                      className="flex h-9 w-9 items-center justify-center rounded-lg text-[#7288A3] hover:bg-[#FFF1F1] hover:text-[#E45858]"
-                    >
-                      <Trash2 size={17} />
-                    </button>
+                    />
                   </div>
                 ))
               )}

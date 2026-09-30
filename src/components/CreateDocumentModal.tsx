@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { ArrowLeft, X, ChevronDown, ChevronUp, Upload, Paperclip, Check, Plus, Loader2, Trash2 } from 'lucide-react';
 import { supabase, type Company } from '../lib/supabase';
+import { isInactiveRecord } from '../lib/recordLifecycle';
 import {
   loadOrganizationReferenceRecords,
   loadOrganizationReferenceValues,
@@ -10,6 +11,7 @@ import { loadVatClassificationTemplateNames } from './VatClassificationsView';
 import { getCurrentUserName } from '../lib/currentUser';
 import GeneralLedgerAccountSelect from './GeneralLedgerAccountSelect';
 import SearchableSelect from './SearchableSelect';
+import { useDropdownDismiss } from './useDropdownDismiss';
 import { loadOperationDateValidationRule, resolveOperationDate } from './OperationDateValidationView';
 import type { DocumentLineItem } from './Documents';
 import { PageActionButton } from './PageHeader';
@@ -110,6 +112,7 @@ function loadCompanyBankAccounts(company?: Company | null): string[] {
     const parsed = JSON.parse(company.counterparty_bank_accounts) as unknown;
     if (!Array.isArray(parsed)) return [];
     return parsed
+      .filter((account) => !isInactiveRecord(account))
       .map((account) => {
         if (typeof account === 'string') return account.trim();
         if (!account || typeof account !== 'object') return '';
@@ -262,17 +265,22 @@ function CounterpartyTitleField({
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  useDropdownDismiss(open, dropdownRef, () => setOpen(false));
   const normalized = value.trim().toLocaleLowerCase();
   const matches = counterparties.filter((counterparty) =>
-    !normalized || counterparty.name.toLocaleLowerCase().includes(normalized),
+    !isInactiveRecord(counterparty) && (!normalized || counterparty.name.toLocaleLowerCase().includes(normalized)),
   );
 
   return (
     <div className={`relative flex min-h-9 w-full items-center rounded-lg bg-white px-3 font-montserrat text-[12px] leading-[18px] ${open ? 'z-40' : 'z-0'}`}>
       <span className="w-[45%] max-w-[210px] flex-shrink-0 font-normal text-[#10233A]">Title</span>
-      <div className="relative min-w-0 flex-1">
+      <div ref={dropdownRef} className="relative min-w-0 flex-1">
         <input
           disabled={disabled}
+          role="combobox"
+          aria-label="Counterparty title"
+          aria-expanded={open}
           value={value}
           placeholder="Enter or search counterparty"
           onFocus={() => !disabled && setOpen(true)}
@@ -284,18 +292,25 @@ function CounterpartyTitleField({
           className={`${inputCls} disabled:cursor-not-allowed disabled:bg-[#F3F6F8] disabled:text-[#7288A3]`}
         />
         {open && matches.length > 0 && (
-          <div className="absolute left-0 right-0 top-[30px] z-50 max-h-[210px] overflow-y-auto rounded-lg border border-[#D3E1EC] bg-white p-1 shadow-[0_10px_24px_rgba(16,35,58,0.14)]">
+          <div role="listbox" aria-label="Counterparty title options" className="absolute left-0 right-0 top-[30px] z-50 max-h-[210px] overflow-y-auto rounded-lg border border-[#D3E1EC] bg-white p-1 shadow-[0_10px_24px_rgba(16,35,58,0.14)]">
             {matches.map((counterparty) => (
               <button
                 key={counterparty.id}
                 type="button"
+                role="option"
+                aria-selected={counterparty.name === value}
+                data-static-selection="true"
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => {
+                  if (isInactiveRecord(counterparty)) return;
                   onSelect(counterparty);
                   setOpen(false);
                 }}
-                className="flex min-h-9 w-full items-center rounded-md px-3 py-2 text-left font-montserrat text-[12px] font-semibold text-[#10233A] transition-colors hover:bg-[#F8FDFF]"
+                className={`grid h-9 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-3 rounded-md px-3 text-left font-montserrat text-[12px] font-semibold text-[#10233A] ${counterparty.name === value ? 'bg-[#E5EDF9]' : 'hover:bg-[#F8FDFF]'}`}
               >
+                <span aria-hidden="true" className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${counterparty.name === value ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>
+                  {counterparty.name === value && <Check size={12} strokeWidth={2.5} className="text-white" />}
+                </span>
                 <span className="truncate">{counterparty.name}</span>
               </button>
             ))}
@@ -330,16 +345,10 @@ function ManagedSelect({
   const [query, setQuery] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const closeOnOutsideClick = (event: MouseEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-        setQuery('');
-      }
-    };
-    document.addEventListener('mousedown', closeOnOutsideClick);
-    return () => document.removeEventListener('mousedown', closeOnOutsideClick);
-  }, []);
+  useDropdownDismiss(open, containerRef, () => {
+    setOpen(false);
+    setQuery('');
+  });
 
   const saveNewValue = async () => {
     const normalized = newValue.trim();
@@ -373,7 +382,7 @@ function ManagedSelect({
           open ? 'border-[#007EA7] ring-1 ring-[#007EA7]/20' : 'border-[#D3E1EC] hover:border-[#A1B6C6]'
         }`}
       />
-      <button type="button" tabIndex={-1} disabled={disabled} onMouseDown={(event) => event.preventDefault()} onClick={() => { setQuery(''); setOpen((current) => !current); }} className="absolute right-0 top-0 flex h-[26px] w-7 items-center justify-center text-[#7288A3] disabled:hidden">
+      <button type="button" tabIndex={-1} disabled={disabled} aria-label={`Open ${placeholder.toLocaleLowerCase()} options`} onMouseDown={(event) => event.preventDefault()} onClick={() => { setQuery(''); setOpen((current) => !current); }} className="absolute right-0 top-0 flex h-[26px] w-7 items-center justify-center text-[#7288A3] disabled:hidden">
         <ChevronDown
           size={14}
           className={`transition-transform ${open ? 'rotate-180' : ''}`}
@@ -397,19 +406,21 @@ function ManagedSelect({
                   type="button"
                   role="option"
                   aria-selected={selected}
+                  data-static-selection="true"
                   onClick={() => {
                     onChange(option);
                     setOpen(false);
                     setQuery('');
                   }}
-                  className={`flex min-h-9 w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[#F2F7FC] ${selected ? 'bg-[#F2F7FC]' : ''}`}
+                  className={`grid h-9 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-3 rounded-md px-2 text-left ${selected ? 'bg-[#E5EDF9]' : 'hover:bg-[#F2F7FC]'}`}
                 >
                   <span
-                    className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[5px] border ${selected ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}
+                    aria-hidden="true"
+                    className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${selected ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}
                   >
                     {selected && <Check size={12} strokeWidth={2.5} className="text-white" />}
                   </span>
-                  <span className="font-montserrat text-[13px] font-medium leading-5 text-[#10233A]">
+                  <span className="truncate font-montserrat text-[13px] font-medium leading-5 text-[#10233A]">
                     {option}
                   </span>
                 </button>
@@ -629,6 +640,8 @@ export default function CreateDocumentModal({ companyId, companyName = '', secti
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [statusOpen, setStatusOpen] = useState(false);
+  const statusRef = useRef<HTMLDivElement>(null);
+  useDropdownDismiss(statusOpen, statusRef, () => setStatusOpen(false));
   const [operationDateRuleMessage, setOperationDateRuleMessage] = useState('');
   const [operationRuleVersion, setOperationRuleVersion] = useState(0);
   const operationDateRule = loadOperationDateValidationRule(companyId);
@@ -844,6 +857,8 @@ export default function CreateDocumentModal({ companyId, companyName = '', secti
   };
 
   const selectExternalCounterparty = (counterparty: Company) => {
+    const currentCounterparty = loadCounterparties().find((item) => item.id === counterparty.id) ?? counterparty;
+    if (isInactiveRecord(currentCounterparty)) return;
     const details = companyToParty(counterparty);
     setExternalParty(details);
     set('clientCounterparty', details.title);
@@ -966,11 +981,18 @@ export default function CreateDocumentModal({ companyId, companyName = '', secti
     if (!form.clientCounterparty.trim()) { setError('Client/Counterparty is required.'); return; }
     setSaving(true);
     setError('');
-    const matchedCounterparty = counterparties.find(
+    const matchedCounterparty = loadCounterparties().find(
       (counterparty) =>
         counterparty.name.trim().toLocaleLowerCase() ===
         form.clientCounterparty.trim().toLocaleLowerCase(),
     );
+    const preservesExistingCounterparty = Boolean(initialData?.clientCounterparty
+      && initialData.clientCounterparty.trim().toLocaleLowerCase() === form.clientCounterparty.trim().toLocaleLowerCase());
+    if (matchedCounterparty && isInactiveRecord(matchedCounterparty) && !preservesExistingCounterparty) {
+      setSaving(false);
+      setError('This counterparty is inactive. Select an active counterparty for a new document.');
+      return;
+    }
 
     let imageUrl: string | null = initialImageUrl ?? null;
     if (uploadFile) {
@@ -1297,29 +1319,38 @@ export default function CreateDocumentModal({ companyId, companyName = '', secti
             <div className="flex flex-col [&>*:nth-child(odd)]:bg-[#F8FDFF]">
             {!isAccountingNote && <>
             <Field label="Status">
-              <div className="relative">
+              <div ref={statusRef} className="relative">
                 <button
                   type="button"
+                  aria-label="Document status"
+                  aria-haspopup="listbox"
+                  aria-expanded={statusOpen}
+                  data-static-selection="true"
                   onClick={() => setStatusOpen(v => !v)}
                   className={`${inputCls} group flex items-center justify-between pr-2`}
                 >
-                  <div className="flex items-center gap-2">
+                  <span className="flex min-w-0 items-center gap-2">
                     <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: STATUS_COLORS[form.status] }} />
-                    <span>{form.status}</span>
-                  </div>
+                    <span className="truncate">{form.status}</span>
+                  </span>
                   <ChevronDown size={14} className="text-[#7288A3] group-disabled:hidden" />
                 </button>
                 {statusOpen && (
-                  <div className="absolute top-full mt-1 left-0 right-0 bg-white border border-[#D3E1EC] rounded-lg shadow-lg z-[80] overflow-hidden">
+                  <div role="listbox" aria-label="Document status options" className="absolute top-full mt-1 left-0 right-0 bg-white border border-[#D3E1EC] rounded-lg shadow-lg z-[80] overflow-hidden p-1.5">
                     {STATUSES.map(s => (
                       <button
                         key={s}
                         type="button"
+                        role="option"
+                        aria-selected={form.status === s}
+                        data-static-selection="true"
                         onClick={() => { set('status', s); setStatusOpen(false); }}
-                        className={`w-full flex items-center gap-2 px-3 py-2 font-montserrat text-[13px] hover:bg-[#F0F7FA] transition-colors ${form.status === s ? 'text-[#007EA7] font-semibold' : 'text-[#10233A]'}`}
+                        className={`grid h-9 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-3 rounded-md px-2 text-left font-montserrat text-[13px] text-[#10233A] ${form.status === s ? 'bg-[#E5EDF9]' : 'hover:bg-[#F0F7FA]'}`}
                       >
-                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: STATUS_COLORS[s] }} />
-                        {s}
+                        <span aria-hidden="true" className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${form.status === s ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>
+                          {form.status === s && <Check size={12} strokeWidth={2.5} className="text-white" />}
+                        </span>
+                        <span className="flex min-w-0 items-center gap-2"><span className="h-2 w-2 shrink-0 rounded-full" style={{ background: STATUS_COLORS[s] }} /><span className="truncate">{s}</span></span>
                       </button>
                     ))}
                   </div>
@@ -1438,7 +1469,7 @@ export default function CreateDocumentModal({ companyId, companyName = '', secti
                   <Field label="Counterparty" required>
                     <ManagedSelect
                       value={form.clientCounterparty}
-                      options={counterparties.map((counterparty) => counterparty.name)}
+                      options={counterparties.filter((counterparty) => !isInactiveRecord(counterparty)).map((counterparty) => counterparty.name)}
                       placeholder="Select counterparty"
                       onChange={(value) => {
                         const counterparty = counterparties.find((item) => item.name === value);

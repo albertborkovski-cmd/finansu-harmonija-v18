@@ -1,4 +1,4 @@
-import { isClientReconciliationItem, type ReconciliationItem, type ReconciliationProposal } from './reconciliation';
+import { areReconciliationEntriesCompatible, isClientReconciliationItem, type ReconciliationItem, type ReconciliationProposal } from './reconciliation';
 
 export type ManualReconciliationAllocation = {
   itemId: string;
@@ -43,12 +43,7 @@ function countIds(items: readonly ReconciliationItem[]) {
 }
 
 function isCompatible(source: ReconciliationItem, candidate: ReconciliationItem) {
-  return source.id !== candidate.id
-    && source.organizationId === candidate.organizationId
-    && source.counterpartyId === candidate.counterpartyId
-    && source.currency === candidate.currency
-    && source.side === candidate.side
-    && (source.kind === 'Invoice') !== (candidate.kind === 'Invoice');
+  return areReconciliationEntriesCompatible(source, candidate);
 }
 
 const compareText = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0;
@@ -78,26 +73,9 @@ export function getManualReconciliationCandidates(items: readonly Reconciliation
       || compareText(left.id, right.id));
 }
 
-/** Browse all same-organization open records without weakening matching eligibility. */
+/** Selection dialogs only expose eligible opposite GL entries. Counterparty filtering is optional in the UI. */
 export function getManualReconciliationOptions(items: readonly ReconciliationItem[], sourceId: string) {
-  const source = items.find(item => item.id === sourceId);
-  const counts = countIds(items);
-  if (!isOpenItem(source) || counts.get(sourceId) !== 1) return [];
-  const compatible = new Set(getManualReconciliationCandidates(items, sourceId).map(item => item.id));
-  return items.filter(item => item.id !== sourceId && item.organizationId === source.organizationId
-    && counts.get(item.id) === 1 && isMinor(item.remainingMinor) && item.remainingMinor > 0 && item.remainingMinor <= item.originalMinor)
-    .map(item => {
-      const reason = item.missingDocument ? 'Missing document — awaiting document receipt' : compatible.has(item.id) ? ''
-        : !isClientReconciliationItem(item) ? 'Accounting operation — use GL assignment'
-        : item.counterpartyId !== source.counterpartyId ? 'Different counterparty'
-        : item.currency !== source.currency ? 'Different currency'
-        : item.side !== source.side ? 'Different receivable / payable side'
-        : (item.kind === 'Invoice') === (source.kind === 'Invoice') ? 'Requires an opposite document type'
-        : 'Not eligible for reconciliation';
-      return { item, reason };
-    }).sort((a, b) => Number(Boolean(a.reason)) - Number(Boolean(b.reason))
-      || compareText(a.item.dueDate || a.item.documentDate, b.item.dueDate || b.item.documentDate)
-      || compareText(a.item.documentNumber, b.item.documentNumber));
+  return getManualReconciliationCandidates(items, sourceId).map(item => ({ item, reason: '' }));
 }
 
 /** Preview the selected order without changing any balances or applying a batch. */

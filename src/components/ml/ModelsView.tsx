@@ -21,7 +21,6 @@ import {
   Copy,
   ArrowRightLeft,
   WrapText,
-  Trash2,
   UsersRound,
   X,
 } from 'lucide-react';
@@ -41,6 +40,13 @@ import { useModelCatalog, type ModelRecord } from './modelCatalogStore';
 import { ResizeHandle, useColumnResize } from '../useColumnResize';
 import ColumnSortButton, { useMultiColumnSort } from '../ColumnSortButton';
 import SystemAddFilters from '../SystemAddFilters';
+import { useDropdownDismiss } from '../useDropdownDismiss';
+import { BulkDeleteButton, RowDeleteButton } from '../DeleteButtons';
+import { isInactiveRecord, isRecordLinked, removeOrDeactivateRecords } from '../../lib/recordLifecycle';
+import { usePersistentState } from '../../hooks/usePersistentState';
+
+const MODEL_STORAGE_KEY = 'finansu-harmonija-v6-model-catalog';
+const isModelLinked = (model: ModelRecord) => model.usage > 0 || isRecordLinked(model, MODEL_STORAGE_KEY);
 
 const MODEL_COLUMNS: ColConfig[] = [
   { key: 'name', label: 'Name', width: 280, visible: true },
@@ -263,6 +269,10 @@ function TrainModelModal({ models, initialModel, lockModelName = false, onClose,
   const [documentSetOpen, setDocumentSetOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [modelOptionsOpen, setModelOptionsOpen] = useState(false);
+  const documentSetRef = useRef<HTMLDivElement>(null);
+  const modelMenuRef = useRef<HTMLDivElement>(null);
+  useDropdownDismiss(documentSetOpen, documentSetRef, () => setDocumentSetOpen(false));
+  useDropdownDismiss(modelOpen, modelMenuRef, () => setModelOpen(false));
   const settingsEditorRef = useRef<HTMLTextAreaElement>(null);
   const settingsSearchRef = useRef<HTMLInputElement>(null);
   const { copied: settingsCopied, copyText: copySettings } = useSystemCopyFeedback();
@@ -343,13 +353,13 @@ function TrainModelModal({ models, initialModel, lockModelName = false, onClose,
           <div className="flex h-[390px] w-[400px] flex-col gap-6">
             <div className="flex h-[70px] flex-col gap-2">
               <span className="font-montserrat text-[14px] font-semibold leading-5 text-[#10233A]">Document set <span className="text-[#FF4550]">*</span></span>
-              <div className="relative h-[42px] w-full">
-                <button type="button" aria-label="Document set" aria-expanded={documentSetOpen} onClick={() => { setDocumentSetOpen(value => !value); setModelOpen(false); }} className="flex h-[42px] w-full items-center justify-between rounded-lg border border-[#D3E1EC] bg-white px-[14px] font-montserrat text-[14px] font-medium text-[#10233A] outline-none transition-colors hover:border-[#A1B6C6] focus:border-[#007EA7]">
-                  <span className={documentSet ? 'text-[#10233A]' : 'text-[#A1B6C6]'}>{documentSet || 'Select document set'}</span>
-                  <ChevronDown size={16} className={`text-[#7288A3] transition-transform ${documentSetOpen ? 'rotate-180' : ''}`} />
+              <div ref={documentSetRef} className="relative h-[42px] w-full min-w-0">
+                <button type="button" aria-label="Document set" aria-haspopup="listbox" aria-expanded={documentSetOpen} data-static-selection="true" onClick={() => { setDocumentSetOpen(value => !value); setModelOpen(false); }} className="flex h-[42px] w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-[#D3E1EC] bg-white px-[14px] font-montserrat text-[14px] font-medium text-[#10233A] outline-none transition-colors hover:border-[#A1B6C6] focus:border-[#007EA7]">
+                  <span className={`min-w-0 truncate ${documentSet ? 'text-[#10233A]' : 'text-[#A1B6C6]'}`}>{documentSet || 'Select document set'}</span>
+                  <ChevronDown size={16} className={`flex-shrink-0 text-[#7288A3] transition-transform ${documentSetOpen ? 'rotate-180' : ''}`} />
                 </button>
                 {documentSetOpen && <div role="listbox" aria-label="Document set options" className="absolute left-0 right-0 top-[46px] z-40 max-h-[220px] overflow-y-auto rounded-lg border border-[#D3E1EC] bg-white p-1 shadow-[0_10px_24px_rgba(16,35,58,0.14)]">
-                  {MODEL_DOCUMENT_SETS.map(option => <button key={option} type="button" role="option" aria-selected={documentSet === option} onClick={() => { setDocumentSet(option); setDocumentSetOpen(false); }} className={`flex h-10 w-full items-center rounded-md px-3 text-left font-montserrat text-[14px] font-medium text-[#10233A] hover:bg-[#F8FDFF] ${documentSet === option ? 'bg-[#EAF4FB]' : 'bg-white'}`}>{option}</button>)}
+                  {MODEL_DOCUMENT_SETS.map(option => <button key={option} type="button" role="option" aria-selected={documentSet === option} data-static-selection="true" onClick={() => { setDocumentSet(option); setDocumentSetOpen(false); }} className={`flex h-10 w-full items-center gap-3 rounded-md px-3 text-left font-montserrat text-[14px] font-medium text-[#10233A] ${documentSet === option ? 'bg-[#E5EDF9]' : 'bg-white hover:bg-[#F8FDFF]'}`}><span aria-hidden="true" className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[6px] border ${documentSet === option ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>{documentSet === option && <Check size={12} strokeWidth={2.5} className="text-white" />}</span><span className="min-w-0 truncate">{option}</span></button>)}
                 </div>}
               </div>
             </div>
@@ -357,12 +367,12 @@ function TrainModelModal({ models, initialModel, lockModelName = false, onClose,
             <div className="flex h-[70px] items-end">
               <div className="flex h-[70px] w-full flex-col gap-2">
                 <span className="font-montserrat text-[14px] font-semibold leading-5 text-[#10233A]">Name <span className="text-[#FF4550]">*</span></span>
-                <div className="relative h-[42px] w-full">
+                <div ref={modelMenuRef} className="relative h-[42px] w-full min-w-0">
                   {lockModelName ? (
                     <input aria-label="Model name" value={models.find(model => model.id === modelId)?.name || ''} readOnly aria-readonly="true" className="h-[42px] w-full cursor-default rounded-lg border border-[#E5EDF9] bg-[#F8FAFC] px-[14px] font-montserrat text-[14px] font-medium text-[#7288A3] outline-none" />
                   ) : (
                     <>
-                      <button type="button" aria-label="Model name" aria-expanded={modelOpen} onClick={() => { setModelOpen(value => !value); setDocumentSetOpen(false); }} className="flex h-[42px] w-full items-center justify-between rounded-lg border border-[#D3E1EC] bg-white px-[14px] font-montserrat text-[14px] font-medium text-[#10233A] outline-none transition-colors hover:border-[#A1B6C6] focus:border-[#007EA7]">
+                      <button type="button" aria-label="Model name" aria-haspopup="listbox" aria-expanded={modelOpen} data-static-selection="true" onClick={() => { setModelOpen(value => !value); setDocumentSetOpen(false); }} className="flex h-[42px] w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-[#D3E1EC] bg-white px-[14px] font-montserrat text-[14px] font-medium text-[#10233A] outline-none transition-colors hover:border-[#A1B6C6] focus:border-[#007EA7]">
                         <span className={modelId ? 'truncate text-[#10233A]' : 'text-[#A1B6C6]'}>{models.find(model => model.id === modelId)?.name || 'Select model'}</span>
                         <ChevronDown size={16} className={`flex-shrink-0 text-[#7288A3] transition-transform ${modelOpen ? 'rotate-180' : ''}`} />
                       </button>
@@ -370,7 +380,7 @@ function TrainModelModal({ models, initialModel, lockModelName = false, onClose,
                     </>
                   )}
                   {!lockModelName && modelOpen && <div role="listbox" aria-label="Model name options" className="absolute left-0 right-0 top-[46px] z-40 max-h-[220px] overflow-y-auto rounded-lg border border-[#D3E1EC] bg-white p-1 shadow-[0_10px_24px_rgba(16,35,58,0.14)]">
-                    {models.map(model => <button key={model.id} type="button" role="option" aria-selected={modelId === model.id} onClick={() => { setModelId(model.id); setModelOpen(false); }} className={`flex h-10 w-full items-center rounded-md px-3 text-left font-montserrat text-[14px] font-medium text-[#10233A] hover:bg-[#F8FDFF] ${modelId === model.id ? 'bg-[#EAF4FB]' : 'bg-white'}`}>{model.name}</button>)}
+                    {models.map(model => <button key={model.id} type="button" role="option" aria-selected={modelId === model.id} data-static-selection="true" onClick={() => { setModelId(model.id); setModelOpen(false); }} className={`flex h-10 w-full items-center gap-3 rounded-md px-3 text-left font-montserrat text-[14px] font-medium text-[#10233A] ${modelId === model.id ? 'bg-[#E5EDF9]' : 'bg-white hover:bg-[#F8FDFF]'}`}><span aria-hidden="true" className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[6px] border ${modelId === model.id ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>{modelId === model.id && <Check size={12} strokeWidth={2.5} className="text-white" />}</span><span className="min-w-0 truncate">{model.name}</span></button>)}
                   </div>}
                 </div>
               </div>
@@ -637,7 +647,12 @@ export default function ModelsView() {
   const [showVersionColumnSettings, setShowVersionColumnSettings] = useState(false);
   const [versionColumns, setVersionColumns] = useState<ColConfig[]>(MODEL_VERSION_COLUMNS);
   const [toast, setToast] = useState('');
-  const [modelVersions, setModelVersions] = useState(MODEL_VERSIONS);
+  const [versionsByModel, setVersionsByModel] = usePersistentState<Record<string, typeof MODEL_VERSIONS>>('finansu-harmonija:v18:model-versions', {});
+  const modelVersions = detailModel ? versionsByModel[detailModel.id] ?? MODEL_VERSIONS : MODEL_VERSIONS;
+  const setModelVersions = (update: (versions: typeof MODEL_VERSIONS) => typeof MODEL_VERSIONS) => {
+    if (!detailModel) return;
+    setVersionsByModel(current => ({ ...current, [detailModel.id]: update(current[detailModel.id] ?? MODEL_VERSIONS) }));
+  };
   const [versionFilterKeys, setVersionFilterKeys] = useState<string[]>([]);
   const [versionFilterValues, setVersionFilterValues] = useState<Record<string, string[]>>({});
   useEffect(() => setCurrentPage(1), [detailModel?.id, versionQuery, versionFilterKeys, versionFilterValues]);
@@ -670,9 +685,9 @@ export default function ModelsView() {
 
   const deleteModels = (ids: Set<string>) => {
     if (!ids.size) return;
-    setModels((current) => current.filter((model) => !ids.has(model.id)));
+    setModels((current) => removeOrDeactivateRecords(current, ids, MODEL_STORAGE_KEY, model => ({ ...model, inactive: true }), isModelLinked));
     setSelected(new Set());
-    notify(`${ids.size} model${ids.size === 1 ? '' : 's'} deleted`);
+    notify('Selected models deleted or deactivated where linked');
   };
 
   const downloadModelResource = (fileName: string) => {
@@ -693,7 +708,7 @@ export default function ModelsView() {
 
   const allVisibleSelected = filteredModels.length > 0 && filteredModels.every((model) => selected.has(model.id));
   const visibleColumns = columns.filter((column) => column.visible);
-  const tableGrid = `${visibleColumns.map((column) => `${column.width}px`).join(' ')} 72px`;
+  const tableGrid = `${visibleColumns.map((column) => `${column.width}px`).join(' ')} minmax(72px, 1fr)`;
   const tableMinWidth = visibleColumns.reduce((total, column) => total + column.width, 72);
 
   const modelCell = (model: ModelRecord, key: string) => {
@@ -768,7 +783,7 @@ export default function ModelsView() {
             <div className="flex flex-1 flex-col justify-between gap-12">
               <div ref={tableScrollRef} className="relative min-h-[340px] overflow-x-auto scrollbar-hide">
                 <div className="min-w-max">
-                  <div className="system-table-header-row mb-4 grid h-5 items-center font-montserrat text-[12px] font-medium leading-[18px] text-[#10233A]" style={{ gridTemplateColumns: `${logColumns.filter(column => column.visible).map(column => `${column.width}px`).join(' ')} 68px` }}>
+                  <div className="system-table-header-row mb-4 grid h-5 items-center font-montserrat text-[12px] font-medium leading-[18px] text-[#10233A]" style={{ gridTemplateColumns: `${logColumns.filter(column => column.visible).map(column => `${column.width}px`).join(' ')} minmax(68px, 1fr)` }}>
                     {logColumns.filter(column => column.visible).map((column, index) => <div data-table-header-select={column.key === 'name' ? "true" : undefined} key={column.key} className={`flex h-5 min-w-0 items-center gap-[6px] px-3 ${index > 0 ? 'border-l border-[#D3E1EC]' : ''}`}>{column.key === 'name' && <Checkbox checked={false} label="Select all model logs" onChange={() => undefined} />}<span className="truncate">{column.label}</span></div>)}<div />
                   </div>
                 </div>
@@ -807,7 +822,7 @@ export default function ModelsView() {
     const allVersionsSelected = visibleVersions.length > 0 && visibleVersions.every((version) => selectedVersions.has(version.version));
     const versionActionClass = 'flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] transition-colors hover:border-[#007EA7] hover:text-[#007EA7]';
     const visibleVersionColumns = versionColumns.filter(column => column.visible);
-    const versionGrid = `${visibleVersionColumns.map(column => `${column.width}px`).join(' ')} 164px`;
+    const versionGrid = `${visibleVersionColumns.map(column => `${column.width}px`).join(' ')} minmax(164px, 1fr)`;
     const versionTableMinWidth = visibleVersionColumns.reduce((total, column) => total + column.width, 164);
 
     return (
@@ -839,7 +854,7 @@ export default function ModelsView() {
               />
             </div>
             <div className="flex h-7 items-center gap-4 rounded bg-white p-1.5 text-[#7288A3]">
-              <button type="button" title="ALL DELETE" aria-label="Delete selected versions" disabled={!selectedVersions.size} onClick={() => { setModelVersions(current => current.filter(version => !selectedVersions.has(version.version))); notify(`${selectedVersions.size} version${selectedVersions.size === 1 ? '' : 's'} deleted`); setSelectedVersions(new Set()); }} className="disabled:cursor-not-allowed disabled:opacity-40 hover:text-[#D64545]"><Trash2 size={16} /></button>
+              <BulkDeleteButton linked selectedCount={selectedVersions.size} label="Deactivate selected versions" onDelete={() => { setModelVersions(current => current.map(version => selectedVersions.has(version.version) ? { ...version, status: 'Inactive' } : version)); notify(`${selectedVersions.size} version${selectedVersions.size === 1 ? '' : 's'} deactivated`); setSelectedVersions(new Set()); }} />
               <ColumnSettingsButton onClick={() => setShowVersionColumnSettings(true)} />
               <ImportButton scope={`Model versions ${detailModel.name}`} onImport={file => notify(`${file.name} imported into ${detailModel.name}`)} />
               <button type="button" title="REFRESH ALL" aria-label="Refresh all versions" onClick={() => { setModelVersions(current => current.map(version => ({ ...version }))); notify('All model versions refreshed'); }} className="hover:text-[#007EA7]"><RefreshCw size={16} /></button>
@@ -853,14 +868,14 @@ export default function ModelsView() {
                   {visibleVersionColumns.map((column, index) => <div data-table-header-select={column.key === 'version' ? "true" : undefined} key={column.key} className={`flex h-5 min-w-0 items-center gap-[6px] px-3 ${index > 0 ? 'border-l border-[#D3E1EC]' : ''}`}>{column.key === 'version' && <Checkbox checked={allVersionsSelected} label="Select all model versions" onChange={() => setSelectedVersions(current => toggleFilteredSelection(current, visibleVersions.map((version) => version.version)))} />}<span className="truncate">{column.label}</span></div>)}<div />
                 </div>
                 {visibleVersions.slice(0, currentPage * TABLE_BATCH_SIZE).map((version, index) => (
-                  <div key={version.version} className={`grid h-9 items-center rounded-lg font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} hover:bg-[#E7F4F9]`} style={{ gridTemplateColumns: versionGrid }}>
+                  <div key={version.version} data-record-inactive={isInactiveRecord(version) || undefined} className={`grid h-9 items-center rounded-lg font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} hover:bg-[#E7F4F9]`} style={{ gridTemplateColumns: versionGrid }}>
                     {visibleVersionColumns.map(column => <div key={column.key} className="flex min-w-0 items-center gap-[6px] overflow-hidden px-3"><span className="flex min-w-0 items-center gap-[6px] truncate">{column.key === 'version' && <Checkbox checked={selectedVersions.has(version.version)} label={`Select version ${version.version}`} onChange={() => setSelectedVersions((current) => { const next = new Set(current); if (next.has(version.version)) next.delete(version.version); else next.add(version.version); return next; })} />}{column.key === 'status' && <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${version.status === 'Archived' ? 'bg-[#A1B6C6]' : 'bg-[#0ED8A8]'}`} />}{String(version[column.key as keyof typeof version] ?? '—')}</span></div>)}
-                    <span className="flex h-9 items-center justify-end gap-1 pr-1">
+                    <span className="system-table-row-actions flex h-9 items-center justify-end gap-1 pr-1">
                       <button type="button" aria-label={`Version details ${version.version}`} onClick={() => setConfigurationVersion(version.version)} className={versionActionClass}><Ticket size={16} /></button>
                       <button type="button" title="TRAIN CONFIG" aria-label={`TRAIN CONFIG ${version.version}`} onClick={() => setConfigurationVersion(version.version)} className={versionActionClass}><FileCog size={16} /></button>
                       <button type="button" title="EXPORT" aria-label={`EXPORT version ${version.version}`} onClick={() => { setResourcesExportVersion(version.version); setResourcesExportOpen(true); }} className="flex h-7 w-7 items-center justify-center rounded border border-[#D3E1EC] bg-white text-[#7288A3] transition-colors hover:border-[#007EA7] hover:text-[#007EA7]"><Download size={14} strokeWidth={2} /></button>
                       <button type="button" aria-label={`Open version ${version.version}`} onClick={() => { setResourcesExportOpen(false); setLogVersion(version.version); setLogQuery(''); setLogSeverity('All'); }} className={versionActionClass}><ExternalLink size={16} /></button>
-                      <button type="button" aria-label={`Delete version ${version.version}`} onClick={() => { setModelVersions(current => current.filter(item => item.version !== version.version)); setSelectedVersions(current => { const next = new Set(current); next.delete(version.version); return next; }); notify(`${version.version} deleted`); }} className={`${versionActionClass} hover:border-[#D64545] hover:text-[#D64545]`}><Trash2 size={16} /></button>
+                      <RowDeleteButton linked inactive={isInactiveRecord(version)} label={`Deactivate version ${version.version}`} onDelete={() => { setModelVersions(current => current.map(item => item.version === version.version ? { ...item, status: 'Inactive' } : item)); setSelectedVersions(current => { const next = new Set(current); next.delete(version.version); return next; }); notify(`${version.version} deactivated`); }} />
                     </span>
                   </div>
                 ))}
@@ -892,7 +907,7 @@ export default function ModelsView() {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <OcrSearchField ariaLabel="Search models" value={query} onChange={(nextQuery) => { setQuery(nextQuery); setCurrentPage(1); }} />
           <div className="flex items-center gap-4 rounded bg-white p-1.5 text-[#7288A3]">
-            <button type="button" title="ALL DELETE" aria-label="Delete selected models" disabled={!selected.size} onClick={() => deleteModels(selected)} className="disabled:cursor-not-allowed disabled:opacity-40 hover:text-[#D64545]"><Trash2 size={16} /></button>
+            <BulkDeleteButton linked={models.some(model => selected.has(model.id) && isModelLinked(model))} selectedCount={selected.size} label="Delete selected models" onDelete={() => deleteModels(selected)} />
             <ColumnSettingsButton onClick={() => setShowColumnSettings(true)} />
             <ImportButton scope="Models" onImport={file => notify(`${file.name} imported into Models`)} />
             <button type="button" title="REFRESH ALL" aria-label="Refresh all models" onClick={() => { setModels(current => current.map(model => ({ ...model }))); notify('All models refreshed'); }} className="hover:text-[#007EA7]"><RefreshCw size={16} /></button>
@@ -922,9 +937,9 @@ export default function ModelsView() {
                 <div aria-hidden="true" />
               </div>
               {sortedModels.length ? sortedModels.slice(0, currentPage * TABLE_BATCH_SIZE).map((model, index) => (
-                <div key={model.id} onClick={() => setDetailModel(model)} className={`system-table-row group grid h-9 cursor-pointer items-center rounded-lg font-montserrat text-[12px] leading-[18px] text-[#10233A] transition-colors hover:bg-[#E7F4F9] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`} style={{ gridTemplateColumns: tableGrid }}>
+                <div key={model.id} data-record-inactive={isInactiveRecord(model) || undefined} onClick={() => setDetailModel(model)} className={`system-table-row group grid h-9 cursor-pointer items-center rounded-lg font-montserrat text-[12px] leading-[18px] text-[#10233A] transition-colors hover:bg-[#E7F4F9] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`} style={{ gridTemplateColumns: tableGrid }}>
                   {visibleColumns.map((column) => <div key={column.key} className="min-w-0 overflow-hidden px-3">{modelCell(model, column.key)}</div>)}
-                  <div className="table-row-actions flex h-9 items-center justify-end gap-1 pr-1"><button type="button" aria-label={`Open ${model.name} resources`} onClick={(event) => { event.stopPropagation(); setDetailModel(model); setVersionQuery(''); setSelectedVersions(new Set()); setLogVersion(null); }} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] transition-colors hover:border-[#007EA7] hover:text-[#007EA7]"><UsersRound size={16} strokeWidth={1.8} /></button><button type="button" data-button-family="row-delete" aria-label={`Delete ${model.name}`} onClick={(event) => { event.stopPropagation(); deleteModels(new Set([model.id])); }} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] hover:border-[#D64545] hover:text-[#D64545]"><Trash2 size={16} /></button></div>
+                  <div className="table-row-actions flex h-9 items-center justify-end gap-1 pr-1"><button type="button" aria-label={`Open ${model.name} resources`} onClick={(event) => { event.stopPropagation(); setDetailModel(model); setVersionQuery(''); setSelectedVersions(new Set()); setLogVersion(null); }} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] transition-colors hover:border-[#007EA7] hover:text-[#007EA7]"><UsersRound size={16} strokeWidth={1.8} /></button><RowDeleteButton linked={isModelLinked(model)} inactive={isInactiveRecord(model)} label={`Delete ${model.name}`} onDelete={() => deleteModels(new Set([model.id]))} /></div>
                 </div>
               )) : models.length === 0
                 ? <CreateableEmptyState onCreate={() => setModal('create')} />

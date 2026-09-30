@@ -4,18 +4,20 @@ import OcrSearchField from './OcrSearchField';
 import { PageActionButton } from './PageHeader';
 import { ReconciliationDialog } from './ReconciliationDialogs';
 import SystemAddFilters from './SystemAddFilters';
-import type { ReconciliationItem } from '../lib/reconciliation';
+import { getReconciliationEntrySide, type ReconciliationItem } from '../lib/reconciliation';
 
 import { exchangeRate } from '../lib/reconciliationExchangeRate';
 import { paymentPurpose } from '../lib/reconciliationPaymentPurpose';
 
 type BalanceView = 'All' | 'Open' | 'Reconciled';
-type ColumnKey = 'exchangeRate' | 'documentNumber' | 'counterpartyName' | 'kind' | 'documentDate' | 'currency' | 'paymentPurpose' | 'used' | 'remaining';
+type ColumnKey = 'exchangeRate' | 'documentNumber' | 'counterpartyName' | 'kind' | 'glEntry' | 'glAccount' | 'documentDate' | 'currency' | 'paymentPurpose' | 'used' | 'remaining';
 
 const COLUMNS: { key: ColumnKey; label: string; numeric?: boolean; width: number }[] = [
   { key: 'documentNumber', label: 'Document No.', width: 132 },
   { key: 'counterpartyName', label: 'Counterparty', width: 136 },
   { key: 'kind', label: 'Type', width: 66 },
+  { key: 'glEntry', label: 'GL entry', width: 100 },
+  { key: 'glAccount', label: 'GL account', width: 120 },
   { key: 'documentDate', label: 'Date', width: 92 },
   { key: 'exchangeRate', label: 'Exchange rate', width: 210 },
   { key: 'currency', label: 'Currency', width: 72 },
@@ -28,6 +30,8 @@ const formatAmount = (minor: number) => (minor / 100).toLocaleString('en-GB', { 
 
 function columnValue(item: ReconciliationItem, key: ColumnKey): string {
   switch (key) {
+    case 'glEntry': return getReconciliationEntrySide(item);
+    case 'glAccount': return item.glAccountCode || '—';
     case 'exchangeRate': return exchangeRate(item);
     case 'paymentPurpose': return paymentPurpose(item);
     case 'used': return formatAmount(item.originalMinor - item.remainingMinor);

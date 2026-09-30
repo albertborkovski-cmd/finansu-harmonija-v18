@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
+import { useDropdownDismiss } from './useDropdownDismiss';
 
 export type SearchableSelectOption = {
   value: string;
@@ -18,6 +19,7 @@ type SearchableSelectProps = {
   className?: string;
   menuClassName?: string;
   emptyMessage?: string;
+  /** @deprecated All selection fields use the system checklist indicator. */
   selectionIndicator?: 'check' | 'checkbox';
 };
 
@@ -42,7 +44,6 @@ export default function SearchableSelect({
   className = "h-[42px] rounded-lg border border-[#D3E1EC] bg-white px-[14px] pr-9 font-montserrat text-[14px] font-medium text-[#10233A]",
   menuClassName = "",
   emptyMessage = "No options found",
-  selectionIndicator = 'check',
 }: SearchableSelectProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -64,17 +65,10 @@ export default function SearchableSelect({
     );
   }, [normalizedOptions, query]);
 
-  useEffect(() => {
-    if (!open) return;
-    const closeOnOutsideClick = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-        setQuery("");
-      }
-    };
-    document.addEventListener("mousedown", closeOnOutsideClick);
-    return () => document.removeEventListener("mousedown", closeOnOutsideClick);
-  }, [open]);
+  useDropdownDismiss(open, rootRef, () => {
+    setOpen(false);
+    setQuery("");
+  });
 
   useEffect(() => setActiveIndex(0), [query]);
 
@@ -137,6 +131,7 @@ export default function SearchableSelect({
       />
       <button
         type="button"
+        data-static-selection
         tabIndex={-1}
         disabled={disabled}
         aria-label={`Open ${ariaLabel} options`}
@@ -144,8 +139,8 @@ export default function SearchableSelect({
         onClick={() => {
           if (disabled) return;
           setQuery("");
-          setOpen((current) => !current);
-          inputRef.current?.focus();
+          if (!open) inputRef.current?.focus();
+          setOpen(!open);
         }}
         className="absolute right-0 top-0 flex h-full w-9 items-center justify-center text-[#7288A3] disabled:hidden"
       >
@@ -166,21 +161,21 @@ export default function SearchableSelect({
                   key={`${option.value}-${option.label}`}
                   type="button"
                   role="option"
+                  data-static-selection
                   aria-selected={selected}
                   disabled={option.disabled}
                   onMouseEnter={() => setActiveIndex(index)}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => choose(option)}
-                  className={`flex min-h-9 w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left font-montserrat text-[13px] font-medium text-[#10233A] disabled:cursor-not-allowed disabled:opacity-50 ${activeIndex === index ? "bg-[#F2F7FC]" : "hover:bg-[#F8FDFF]"}`}
+                  className={`flex min-h-9 w-full items-center gap-3 rounded-md px-3 py-2 text-left font-montserrat text-[13px] font-medium text-[#10233A] disabled:cursor-not-allowed disabled:opacity-50 ${selected ? "bg-[#E5EDF9]" : activeIndex === index ? "bg-[#F2F7FC]" : "hover:bg-[#F8FDFF]"}`}
                 >
-                  {selectionIndicator === 'checkbox' && <span aria-hidden="true" className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded border ${selected ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>
-                    {selected && <Check size={13} strokeWidth={3} className="text-white" />}
-                  </span>}
-                  <span className={`min-w-0 ${option.description ? 'flex flex-1 flex-col gap-1' : `truncate ${selectionIndicator === 'checkbox' ? 'flex-1' : ''}`}`}>
+                  <span aria-hidden="true" className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${selected ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>
+                    {selected && <Check size={12} strokeWidth={2.5} className="text-white" />}
+                  </span>
+                  <span className={`min-w-0 flex-1 ${option.description ? 'flex flex-col gap-1' : 'truncate'}`}>
                     <span className={option.description ? 'whitespace-normal break-words text-[14px] leading-5' : ''}>{option.label}</span>
                     {option.description && <span className="whitespace-normal break-words text-[12px] font-normal leading-[18px] text-[#7288A3]">{option.description}</span>}
                   </span>
-                  {selectionIndicator === 'check' && selected ? <Check size={14} className="flex-shrink-0 text-[#007EA7]" /> : null}
                 </button>
               );
             })

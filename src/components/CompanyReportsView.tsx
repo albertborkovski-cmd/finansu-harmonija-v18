@@ -4,11 +4,12 @@ import {
   Download,
   Eye,
   FileText,
-  Trash2,
   X,
 } from "lucide-react";
 import type { Company } from "../lib/supabase";
 import { usePersistentState } from "../hooks/usePersistentState";
+import { isInactiveRecord, isRecordLinked, removeOrDeactivateRecords } from '../lib/recordLifecycle';
+import { RowDeleteButton } from './DeleteButtons';
 import { PageActionButton, PageHeader } from "./PageHeader";
 import CompanyBreadcrumb from "./CompanyBreadcrumb";
 import OcrSearchField from "./OcrSearchField";
@@ -418,13 +419,14 @@ export default function CompanyReportsView({ company }: { company: Company }) {
                 />
               </div>
             ))}
-            <div className="w-[88px] flex-shrink-0" aria-hidden="true" />
+            <div className="system-table-row-actions w-[88px] flex-shrink-0" aria-hidden="true" />
           </div>
 
           <div className="flex flex-col gap-0.5">
             {pageRows.map((report, index) => (
               <div
                 key={report.id}
+                data-record-inactive={isInactiveRecord(report) || undefined}
                 className={`flex min-h-10 items-center rounded-lg font-montserrat text-[12px] text-[#10233A] transition-colors ${index % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} hover:bg-[#E7F4F9]`}
               >
                 {visibleColumns.map((column) => (
@@ -458,15 +460,10 @@ export default function CompanyReportsView({ company }: { company: Company }) {
                   >
                     <Eye size={15} strokeWidth={1.8} />
                   </button>
-                  <button
-                    type="button"
-                    title="DELETE"
-                    aria-label={`DELETE ${report.name}`}
-                    onClick={() => setDeleteReport(report)}
-                    className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] transition-colors hover:border-[#D64545] hover:text-[#D64545]"
-                  >
-                    <Trash2 size={15} strokeWidth={1.8} />
-                  </button>
+                  <RowDeleteButton linked={isRecordLinked(report, storageKey)} inactive={isInactiveRecord(report)} label={`Delete ${report.name}`} onDelete={() => {
+                    if (isRecordLinked(report, storageKey)) setReports(current => removeOrDeactivateRecords(current, new Set([report.id]), storageKey));
+                    else setDeleteReport(report);
+                  }} />
                 </div>
               </div>
             ))}
@@ -525,7 +522,7 @@ export default function CompanyReportsView({ company }: { company: Company }) {
           onClose={() => setDeleteReport(null)}
           onConfirm={() => {
             setReports((current) =>
-              current.filter((item) => item.id !== deleteReport.id),
+              removeOrDeactivateRecords(current, new Set([deleteReport.id]), storageKey),
             );
             setDeleteReport(null);
           }}

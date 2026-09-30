@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { PageHeader, PageActionButton } from './PageHeader';
 import { SystemBreadcrumb } from './SystemNavigation';
 import OcrSearchField from './OcrSearchField';
+import NotificationRelativeTime from './NotificationRelativeTime';
 import ColumnSettingsPanel, { type ColConfig } from './ColumnSettingsPanel';
 import { ColumnSettingsButton } from './ScopedActionButtons';
 import { ResizeHandle, useColumnResize } from './useColumnResize';
@@ -11,10 +12,12 @@ import HorizontalTableScrollbar from './HorizontalTableScrollbar';
 import TablePagination from './TablePagination';
 import { useAttentionNotifications } from '../hooks/useAttentionNotifications';
 import { useVisibleNotificationRecords } from '../hooks/useVisibleNotificationRecords';
-import { getNotificationStatus, getNotificationTabCounts, getRelevantActionsForTab, getTaskStatus, isNotificationRead, setNotificationRead, requiresAction, type AttentionNotification, type NotificationTab } from '../lib/notifications';
+import { getNotificationStatus, setNotificationStatus, getNotificationTabCounts, getRelevantActionsForTab, getTaskStatus, isNotificationRead, requiresAction, type AttentionNotification, type NotificationTab } from '../lib/notifications';
 import SystemAddFilters from './SystemAddFilters';
 import { canEditMenu, parseSession, type AppSession } from '../lib/accessControl';
-import { Check, XCircle, Mail, MailCheck, Pencil, Trash2, RefreshCw, X, AlertTriangle, Info } from 'lucide-react';
+import { Check, XCircle, CheckCircle2, RotateCcw, Pencil, RefreshCw, X, AlertTriangle, Info } from 'lucide-react';
+import { RowDeleteButton } from './DeleteButtons';
+import { isInactiveRecord, isRecordLinked, removeOrDeactivateRecords } from '../lib/recordLifecycle';
 import SearchableSelect from './SearchableSelect';
 import NewTaskForm from './NewTaskForm';
 import NotificationRelatedObjectField from './NotificationRelatedObjectField';
@@ -105,16 +108,21 @@ export default function OrganizationRequiredActionsView({ organization, session,
     if (!canEdit) throw new Error('You do not have permission to edit notifications.');
     writeRecords(category, update);
   };
-  const toggleRead = (row: AttentionNotification) => {
-    if (!currentSession || !sectionActions.notifications.some(item => item.id === row.id && item.organizationId === row.organizationId)) return;
+  const toggleNotificationStatus = (row: AttentionNotification) => {
+    if (!canEdit || !currentSession || row.category !== 'notifications' || !sectionActions.notifications.some(item => item.id === row.id && item.organizationId === row.organizationId)) return;
     try {
-      writeRecords('notifications', rows => rows.map(item => item.id === row.id && item.organizationId === row.organizationId ? setNotificationRead(item, currentSession.email, !isNotificationRead(item, currentSession.email)) : item));
+      updateRecords('notifications', rows => {
+        const current = rows.find(item => item.id === row.id && item.organizationId === row.organizationId);
+        if (!current || (current.organizationId && !canAccessOrganization(current.organizationId)) || !getRelevantActionsForTab([{ ...current, category: 'notifications' }], currentSession, 'notifications').length) throw new Error('This notification is no longer accessible. Refresh the list.');
+        const nextStatus = getNotificationStatus(current) === 'Active' ? 'Resolved' : 'Active';
+        return rows.map(item => item === current ? setNotificationStatus(item, nextStatus) : item);
+      });
       setError('');
-    } catch (e) { setError(e instanceof Error ? e.message : 'Unable to update reading status.'); }
+    } catch (e) { setError(e instanceof Error ? e.message : 'Unable to update notification status.'); }
   };
   const deleteNotification = (row: AttentionNotification) => {
     if (row.category !== 'notifications' || isSystemNotification(row) || !canEdit) return;
-    if (!window.confirm(`Delete ${row.name}?`)) return;
+    if (!window.confirm(`Remove ${row.name}? Linked records will be deactivated and retained.`)) return;
     try {
       updateRecords('notifications', rows => {
         const current = rows.find(item => item.id === row.id && item.organizationId === row.organizationId);
@@ -123,7 +131,7 @@ export default function OrganizationRequiredActionsView({ organization, session,
           || !getRelevantActionsForTab([{ ...current, category: 'notifications' }], currentSession, 'notifications').length) {
           throw new Error('This notification cannot be deleted. Refresh the list.');
         }
-        return rows.filter(item => item !== current);
+        return removeOrDeactivateRecords(rows, new Set([current.id]), 'finansu-harmonija:v7:notifications', item => ({ ...setNotificationStatus(item, 'Resolved'), active: false, inactive: true }));
       });
       setError('');
     } catch (e) { setError(e instanceof Error ? e.message : 'Unable to delete record.'); }
@@ -314,28 +322,30 @@ export default function OrganizationRequiredActionsView({ organization, session,
             <ColumnSortButton columnLabel={column.label} direction={directionFor(column.key)} onDirectionChange={direction => changeSort(column.key, direction)} />
             <ResizeHandle onMouseDown={event => startResize(columns.findIndex(item => item.key === column.key), event)} />
           </div>)}
-          {activeTab === 'notifications' && <div style={{ width: actionWidth }} className="system-table-row-actions shrink-0 bg-white px-2 font-montserrat text-[12px] text-[#10233A]">Action</div>}
+          <div aria-hidden="true" className="min-w-0 flex-1" />
+          <div style={{ width: actionWidth }} className="system-table-row-actions shrink-0 bg-white px-2"><span className="sr-only">Actions</span></div>
         </div>
         {sortedRows.slice(0, currentPage * TABLE_BATCH_SIZE).map((row, index) => {
-          const notificationRead = row.category === 'notifications' && isNotificationRead(row, effectiveSession.email);
+          const notificationResolved = row.category === 'notifications' && getNotificationStatus(row) === 'Resolved';
           const task = row.category === 'reminders' ? editableTask(row) : null;
           const dueGroup = task ? getTaskDueGroup(task, today) : null;
           const permissions = task && currentSession ? getTaskPermissions(task, currentSession) : null;
           const actionVisibility = task && currentSession ? getTaskActionVisibility(task, currentSession) : null;
-          return <div key={row.category === 'notifications' ? JSON.stringify([row.category, row.organizationId ?? '', row.id]) : `${row.organizationId ?? ''}:${row.actionId || `${row.category}:${row.id}`}`} className={`flex h-9 items-center rounded-lg ${index % 2 === 0 ? 'bg-[#F8FDFF]' : ''}`}>
+          return <div data-record-inactive={('inactive' in row && row.inactive === true) || undefined} key={row.category === 'notifications' ? JSON.stringify([row.category, row.organizationId ?? '', row.id]) : `${row.organizationId ?? ''}:${row.actionId || `${row.category}:${row.id}`}`} className={`flex h-9 items-center rounded-lg ${index % 2 === 0 ? 'bg-[#F8FDFF]' : ''}`}>
           {visible.map(column => <div key={column.key} title={valueFor(row, column.key)} className="flex-shrink-0 truncate px-3 font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A]" style={{ width: column.width }}>{column.key === 'severity' ? <span className={`inline-flex items-center gap-1.5 ${valueFor(row, column.key) === 'Critical' ? 'text-[#B93846]' : valueFor(row, column.key) === 'Warning' ? 'text-[#966000]' : 'text-[#7288A3]'}`}>{['Critical', 'Warning'].includes(valueFor(row, column.key)) ? <AlertTriangle size={15} /> : <Info size={15} />}{valueFor(row, column.key)}</span> : column.key === 'dueDate' && task ? <>
             <span>{valueFor(row, column.key)}</span>{dueGroup && <span className={`ml-2 text-[10px] ${dueGroup === 'Overdue' ? 'text-[#D75B67]' : 'text-[#7288A3]'}`}>{dueGroup}</span>}
-          </> : column.key === 'priority' && task ? <span className={`inline-flex items-center rounded px-2 py-0.5 text-[11px] font-medium ${task.priority === 'Urgent' ? 'bg-[#FDEBEC] text-[#B93846]' : task.priority === 'High' ? 'bg-[#FFF3DE] text-[#966000]' : task.priority === 'Low' ? 'bg-[#F0F3F6] text-[#7288A3]' : 'bg-[#E6F2F6] text-[#007EA7]'}`}>{task.priority ?? 'Normal'}</span> : column.key === 'relatedObject' ? renderRelatedObject(row) : valueFor(row, column.key)}</div>)}
-          <div style={{ width: actionWidth }} className={`system-table-row-actions flex shrink-0 items-center gap-1 px-2 ${activeTab === 'notifications' ? 'justify-start' : 'justify-end'} ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
+          </> : column.key === 'priority' && task ? <span className={`inline-flex items-center rounded px-2 py-0.5 text-[11px] font-medium ${task.priority === 'Urgent' ? 'bg-[#FDEBEC] text-[#B93846]' : task.priority === 'High' ? 'bg-[#FFF3DE] text-[#966000]' : task.priority === 'Low' ? 'bg-[#F0F3F6] text-[#7288A3]' : 'bg-[#E6F2F6] text-[#007EA7]'}`}>{task.priority ?? 'Normal'}</span> : column.key === 'createdAt' && row.category === 'notifications' ? <NotificationRelativeTime row={row} /> : column.key === 'relatedObject' ? renderRelatedObject(row) : valueFor(row, column.key)}</div>)}
+          <div aria-hidden="true" className="min-w-0 flex-1" />
+          <div style={{ width: actionWidth }} className={`system-table-row-actions flex shrink-0 items-center justify-end gap-1 px-2 ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
             {row.category === 'notifications' && renderRelatedObject(row, true)}
-            {row.category === 'notifications' && <button type="button" title={notificationRead ? 'Read — click to mark as unread' : 'Unread — click to mark as read'} aria-label={`${notificationRead ? 'Mark as unread' : 'Mark as read'}: ${row.name}`} onClick={() => toggleRead(row)} className={`flex h-7 w-7 shrink-0 items-center justify-center rounded border-2 hover:border-[#007EA7] hover:text-[#007EA7] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#007EA7] ${notificationRead ? 'border-[#D3E1EC] bg-white text-[#7288A3]' : 'border-[#D3E1EC] bg-[#E6F2F6] text-[#007EA7]'}`}>{notificationRead ? <MailCheck size={16} aria-hidden="true" /> : <Mail size={16} aria-hidden="true" />}</button>}
+            {row.category === 'notifications' && <button type="button" disabled={!canEdit} title={notificationResolved ? 'Mark as Active' : 'Mark as Resolved'} aria-label={`${notificationResolved ? 'Mark as Active' : 'Mark as Resolved'}: ${row.name}`} onClick={() => toggleNotificationStatus(row)} className="flex h-7 w-7 shrink-0 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] enabled:hover:border-[#007EA7] enabled:hover:text-[#007EA7] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#007EA7] disabled:cursor-not-allowed disabled:opacity-40">{notificationResolved ? <RotateCcw size={16} aria-hidden="true" /> : <CheckCircle2 size={16} aria-hidden="true" />}</button>}
             {((row.category === 'notifications' && !isSystemNotification(row)) || permissions?.edit) && <button type="button" disabled={row.category === 'notifications' && !canEdit} title="EDIT" aria-label={`Edit ${row.name}`} onClick={() => {
               if (row.category === 'notifications' && (isSystemNotification(row) || !canEdit)) return;
               editorOriginal.current = row; setEditor({ ...row }); setError('');
             }} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] text-[#7288A3] hover:border-[#007EA7] disabled:opacity-40"><Pencil size={14} /></button>}
             {actionVisibility?.complete && <button type="button" disabled={!permissions?.complete} title="Complete" aria-label={`Complete ${row.name}`} onClick={() => changeTaskStatus(row, 'complete')} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] text-[#7288A3] enabled:hover:border-[#007EA7] enabled:hover:text-[#007EA7] disabled:cursor-not-allowed disabled:border-[#E5EDF9] disabled:text-[#B4B6B8]"><Check size={14} /></button>}
             {actionVisibility?.cancel && <button type="button" disabled={!permissions?.cancel} title="Cancel task" aria-label={`Cancel task ${row.name}`} onClick={() => changeTaskStatus(row, 'cancel')} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] text-[#7288A3] enabled:hover:border-[#D75B67] enabled:hover:text-[#D75B67] disabled:cursor-not-allowed disabled:border-[#E5EDF9] disabled:text-[#B4B6B8]"><XCircle size={14} /></button>}
-            {row.category === 'notifications' && !isSystemNotification(row) && <button type="button" disabled={!canEdit} title="DELETE" aria-label={`Delete ${row.name}`} onClick={() => deleteNotification(row)} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] text-[#7288A3] hover:border-[#D75B67] disabled:opacity-40"><Trash2 size={14} /></button>}
+            {row.category === 'notifications' && !isSystemNotification(row) && <RowDeleteButton disabled={!canEdit} linked={isRecordLinked(row, 'finansu-harmonija:v7:notifications')} inactive={isInactiveRecord(row)} label={`Delete ${row.name}`} onDelete={() => deleteNotification(row)} />}
           </div>
         </div>; })}
         {!sortedRows.length && <p className="py-12 text-center font-montserrat text-[12px] text-[#7288A3]">No {activeTab === 'notifications' ? 'notifications' : 'tasks'} match the selected filters.</p>}

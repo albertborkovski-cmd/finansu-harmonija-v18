@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { ArrowLeft, User, Menu, LogOut, ChevronDown, LayoutDashboard, Files, HandCoins, Scale, BarChart3, Headphones, HelpCircle, BookOpenText, Landmark, Bell } from 'lucide-react';
+import { ArrowLeft, User, Menu, LogOut, ChevronDown, LayoutDashboard, Files, HandCoins, Scale, BarChart3, Headphones, HelpCircle, BookOpenText, Landmark, ListTodo } from 'lucide-react';
 import type { Company } from '../lib/supabase';
 import Documents from './Documents';
 import DashboardView from './DashboardView';
@@ -11,6 +11,9 @@ import CompanyDebtsView from './CompanyDebtsView';
 import CompanyReconciliationView from './CompanyReconciliationView';
 import AllDocumentsView from './AllDocumentsView';
 import CompanyBreadcrumb from './CompanyBreadcrumb';
+import Companies from './Companies';
+import OrganizationEmailSettingsView from './OrganizationEmailSettingsView';
+import { Settings } from 'lucide-react';
 import GeneralLedgerView from './GeneralLedgerView';
 import CompanyReportsView from './CompanyReportsView';
 import CompanyGlJournalView from './CompanyGlJournalView';
@@ -37,13 +40,15 @@ interface CompanyDetailProps {
 
 const mainMenuItems = [
   { id: 'overview',      label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'notifications', label: 'Tasks', icon: Bell },
+  { id: 'notifications', label: 'Tasks', icon: ListTodo },
   { id: 'documents',     label: 'All documents', icon: Files },
   { id: 'gl-journal',    label: 'GL journal', icon: BookOpenText },
   { id: 'bank',          label: 'Bank', icon: Landmark },
   { id: 'reports',       label: 'Debts', icon: HandCoins },
   { id: 'services',      label: 'Reconciliation', icon: Scale },
   { id: 'settings',      label: 'Reports', icon: BarChart3 },
+  { id: 'counterparties', label: 'Counterparties', icon: User },
+  { id: 'company-settings', label: 'Settings', icon: Settings },
 ];
 
 const contactMenuItems = [
@@ -371,6 +376,10 @@ export default function CompanyDetail({ company, onBack, onLogout, onOpenProfile
               : <CompanyClientInformation company={currentCompany} activeTab={activeCompanyInformationMenu} organizationDesign onCompanyUpdated={setCurrentCompany} />
         ) : activeMenu === 'services' ? (
           <CompanyReconciliationView key={currentCompany.id + ':examples-v2'} companyId={currentCompany.id} companyName={currentCompany.name} generalLedgerName={currentCompany.general_ledger ?? ''} canEditGlAccounts={canEditReconciliation} initialRecordId={relatedObject?.type === 'Reconciliation' ? relatedRecordId : undefined} onRelatedObjectBack={backFromRelatedObject} />
+        ) : activeMenu === 'counterparties' ? (
+          <Companies key={currentCompany.id} title="Counterparties" entityLabel="counterparty" dataSource="counterparties" counterpartyCompanyId={currentCompany.id} allowCreate breadcrumbs={['Companies', currentCompany.name, 'Counterparties']} />
+        ) : activeMenu === 'company-settings' ? (
+          <OrganizationEmailSettingsView key={currentCompany.id} companyId={currentCompany.id} companyName={currentCompany.name} />
         ) : activeMenu === 'settings' ? (
           <CompanyReportsView company={currentCompany} />
         ) : (

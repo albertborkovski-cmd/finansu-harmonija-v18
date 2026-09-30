@@ -1,4 +1,5 @@
 import { toggleFilteredSelection } from '../lib/tableSelection';
+import { isInactiveRecord, isRecordLinked } from '../lib/recordLifecycle';
 import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, FileText, Pencil, X } from "lucide-react";
@@ -7,6 +8,7 @@ import ColumnSortButton, { useMultiColumnSort } from "./ColumnSortButton";
 import { BulkDeleteButton, RowDeleteButton } from "./DeleteButtons";
 import HorizontalTableScrollbar from "./HorizontalTableScrollbar";
 import OcrSearchField from "./OcrSearchField";
+import OcrFieldValidationSettings from "./OcrFieldValidationSettings";
 import { PageActionButton, PageHeader } from "./PageHeader";
 import { HeaderBackButton } from "./SystemNavigation";
 import RefreshAllButton from "./RefreshAllButton";
@@ -14,6 +16,7 @@ import { ColumnSettingsButton } from "./ScopedActionButtons";
 import TablePagination from "./TablePagination";
 import SystemAddFilters from "./SystemAddFilters";
 import { ResizeHandle, useColumnResize } from "./useColumnResize";
+import { useDropdownDismiss } from "./useDropdownDismiss";
 
 export type OrganizationReferenceSection =
   | "Company status"
@@ -481,13 +484,16 @@ function CheckBox({
 
 export default function OrganizationReferenceValuesView({
   section,
+  breadcrumbParents = ["Settings", "Organizations"],
 }: {
   section: OrganizationReferenceSection;
+  breadcrumbParents?: [string, string];
 }) {
   const [records, setRecords] = useState<OrganizationReferenceRecord[]>(() =>
     loadOrganizationReferenceRecords(section),
   );
   const [search, setSearch] = useState("");
+  const [validationDocument, setValidationDocument] = useState<OrganizationReferenceRecord | null>(null);
   const [activeFilterKeys, setActiveFilterKeys] = useState<string[]>([]);
   const [filterValues, setFilterValues] = useState<Record<string, string[]>>(
     {},
@@ -506,6 +512,8 @@ export default function OrganizationReferenceValuesView({
     string | null
   >(null);
   const [statusOpen, setStatusOpen] = useState(false);
+  const statusRef = useRef<HTMLSpanElement>(null);
+  useDropdownDismiss(statusOpen, statusRef, () => setStatusOpen(false));
   const [subtypeEditingIndex, setSubtypeEditingIndex] = useState<number | null>(null);
   const [subtypeStatusOpen, setSubtypeStatusOpen] = useState(false);
   const [subtypeDraft, setSubtypeDraft] = useState<OrganizationReferenceRecord>({
@@ -867,17 +875,16 @@ export default function OrganizationReferenceValuesView({
     });
   };
 
+  const recordIsLinked = (record: OrganizationReferenceRecord) =>
+    records.some((item) => item.parentCode === record.code && item !== record) ||
+    isRecordLinked({ ...record, id: record.code, name: record.fullName }, storageKey(section));
+
   const deleteIndexes = (indexes: Set<number>) => {
-    const deletedCodes = new Set(
-      records
-        .filter((_, index) => indexes.has(index))
-        .map((record) => record.code),
-    );
     persist(
-      records.filter(
-        (record, index) =>
-          !indexes.has(index) && !deletedCodes.has(record.parentCode),
-      ),
+      records.flatMap((record, index) => {
+        if (!indexes.has(index) || isInactiveRecord(record)) return [record];
+        return recordIsLinked(record) ? [{ ...record, status: "Inactive" }] : [];
+      }),
     );
     setSelected(new Set());
   };
@@ -887,6 +894,19 @@ export default function OrganizationReferenceValuesView({
   const visibleColumns = columns.filter((column) => column.visible);
   const tableWidth =
     42 + visibleColumns.reduce((sum, column) => sum + column.width, 0) + 72;
+
+  if (section === "Document type" && validationDocument) {
+    const parent = records.find(record => record.code === validationDocument.parentCode);
+    return <div className="flex min-h-0 flex-1 flex-col gap-6">
+      <nav aria-label="Breadcrumb" className="flex items-center gap-2 font-montserrat text-[12px] text-[#7288A3]">
+        <span>OCR</span><span>/</span><span>Administration</span><span>/</span>
+        <button onClick={() => { setValidationDocument(null); setSelectedDocumentTypeCode(null); }} className="hover:text-[#007EA7]">Document type</button><span>/</span>
+        <button onClick={() => setValidationDocument(null)} className="hover:text-[#007EA7]">{parent?.fullName || "Invoices"}</button><span>/</span><span>{validationDocument.fullName}</span>
+      </nav>
+      <div className="flex items-center gap-3"><HeaderBackButton onClick={() => setValidationDocument(null)} /><h1 className="font-montserrat text-xl font-semibold text-[#10233A]">{validationDocument.fullName}</h1></div>
+      <OcrFieldValidationSettings key={validationDocument.code} documentType={validationDocument.code} />
+    </div>;
+  }
 
   if (section === "Document type" && selectedDocumentTypeCode) {
     const selectedDocumentType = records.find(
@@ -933,9 +953,9 @@ export default function OrganizationReferenceValuesView({
             }
           />
           <div className="flex items-center gap-2 font-montserrat text-[12px] font-medium text-[#7288A3]">
-            <span>Settings</span>
+            <span>{breadcrumbParents[0]}</span>
             <span>/</span>
-            <span>Organizations</span>
+            <span>{breadcrumbParents[1]}</span>
             <span>/</span>
             <button
               type="button"
@@ -973,6 +993,7 @@ export default function OrganizationReferenceValuesView({
             <div className="flex items-center gap-4">
               <BulkDeleteButton
                 selectedCount={selected.size}
+                linked={records.some((record, index) => selected.has(index) && recordIsLinked(record))}
                 onDelete={() => deleteIndexes(selected)}
               />
               <ColumnSettingsButton
@@ -1025,13 +1046,14 @@ export default function OrganizationReferenceValuesView({
                     </div>
                   );
                 })}
-                <div className="h-6 w-[72px] flex-shrink-0" />
+                <div className="system-table-row-actions h-6 w-[72px] flex-shrink-0" />
               </div>
 
               <div className="flex flex-col gap-0.5">
                 {displayedSubtypes.map(({ record, index }, rowIndex) => (
                   <div
                     key={`${record.code}-${index}`}
+                    data-record-inactive={isInactiveRecord(record) || undefined}
                     className={`group flex h-10 items-center rounded-lg ${rowIndex % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} hover:bg-[#E7F4F9]`}
                   >
                     <div className="flex w-[42px] flex-shrink-0 px-3">
@@ -1054,15 +1076,15 @@ export default function OrganizationReferenceValuesView({
                         style={{ width: column.width }}
                         className="flex-shrink-0 overflow-hidden px-3"
                       >
-                        <span className="block truncate font-montserrat text-[12px] font-normal text-[#10233A]">
+                        {column.key === "fullName" ? <button type="button" onClick={() => setValidationDocument(record)} className="block max-w-full truncate text-left font-montserrat text-[12px] text-[#007EA7] underline hover:text-[#005E7D]">{record.fullName}</button> : <span className="block truncate font-montserrat text-[12px] font-normal text-[#10233A]">
                           {record[
                             column.key as keyof OrganizationReferenceRecord
                           ] || "—"}
-                        </span>
+                        </span>}
                       </div>
                     ))}
                     <div
-                      className={`flex h-10 w-[72px] flex-shrink-0 items-center justify-end gap-3 px-2 group-hover:bg-[#E7F4F9] ${rowIndex % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"}`}
+                      className={`system-table-row-actions flex h-10 w-[72px] flex-shrink-0 items-center justify-end gap-3 px-2 group-hover:bg-[#E7F4F9] ${rowIndex % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"}`}
                     >
                       <button
                         type="button"
@@ -1075,6 +1097,8 @@ export default function OrganizationReferenceValuesView({
                       <RowDeleteButton
                         variant="plain"
                         label={`Delete ${record.fullName}`}
+                        linked={recordIsLinked(record)}
+                        inactive={isInactiveRecord(record)}
                         onDelete={() => deleteIndexes(new Set([index]))}
                       />
                     </div>
@@ -1156,9 +1180,9 @@ export default function OrganizationReferenceValuesView({
         }
       />
       <div className="flex items-center gap-2 font-montserrat text-[12px] font-medium text-[#7288A3]">
-        <span>Settings</span>
+        <span>{breadcrumbParents[0]}</span>
         <span>/</span>
-        <span>Organizations</span>
+        <span>{breadcrumbParents[1]}</span>
         <span>/</span>
         <span className="text-[#A1B6C6]">{section}</span>
       </div>
@@ -1183,6 +1207,7 @@ export default function OrganizationReferenceValuesView({
         <div className="flex items-center gap-4">
           <BulkDeleteButton
             selectedCount={selected.size}
+            linked={records.some((record, index) => selected.has(index) && recordIsLinked(record))}
             onDelete={() => deleteIndexes(selected)}
           />
           <ColumnSettingsButton onClick={() => setShowColumns(true)} />
@@ -1231,13 +1256,14 @@ export default function OrganizationReferenceValuesView({
                 </div>
               );
             })}
-            <div className="h-6 w-[72px] flex-shrink-0 bg-white" />
+            <div className="system-table-row-actions h-6 w-[72px] flex-shrink-0 bg-white" />
           </div>
 
           <div className="flex flex-col gap-0.5">
             {displayedRecords.map(({ record, index }, rowIndex) => (
               <div
                 key={`${record.code}-${index}`}
+                data-record-inactive={isInactiveRecord(record) || undefined}
                 role={section === "Document type" ? "button" : undefined}
                 tabIndex={section === "Document type" ? 0 : undefined}
                 onClick={() => {
@@ -1307,7 +1333,7 @@ export default function OrganizationReferenceValuesView({
                 ))}
                 <div
                   onClick={(event) => event.stopPropagation()}
-                  className={`flex h-10 w-[72px] flex-shrink-0 items-center justify-end gap-3 px-2 group-hover:bg-[#E7F4F9] ${rowIndex % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"}`}
+                  className={`system-table-row-actions flex h-10 w-[72px] flex-shrink-0 items-center justify-end gap-3 px-2 group-hover:bg-[#E7F4F9] ${rowIndex % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"}`}
                 >
                   <button
                     type="button"
@@ -1320,6 +1346,8 @@ export default function OrganizationReferenceValuesView({
                   <RowDeleteButton
                     variant="plain"
                     label={`Delete ${valueForRecord(section, record)}`}
+                    linked={recordIsLinked(record)}
+                    inactive={isInactiveRecord(record)}
                     onDelete={() => deleteIndexes(new Set([index]))}
                   />
                 </div>
@@ -1414,7 +1442,7 @@ export default function OrganizationReferenceValuesView({
                   >
                     <span>{column.label}</span>
                     {key === "status" ? (
-                      <span className="relative">
+                      <span ref={statusRef} className="relative">
                         <button
                           type="button"
                           aria-label={column.label}
@@ -1442,15 +1470,16 @@ export default function OrganizationReferenceValuesView({
                                   setDraft({ ...draft, status });
                                   setStatusOpen(false);
                                 }}
-                                className={`flex h-9 w-full items-center gap-2 rounded-md px-2 text-left font-montserrat text-[13px] font-medium text-[#10233A] ${draft.status === status ? "bg-[#F0F7FA]" : "hover:bg-[#F7FBFC]"}`}
+                                className={`flex h-9 w-full items-center gap-2 rounded-md px-2 text-left font-montserrat text-[13px] font-medium text-[#10233A] ${draft.status === status ? "bg-[#E5EDF9]" : "hover:bg-[#F7FBFC]"}`}
                               >
                                 <span
-                                  className={`flex h-[18px] w-[18px] items-center justify-center rounded border ${draft.status === status ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
+                                  aria-hidden="true"
+                                  className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${draft.status === status ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
                                 >
                                   {draft.status === status && (
                                     <Check
                                       size={12}
-                                      strokeWidth={3}
+                                      strokeWidth={2.5}
                                       className="text-white"
                                     />
                                   )}
@@ -1524,6 +1553,8 @@ function SubtypeEditorPanel({
   onClose: () => void;
   onSave: () => void;
 }) {
+  const statusRef = useRef<HTMLLabelElement>(null);
+  useDropdownDismiss(statusOpen, statusRef, () => { if (statusOpen) onToggleStatus(); });
   return (
     <div
       className="fixed inset-0 z-[150] flex justify-end bg-[#10233A]/10"
@@ -1580,7 +1611,7 @@ function SubtypeEditorPanel({
             </label>
           ))}
 
-          <label className="relative flex flex-col gap-2 font-montserrat text-[14px] font-semibold text-[#10233A]">
+          <label ref={statusRef} className="relative flex flex-col gap-2 font-montserrat text-[14px] font-semibold text-[#10233A]">
             <span>Status</span>
             <button
               type="button"
@@ -1609,13 +1640,14 @@ function SubtypeEditorPanel({
                       onChange({ ...draft, status });
                       onToggleStatus();
                     }}
-                    className={`flex h-9 w-full items-center gap-2 rounded-md px-2 text-left font-montserrat text-[13px] font-medium text-[#10233A] ${draft.status === status ? "bg-[#F0F7FA]" : "hover:bg-[#F7FBFC]"}`}
+                    className={`flex h-9 w-full items-center gap-2 rounded-md px-2 text-left font-montserrat text-[13px] font-medium text-[#10233A] ${draft.status === status ? "bg-[#E5EDF9]" : "hover:bg-[#F7FBFC]"}`}
                   >
                     <span
-                      className={`flex h-[18px] w-[18px] items-center justify-center rounded border ${draft.status === status ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
+                      aria-hidden="true"
+                      className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${draft.status === status ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
                     >
                       {draft.status === status && (
-                        <Check size={12} className="text-white" />
+                        <Check size={12} strokeWidth={2.5} className="text-white" />
                       )}
                     </span>
                     {status}

@@ -14,14 +14,28 @@ The normal production build does not include this fixture.
 
 ## Row action layout regression
 
-Run `node --test tests/row-action-layout.test.mjs` to check the shared normal-flow
-CSS contract and prevent explicit table action wrappers from regaining sticky,
-absolute, automatic-margin, or flexible-spacer positioning.
+Run `node --test tests/row-action-layout.test.mjs tests/table-action-layout.test.mjs`
+to check the shared normal-flow CSS contract, automatic left margin, full-width
+flex rows, and flexible final grid tracks. Action cells must not regain sticky,
+absolute, fixed, or growing positioning.
+
+Start `npm run dev` and open `/tests/fixtures/table-action-layout.html` for an
+isolated browser check using the production stylesheet, without application data
+or authentication. The four cases cover narrow and overflowing flex/grid rows.
+`#layout-result` reports startup and post-mutation bounds assertions; all checks
+must pass after hiding/adding columns, resizing columns and the viewport, and
+scrolling to the end. Reset restores fixture-only state.
+
+For automated inspection, `window.tableActionFixture.checkLayout()` returns
+`{ passed, failures, measurements }`. Viewports use IDs `flex-narrow-viewport`,
+`flex-wide-viewport`, `grid-narrow-viewport`, and `grid-wide-viewport`; replace
+`viewport` with `row-actions` or `header-actions` to inspect action cells.
 
 Browser checks for Companies, Notifications & Tasks, Settings → Internal Users,
 and OCR tables:
 
-- Actions follow the last visible data column with both narrow and wide tables.
+- With spare width, actions align to the viewport right edge after all data columns.
+- With overflowing columns, actions follow the last data column and scroll normally.
 - Hiding, showing, resizing or reordering data columns moves the action cell with them.
 - Horizontal scrolling moves data and action cells together, with no overlay.
 - Restore any column preferences changed during testing.

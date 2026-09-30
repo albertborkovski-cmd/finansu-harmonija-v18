@@ -14,6 +14,8 @@ import SystemAddFilters from "./SystemAddFilters";
 import TablePagination from "./TablePagination";
 import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { ResizeHandle, useColumnResize } from "./useColumnResize";
+import { useDropdownDismiss } from "./useDropdownDismiss";
+import { isInactiveRecord } from "../lib/recordLifecycle";
 
 type OrganizationBankAccount = {
   id: string;
@@ -90,6 +92,8 @@ export default function CompanyBankAccountsView({ company, onCompanyUpdated }: {
   const [error, setError] = useState("");
   const [editing, setEditing] = useState<OrganizationBankAccount | null>(null);
   const [frequencyOpen, setFrequencyOpen] = useState(false);
+  const frequencyRef = useRef<HTMLLabelElement>(null);
+  useDropdownDismiss(frequencyOpen, frequencyRef, () => setFrequencyOpen(false));
   const [columns, setColumns] = usePersistentState<ColConfig[]>(
     `finansu-harmonija:v12:bank-account-columns:${company.id}`,
     DEFAULT_COLUMNS,
@@ -127,6 +131,7 @@ export default function CompanyBankAccountsView({ company, onCompanyUpdated }: {
   };
 
   const syncAccounts = async (ids: string[]) => {
+    ids = ids.filter(id => accounts.some(account => account.id === id && !isInactiveRecord(account)));
     if (!ids.length) return;
     setSyncingIds(ids);
     const syncedAt = new Date().toISOString();
@@ -184,7 +189,7 @@ export default function CompanyBankAccountsView({ company, onCompanyUpdated }: {
 
   return (
     <div className="flex min-w-0 flex-col gap-8 bg-white px-4 py-14 sm:px-8 lg:px-[72px]">
-      <PageHeader title="Bank accounts" actions={<PageActionButton disabled={!accounts.length || syncingIds.length > 0} onClick={() => void syncAccounts(accounts.map((account) => account.id))}>SYNC ALL</PageActionButton>} />
+      <PageHeader title="Bank accounts" actions={<PageActionButton disabled={!accounts.some(account => !isInactiveRecord(account)) || syncingIds.length > 0} onClick={() => void syncAccounts(accounts.map((account) => account.id))}>SYNC ALL</PageActionButton>} />
       <CompanyBreadcrumb companyName={company.name} items={["Bank", "Bank accounts"]} />
 
       <div className="flex flex-wrap items-center gap-2">
@@ -210,16 +215,16 @@ export default function CompanyBankAccountsView({ company, onCompanyUpdated }: {
                 <ResizeHandle onMouseDown={(event) => startResize(realIndex, event)} />
               </div>;
             })}
-            <div className="w-[104px] flex-shrink-0" />
+            <div className="system-table-row-actions w-[104px] flex-shrink-0" />
           </div>
 
           <div className="flex flex-col gap-0.5">
             {visibleRows.map((row, index) => {
               const syncing = syncingIds.includes(row.id);
-              return <div key={row.id} className={`flex h-10 items-center rounded-lg ${index % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} hover:bg-[#E7F4F9]`}>
+              return <div key={row.id} data-record-inactive={isInactiveRecord(row) || undefined} className={`flex h-10 items-center rounded-lg ${index % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} hover:bg-[#E7F4F9]`}>
                 {visibleColumns.map((column) => <div key={column.key} style={{ width: column.width }} className="flex-shrink-0 truncate px-3 font-montserrat text-[12px] font-normal text-[#10233A]">{renderCell(row, column.key)}</div>)}
                 <div className="system-table-row-actions flex w-[104px] flex-shrink-0 items-center justify-end gap-2 px-3">
-                  <button type="button" aria-label={`Synchronize ${row.iban}`} title="SYNC NOW" disabled={syncing} onClick={() => void syncAccounts([row.id])} className="flex h-7 w-7 items-center justify-center rounded-md border border-[#C8D8E5] text-[#7288A3] transition-colors hover:border-[#007EA7] hover:bg-white hover:text-[#007EA7] disabled:opacity-50"><ArrowDownUp size={14} className={syncing ? "animate-pulse" : ""} /></button>
+                  <button type="button" aria-label={`Synchronize ${row.iban}`} title="SYNC NOW" disabled={syncing || isInactiveRecord(row)} onClick={() => void syncAccounts([row.id])} className="flex h-7 w-7 items-center justify-center rounded-md border border-[#C8D8E5] text-[#7288A3] transition-colors hover:border-[#007EA7] hover:bg-white hover:text-[#007EA7] disabled:opacity-50"><ArrowDownUp size={14} className={syncing ? "animate-pulse" : ""} /></button>
                   <button type="button" aria-label={`SETTINGS ${row.iban}`} title="SETTINGS" onClick={() => setEditing({ ...row })} className="flex h-7 w-7 items-center justify-center rounded-md border border-[#C8D8E5] text-[#7288A3] transition-colors hover:border-[#007EA7] hover:bg-white hover:text-[#007EA7]"><Settings2 size={14} /></button>
                 </div>
               </div>;
@@ -239,9 +244,9 @@ export default function CompanyBankAccountsView({ company, onCompanyUpdated }: {
           <div className="flex items-center justify-between px-6 py-5"><h2 className="font-montserrat text-[22px] font-semibold text-[#10233A]">Synchronization settings</h2><button type="button" aria-label="Close synchronization settings" onClick={() => setEditing(null)} className="text-[#7288A3]"><X size={24} /></button></div>
           <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-6 py-2">
             <div className="rounded-lg bg-[#F8FDFF] px-4 py-3"><p className="font-montserrat text-[11px] font-semibold uppercase text-[#7288A3]">Bank account</p><p className="mt-1 font-montserrat text-[13px] font-semibold text-[#10233A]">{editing.iban || "—"}</p></div>
-            <label className="relative flex flex-col gap-2 font-montserrat text-[12px] font-semibold text-[#10233A]">Synchronization frequency
-              <button type="button" aria-haspopup="listbox" aria-expanded={frequencyOpen} onClick={() => setFrequencyOpen((value) => !value)} className="flex h-10 items-center justify-between rounded-lg border border-[#D3E1EC] bg-white px-3 text-left text-[13px] font-medium outline-none focus:border-[#007EA7]"><span>{editing.syncSchedule || "Manual synchronization"}</span><ChevronDown size={16} className={`text-[#7288A3] transition-transform ${frequencyOpen ? "rotate-180" : ""}`} /></button>
-              {frequencyOpen && <div role="listbox" className="absolute left-0 right-0 top-[66px] z-10 overflow-hidden rounded-lg border border-[#D3E1EC] bg-white p-1 shadow-lg">{SYNC_OPTIONS.map((option) => { const selected = (editing.syncSchedule || "Manual synchronization") === option; return <button key={option} type="button" role="option" aria-selected={selected} onClick={() => { setEditing({ ...editing, syncSchedule: option }); setFrequencyOpen(false); }} className={`flex h-9 w-full items-center justify-between rounded-md px-3 text-left font-montserrat text-[12px] font-medium ${selected ? "bg-[#E7F4F9] text-[#007EA7]" : "text-[#10233A] hover:bg-[#F8FDFF]"}`}><span>{option}</span>{selected && <Check size={14} />}</button>; })}</div>}
+            <label ref={frequencyRef} className="relative flex flex-col gap-2 font-montserrat text-[12px] font-semibold text-[#10233A]">Synchronization frequency
+              <button type="button" aria-haspopup="listbox" aria-expanded={frequencyOpen} onClick={() => setFrequencyOpen((value) => !value)} className="flex h-10 items-center justify-between gap-2 rounded-lg border border-[#D3E1EC] bg-white px-3 text-left text-[13px] font-medium outline-none focus:border-[#007EA7]"><span className="min-w-0 truncate">{editing.syncSchedule || "Manual synchronization"}</span><ChevronDown size={16} className={`shrink-0 text-[#7288A3] transition-transform ${frequencyOpen ? "rotate-180" : ""}`} /></button>
+              {frequencyOpen && <div role="listbox" className="absolute left-0 right-0 top-[66px] z-10 overflow-hidden rounded-lg border border-[#D3E1EC] bg-white p-1 shadow-lg">{SYNC_OPTIONS.map((option) => { const selected = (editing.syncSchedule || "Manual synchronization") === option; return <button key={option} type="button" role="option" aria-selected={selected} onClick={() => { setEditing({ ...editing, syncSchedule: option }); setFrequencyOpen(false); }} className={`flex h-9 w-full items-center gap-3 rounded-md px-3 text-left font-montserrat text-[12px] font-medium text-[#10233A] ${selected ? "bg-[#E5EDF9]" : "hover:bg-[#F8FDFF]"}`}><span aria-hidden="true" className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${selected ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}>{selected && <Check size={12} strokeWidth={2.5} className="text-white" />}</span><span className="min-w-0 truncate">{option}</span></button>; })}</div>}
             </label>
             {(editing.syncSchedule || "Manual synchronization") === "Every day" && <label className="flex flex-col gap-2 font-montserrat text-[12px] font-semibold text-[#10233A]">Daily synchronization time<input type="time" value={editing.syncTime || "09:00"} onChange={(event) => setEditing({ ...editing, syncTime: event.target.value })} className="h-10 rounded-lg border border-[#D3E1EC] bg-white px-3 font-montserrat text-[13px] font-medium text-[#10233A] outline-none focus:border-[#007EA7]" /></label>}
             <div className="rounded-lg border border-[#E5EDF9] px-4 py-3"><p className="font-montserrat text-[11px] font-semibold uppercase text-[#7288A3]">Last synchronized</p><p className="mt-1 font-montserrat text-[13px] font-medium text-[#10233A]">{formatSyncTime(editing.lastSyncedAt)}</p></div>

@@ -15,16 +15,16 @@ function components(directory) {
   });
 }
 
-test('shared row actions stay in normal flow without an automatic left margin', () => {
-  const rule = css.match(/\.system-table-row-actions,\s*:where\(div, span\):has\(> button\[data-button-family="row-delete"\]\)\s*\{([^}]+)\}/)?.[1];
+test('shared row actions stay in normal flow and consume spare space before the final column', () => {
+  const rule = css.match(/\.system-table-row-actions,\s*\.table-row-actions,\s*:where\(div, span\):has\(> button\[data-button-family="row-delete"\]\)\s*\{([^}]+)\}/)?.[1];
   assert.ok(rule, 'Explicit row-action and legacy DeleteButton contract must exist');
   assert.match(rule, /position:\s*static\s*!important/);
   assert.match(rule, /inset:\s*auto\s*!important/);
-  assert.match(rule, /margin-left:\s*0\s*!important/);
+  assert.match(rule, /margin-left:\s*auto\s*!important/);
   assert.match(rule, /flex-shrink:\s*0\s*!important/);
 });
 
-test('table action wrappers do not reintroduce viewport anchors or flexible spacers', () => {
+test('table action wrappers do not reintroduce viewport anchors or flexible action widths', () => {
   let markedWrappers = 0;
   const violations = [];
   for (const path of components(join(root, 'src/components'))) {
@@ -34,7 +34,7 @@ test('table action wrappers do not reintroduce viewport anchors or flexible spac
         const value = node.initializer?.getText(source) || '';
         if (value.includes('system-table-row-actions')) {
           markedWrappers += 1;
-          if (/(?:^|[\s"'`])(sticky|absolute|fixed|ml-auto|flex-1|grow)(?:[\s"'`]|$)/.test(value)) {
+          if (/(?:^|[\s"'`])(sticky|absolute|fixed|flex-1|grow)(?:[\s"'`]|$)/.test(value)) {
             violations.push(`${path}:${source.getLineAndCharacterOfPosition(node.pos).line + 1}`);
           }
         }

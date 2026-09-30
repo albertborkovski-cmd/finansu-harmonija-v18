@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   Check,
   ChevronDown,
@@ -14,6 +14,7 @@ import {
   addCompanyGeneralLedgerAccount,
   loadCompanyGeneralLedgerAccountHierarchy,
 } from "./GeneralLedgerView";
+import { useDropdownDismiss } from "./useDropdownDismiss";
 
 interface GeneralLedgerAccountSelectProps {
   value: string;
@@ -57,6 +58,14 @@ export default function GeneralLedgerAccountSelect({
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const rootRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const listboxId = useId();
+
+  const dismissMenu = () => {
+    setOpen(false);
+    setDraft(value);
+    setQuery("");
+  };
+  useDropdownDismiss(open, rootRef, dismissMenu, menuRef);
 
   const loadOptions = useCallback(
     () =>
@@ -99,26 +108,13 @@ export default function GeneralLedgerAccountSelect({
   useEffect(() => {
     if (!open) return;
     updateMenuPosition();
-    const closeOnOutsideClick = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (
-        !rootRef.current?.contains(target) &&
-        !menuRef.current?.contains(target)
-      ) {
-        setOpen(false);
-        setDraft(value);
-        setQuery("");
-      }
-    };
-    document.addEventListener("mousedown", closeOnOutsideClick);
     window.addEventListener("resize", updateMenuPosition);
     window.addEventListener("scroll", updateMenuPosition, true);
     return () => {
-      document.removeEventListener("mousedown", closeOnOutsideClick);
       window.removeEventListener("resize", updateMenuPosition);
       window.removeEventListener("scroll", updateMenuPosition, true);
     };
-  }, [open, updateMenuPosition, value]);
+  }, [open, updateMenuPosition]);
 
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const filteredOptions = useMemo(
@@ -209,7 +205,11 @@ export default function GeneralLedgerAccountSelect({
         <input
           value={draft}
           disabled={disabled}
+          role="combobox"
           aria-label={ariaLabel}
+          aria-expanded={open}
+          aria-haspopup="listbox"
+          aria-controls={open ? listboxId : undefined}
           placeholder={placeholder}
           onFocus={(event) => {
             if (disabled) return;
@@ -231,9 +231,7 @@ export default function GeneralLedgerAccountSelect({
               commitTypedCode();
             }
             if (event.key === "Escape") {
-              setOpen(false);
-              setDraft(value);
-              setQuery("");
+              dismissMenu();
             }
           }}
           className={`min-w-0 flex-1 bg-transparent px-2 font-montserrat font-medium outline-none placeholder:text-[#A1B6C6] ${disabled ? "text-[#7288A3]" : "text-[#10233A]"} ${
@@ -245,6 +243,7 @@ export default function GeneralLedgerAccountSelect({
           disabled={disabled}
           aria-label={`Open ${ariaLabel} list`}
           aria-expanded={open}
+          data-static-selection="true"
           onClick={() => {
             if (disabled) return;
             setQuery("");
@@ -270,8 +269,6 @@ export default function GeneralLedgerAccountSelect({
         createPortal(
           <div
             ref={menuRef}
-            role="listbox"
-            aria-label="GL account hierarchy"
             className="fixed z-[1400] overflow-hidden rounded-lg border border-[#D3E1EC] bg-white shadow-[0_10px_30px_rgba(16,35,58,0.18)]"
             style={{
               top: menuPosition.top,
@@ -300,40 +297,49 @@ export default function GeneralLedgerAccountSelect({
                   Clear value
                 </button>
               )}
-              {filteredOptions.length === 0 ? (
-                <div className="px-3 py-5 text-center font-montserrat text-[12px] text-[#A1B6C6]">
-                  No matching GL account
-                </div>
-              ) : (
-                filteredOptions.map((account) => {
-                  const selected = account.code === value;
-                  const hasChildren = parentCodes.has(account.code);
-                  return (
-                    <button
-                      key={account.code}
-                      type="button"
-                      role="option"
-                      aria-selected={selected}
-                      onClick={() => void selectValue(account.code)}
-                      className={`flex min-h-9 w-full items-center rounded-md py-1.5 pr-2 text-left transition-colors hover:bg-[#F2F7FC] ${
-                        selected ? "bg-[#EAF5F9]" : ""
-                      }`}
-                      style={{ paddingLeft: 8 + account.depth * 18 }}
-                    >
-                      <span className="mr-1 flex h-4 w-4 flex-shrink-0 items-center justify-center text-[#A1B6C6]">
-                        {hasChildren ? <ChevronRight size={12} /> : <span className="h-1 w-1 rounded-full bg-[#D3E1EC]" />}
-                      </span>
-                      <span className="w-[64px] flex-shrink-0 font-montserrat text-[12px] font-semibold text-[#10233A]">
-                        {account.code}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate font-montserrat text-[12px] font-medium text-[#7288A3]">
-                        {account.name}
-                      </span>
-                      {selected && <Check size={13} className="ml-2 flex-shrink-0 text-[#007EA7]" />}
-                    </button>
-                  );
-                })
-              )}
+              <div id={listboxId} role="listbox" aria-label="GL account hierarchy">
+                {filteredOptions.length === 0 ? (
+                  <div className="px-3 py-5 text-center font-montserrat text-[12px] text-[#A1B6C6]">
+                    No matching GL account
+                  </div>
+                ) : (
+                  filteredOptions.map((account) => {
+                    const selected = account.code === value;
+                    const hasChildren = parentCodes.has(account.code);
+                    return (
+                      <button
+                        key={account.code}
+                        type="button"
+                        role="option"
+                        aria-selected={selected}
+                        data-static-selection="true"
+                        onClick={() => void selectValue(account.code)}
+                        className={`flex min-h-9 w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors ${
+                          selected ? "bg-[#E5EDF9]" : "hover:bg-[#F2F7FC]"
+                        }`}
+                      >
+                        <span
+                          aria-hidden="true"
+                          className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[6px] border ${selected ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
+                        >
+                          {selected && <Check size={12} strokeWidth={2.5} className="text-white" />}
+                        </span>
+                        <span className="flex min-w-0 flex-1 items-center" style={{ paddingLeft: account.depth * 18 }}>
+                          <span className="mr-1 flex h-4 w-4 flex-shrink-0 items-center justify-center text-[#A1B6C6]">
+                            {hasChildren ? <ChevronRight size={12} /> : <span className="h-1 w-1 rounded-full bg-[#D3E1EC]" />}
+                          </span>
+                          <span className="w-[64px] flex-shrink-0 font-montserrat text-[12px] font-semibold text-[#10233A]">
+                            {account.code}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate font-montserrat text-[12px] font-medium text-[#7288A3]">
+                            {account.name}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
             </div>
             {companyId && (
               <div className="border-t border-[#D3E1EC] bg-white p-2">

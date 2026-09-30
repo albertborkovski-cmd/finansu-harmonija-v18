@@ -1,11 +1,14 @@
 import { useRef, useState } from "react";
-import { FileUp, Plus, Trash2, X } from "lucide-react";
+import { FileUp, Plus, X } from "lucide-react";
+import { RowDeleteButton } from './DeleteButtons';
+import { isInactiveRecord, isRecordLinked, removeOrDeactivateRecords } from '../lib/recordLifecycle';
 import * as XLSX from "xlsx";
 import OcrSearchField from "./OcrSearchField";
 
 const ACTION_BUTTON_STYLE = 'flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-md border-2 border-[#D3E1EC] bg-white px-3 font-montserrat text-[12px] font-semibold leading-5 text-[#7288A3] transition-colors hover:border-[#A1B6C6] active:border-[#007EA7] active:bg-[#007EA7] active:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#007EA7]/30';
 
 interface DepartmentCodeItem {
+  active?: boolean;
   id: string;
   code: string;
   name: string;
@@ -46,6 +49,7 @@ function parseConfig(value: string): DepartmentCodesConfig {
           id: String(item?.id ?? `stored-${index}`),
           code: String(item?.code ?? ""),
           name: String(item?.name ?? ""),
+          active: item?.active !== false,
         })),
       };
     }
@@ -64,7 +68,7 @@ function parseConfig(value: string): DepartmentCodesConfig {
 function serializeConfig(config: DepartmentCodesConfig) {
   return JSON.stringify({
     enabled: config.enabled,
-    items: config.items.map(({ id, code, name }) => ({ id, code, name })),
+    items: config.items.map(({ id, code, name, active }) => ({ id, code, name, active })),
   });
 }
 
@@ -290,6 +294,7 @@ export default function DepartmentCodesEditor({
                       >
                         <input
                           aria-label={`${itemSingular} code ${index + 1}`}
+                          data-record-inactive={isInactiveRecord(item) || undefined}
                           value={item.code}
                           placeholder="Code"
                           onChange={(event) =>
@@ -306,6 +311,7 @@ export default function DepartmentCodesEditor({
                         />
                         <input
                           aria-label={`${itemSingular} name ${index + 1}`}
+                          data-record-inactive={isInactiveRecord(item) || undefined}
                           value={item.name}
                           placeholder="Name"
                           onChange={(event) =>
@@ -320,21 +326,17 @@ export default function DepartmentCodesEditor({
                           }
                           className="h-8 min-w-0 rounded-md border border-[#D3E1EC] px-2.5 font-montserrat text-[11px] font-medium text-[#10233A] outline-none focus:border-[#007EA7]"
                         />
-                        <button
-                          type="button"
-                          aria-label={`Delete ${itemSingular} ${index + 1}`}
-                          onClick={() =>
+                        <RowDeleteButton
+                          label={`Delete ${itemSingular} ${index + 1}`}
+                          linked={isRecordLinked(item)}
+                          inactive={isInactiveRecord(item)}
+                          onDelete={() =>
                             update({
                               ...config,
-                              items: config.items.filter(
-                                (current) => current.id !== item.id,
-                              ),
+                              items: removeOrDeactivateRecords(config.items, new Set([item.id])),
                             })
                           }
-                          className="flex h-8 w-8 items-center justify-center rounded-md text-[#7288A3] hover:bg-[#FFF2F2] hover:text-[#E45858]"
-                        >
-                          <Trash2 size={15} />
-                        </button>
+                        />
                       </div>
                     );
                   })}

@@ -1,15 +1,16 @@
 import { toggleFilteredSelection } from '../lib/tableSelection';
+import { isInactiveRecord, isRecordLinked, removeOrDeactivateRecords } from '../lib/recordLifecycle';
 import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Check,
   ChevronDown,
   Copy,
-  Eye,
-  EyeOff,
   FileText,
   ImagePlus,
+  Mail,
+  KeyRound,
   Pencil,
   Plus,
   X,
@@ -17,6 +18,8 @@ import {
 import { PageActionButton, PageHeader } from "./PageHeader";
 import OcrSearchField from "./OcrSearchField";
 import RefreshAllButton from "./RefreshAllButton";
+import SearchableSelect from './SearchableSelect';
+import { useDropdownDismiss } from './useDropdownDismiss';
 import { BulkDeleteButton, RowDeleteButton } from "./DeleteButtons";
 import HorizontalTableScrollbar from "./HorizontalTableScrollbar";
 import TablePagination from "./TablePagination";
@@ -33,7 +36,10 @@ import {
   deriveModuleAccess,
   flattenRoleAccessTree,
   isSystemAdministratorRole,
+  migrateDocumentTypeMenuKey,
   ROLE_ACCESS_TREE,
+  ROLE_MENU_ITEMS,
+  parseMenuVisibility,
   type AccessMap,
   type MenuAccessMap,
   type RoleAccessNode,
@@ -79,7 +85,8 @@ const USER_COLUMNS: ColConfig[] = [
 ];
 
 const INTERNAL_USER_COLUMNS: ColConfig[] = [
-  ...USER_COLUMNS.slice(0, 4),
+  ...USER_COLUMNS.filter(column => column.key === 'fullName'),
+  ...USER_COLUMNS.filter(column => column.key === 'email' || column.key === 'phone'),
   { key: "position", label: "Position", width: 190, visible: true },
   {
     key: "organizations",
@@ -87,11 +94,27 @@ const INTERNAL_USER_COLUMNS: ColConfig[] = [
     width: 240,
     visible: true,
   },
-  ...USER_COLUMNS.slice(4),
+  ...USER_COLUMNS.slice(4).map(column => ({
+    ...column,
+    visible: ['createdBy', 'creationDate', 'updatedBy', 'lastUpdate'].includes(column.key) ? false : column.visible,
+  })),
+  { key: 'lastLogin', label: 'Last login', width: 190, visible: true },
 ];
 
+function internalUserStatus(status?: string): string {
+  switch (status?.trim().toLowerCase()) {
+    case 'enabled':
+    case 'active': return 'Active';
+    case 'inactive':
+    case 'deactivated': return 'Inactive';
+    case 'disabled':
+    case 'blocked': return 'Blocked';
+    default: return 'Unactivated';
+  }
+}
+
 const PERMISSIONS = ["CREATE", "READ", "UPDATE", "DELETE", "ACTION"];
-const VISIBLE_ACTION_PERMISSIONS = PERMISSIONS.filter(permission => permission !== 'ACTION');
+const VISIBLE_ACTION_PERMISSIONS = ['CREATE', 'DELETE'];
 // Navigation groups, retained documents and audit records are not physically deletable.
 const NON_DELETABLE_MENU_IDS = new Set([
   'global-dashboard', 'dashboard', 'uploaded-documents', 'notifications',
@@ -282,6 +305,13 @@ function builtInRows(audience: Audience, section: Section): DirectoryRow[] {
   ];
 }
 
+function isProtectedSystemRole(audience: Audience, row?: DirectoryRow): boolean {
+  if (!row) return false;
+  return isSystemAdministratorRole(row.name) || builtInRows(audience, 'Roles').some(
+    base => base.id === row.id || base.name.toLowerCase() === row.name?.trim().toLowerCase(),
+  );
+}
+
 function loadRows(audience: Audience, section: Section): DirectoryRow[] {
   let stored: DirectoryRow[] = [];
   let deletedIds = new Set<string>();
@@ -301,7 +331,7 @@ function loadRows(audience: Audience, section: Section): DirectoryRow[] {
   const merged = stored.filter((row) => !deletedIds.has(row.id));
   builtInRows(audience, section).forEach((systemRow) => {
     const protectedAdministrator =
-      section === "Roles" && isSystemAdministratorRole(systemRow.name);
+      section === "Roles" && isProtectedSystemRole(audience, systemRow);
     if (deletedIds.has(systemRow.id) && !protectedAdministrator) return;
     const matchIndex = merged.findIndex(
       (row) =>
@@ -317,7 +347,7 @@ function loadRows(audience: Audience, section: Section): DirectoryRow[] {
     }
   });
   return merged.map((row) => {
-    if (section === "Users") return row;
+    if (section === "Users") return { ...row, status: internalUserStatus(row.status) };
     if (!isSystemAdministratorRole(row.name)) return row;
     return {
       ...row,
@@ -341,6 +371,25 @@ function persistRows(
     saveLinkedDirectoryUsers(audience, rows, false);
   }
   notifySettingsDataChanged(section.toLowerCase());
+}
+
+function isDirectoryRowLinked(audience: Audience, section: Section, row: DirectoryRow): boolean {
+  if (isRecordLinked(row, storageKey(audience, section))) return true;
+  if (section === 'Roles') {
+    const roleName = row.name?.trim().toLocaleLowerCase();
+    return loadRows(audience, 'Users').some((user) => (user.roles ?? '').split(',')
+      .some((role) => role.trim().toLocaleLowerCase() === roleName));
+  }
+  const hasAssignment = (value: string | undefined) => Boolean(value?.split(',')
+    .some((item) => !['', 'unassigned', 'none', '—'].includes(item.trim().toLocaleLowerCase())));
+  if (hasAssignment(row.roles) || hasAssignment(row.organizations)
+    || Number(row.documentsCreated) > 0 || Number(row.documentsEdited) > 0) return true;
+  return ['activityLog', 'loginHistory'].some((field) => {
+    try {
+      const entries: unknown = JSON.parse(row[field] || '[]');
+      return Array.isArray(entries) && entries.length > 0;
+    } catch { return Boolean(row[field]); }
+  });
 }
 
 function readDeletedIds(audience: Audience, section: Section) {
@@ -392,16 +441,55 @@ function saveRoleAssignments(
   notifySettingsDataChanged("role-assignments");
 }
 
+function FittingSelection({ values, placeholder }: { values: string[]; placeholder: string }) {
+  const container = useRef<HTMLSpanElement>(null);
+  const measurements = useRef<HTMLSpanElement>(null);
+  const [count, setCount] = useState(0);
+  const chip = 'inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded border border-[#E5EDF9] bg-white px-2 font-medium';
+  useLayoutEffect(() => {
+    const measure = () => {
+      if (!container.current || !measurements.current) return;
+      const nodes = measurements.current.children;
+      const width = container.current.clientWidth;
+      let used = 0;
+      let fitting = 0;
+      for (let i = 0; i < values.length; i++) {
+        used += (nodes[i] as HTMLElement).getBoundingClientRect().width + (i ? 4 : 0);
+        const remaining = values.length - i - 1;
+        const badge = remaining ? (nodes[values.length + remaining - 1] as HTMLElement).getBoundingClientRect().width + 4 : 0;
+        if (used + badge <= width) fitting = i + 1;
+      }
+      setCount(fitting);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    if (container.current) observer.observe(container.current);
+    if (measurements.current) observer.observe(measurements.current);
+    return () => observer.disconnect();
+  }, [values]);
+  return <span ref={container} className="relative flex h-6 min-w-0 flex-1 items-center gap-1 overflow-hidden font-montserrat text-[12px] text-[#10233A]" title={values.join(', ')}>
+    {!values.length && <span className="text-[#A1B6C6]">{placeholder}</span>}
+    {values.slice(0, count).map(value => <span key={value} className={chip}>{value}</span>)}
+    {values.length > count && <span className={`${chip} bg-[#F8FDFF] text-[#007EA7]`}>+{values.length - count}</span>}
+    <span ref={measurements} aria-hidden="true" className="pointer-events-none invisible absolute left-0 top-0 flex w-max gap-1">
+      {values.map(value => <span key={value} className={chip}>{value}</span>)}
+      {values.map((_, index) => <span key={`count-${index}`} className={chip}>+{index + 1}</span>)}
+    </span>
+  </span>;
+}
+
 function CheckBox({
   checked,
   onChange,
   label,
   disabled = false,
+  disabledReason = 'Physical deletion is not available for this item',
 }: {
   checked: boolean;
   onChange: () => void;
   label: string;
   disabled?: boolean;
+  disabledReason?: string;
 }) {
   return (
     <button
@@ -410,20 +498,21 @@ function CheckBox({
       aria-checked={checked}
       aria-label={label}
       disabled={disabled}
-      title={disabled ? 'Physical deletion is not available for this item' : undefined}
+      title={disabled ? disabledReason : undefined}
       onClick={(event) => {
         event.stopPropagation();
         onChange();
       }}
       className={`flex h-[18px] w-[18px] items-center justify-center rounded-[6px] border disabled:cursor-not-allowed disabled:border-[#D3E1EC] disabled:bg-[#E5EDF9] ${checked ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
     >
-      {checked && <Check size={12} className="text-white" />}
+      {checked && <Check size={12} className={disabled ? 'text-[#7288A3]' : 'text-white'} />}
     </button>
   );
 }
 
 function readRoles(audience: Audience) {
   return loadRows(audience, "Roles")
+    .filter((role) => !isInactiveRecord(role))
     .map((role) => role.name)
     .filter(Boolean);
 }
@@ -447,13 +536,13 @@ function RoleAccessTree({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      {nodes.filter(node => node.label?.trim() && node.id !== 'notifications' && node.id !== 'info').map((node) => {
+      {nodes.filter(node => node.label?.trim() && node.id !== 'info').map((node) => {
         const permission = access[node.id] ?? { view: false, edit: false };
         const hasChildren = Boolean(node.children?.length);
         return (
           <div key={node.id}>
             <div
-              className={`grid min-h-10 grid-cols-[minmax(240px,1fr)_repeat(6,76px)] items-center rounded-md border [&>button]:justify-self-center ${depth === 0 ? "border-[#D3E1EC] bg-white" : "border-transparent bg-[#F8FBFD]"}`}
+              className={`grid min-h-10 grid-cols-[minmax(240px,1fr)_repeat(4,76px)] items-center rounded-md border [&>button]:justify-self-center ${depth === 0 ? "border-[#D3E1EC] bg-white" : "border-transparent bg-[#F8FBFD]"}`}
             >
               <div className="flex min-w-0 items-center gap-2 px-3" style={{ paddingLeft: 12 + depth * 22 }}>
                 {hasChildren ? (
@@ -469,14 +558,18 @@ function RoleAccessTree({
                 </span>
               </div>
               <div className="flex h-10 items-center justify-center border-l border-[#E5EDF9]"><CheckBox
-                checked={permission.view}
+                checked={locked || permission.view}
+                disabled={locked}
+                disabledReason="Administrator permissions are protected and cannot be removed"
                 label={`View ${node.label}`}
                 onChange={() => {
                   if (!locked) onToggle(node, "view");
                 }}
               /></div>
               <div className="flex h-10 items-center justify-center border-l border-[#E5EDF9]"><CheckBox
-                checked={permission.edit}
+                checked={locked || permission.edit}
+                disabled={locked}
+                disabledReason="Administrator permissions are protected and cannot be removed"
                 label={`Edit ${node.label}`}
                 onChange={() => {
                   if (!locked) onToggle(node, "edit");
@@ -484,7 +577,7 @@ function RoleAccessTree({
               /></div>
               {VISIBLE_ACTION_PERMISSIONS.map(action => {
                 const unavailable = action === 'DELETE' && !allowsRoleDelete(node);
-                return <div key={action} className="flex h-10 items-center justify-center border-l border-[#E5EDF9]"><CheckBox disabled={unavailable} checked={!unavailable && (locked || (actionPermissions[node.id] ?? []).includes(action))} label={`${action} ${node.label}`} onChange={() => { if (!locked && !unavailable) onToggleAction(node.id, action); }} /></div>;
+                return <div key={action} className="flex h-10 items-center justify-center border-l border-[#E5EDF9]"><CheckBox disabled={locked || unavailable} disabledReason={unavailable ? 'Physical deletion is not available for this item' : 'Administrator permissions are protected and cannot be removed'} checked={!unavailable && (locked || (actionPermissions[node.id] ?? []).includes(action))} label={`${action} ${node.label}`} onChange={() => { if (!locked && !unavailable) onToggleAction(node.id, action); }} /></div>;
               })}
             </div>
             {hasChildren && permission.view && (
@@ -527,7 +620,7 @@ function RolePanel({
   const configuration = initial ?? template;
   const [actionPermissions, setActionPermissions] = useState<Record<string, string[]>>(() => {
     try {
-      if (configuration?.actionPermissions) return JSON.parse(configuration.actionPermissions);
+      if (configuration?.actionPermissions) return migrateDocumentTypeMenuKey(JSON.parse(configuration.actionPermissions) as Record<string, string[]>);
     } catch { /* Older roles use the shared action configuration. */ }
     const inherited = (configuration?.permissions ?? '').split(',').map(value => value.trim()).filter(value => PERMISSIONS.includes(value));
     return Object.fromEntries(flattenRoleAccessTree(ROLE_ACCESS_TREE).map(node => [node.id, [...inherited]]));
@@ -545,34 +638,22 @@ function RolePanel({
         ? (JSON.parse(configuration.moduleAccess) as AccessMap)
         : deriveModuleAccess({});
       return configuration?.menuAccess
-        ? (JSON.parse(configuration.menuAccess) as MenuAccessMap)
+        ? migrateDocumentTypeMenuKey(JSON.parse(configuration.menuAccess) as MenuAccessMap)
         : createMenuAccessFromModules(moduleAccess);
     } catch {
       return createMenuAccessFromModules(deriveModuleAccess({}));
     }
   });
+  const [menuVisibility, setMenuVisibility] = useState(() => parseMenuVisibility(configuration?.menuVisibility, menuAccess));
   const availableUsers = useMemo(
-    () => loadRows(audience, "Users"),
-    [audience],
+    () => loadRows(audience, "Users").filter((user) => !isInactiveRecord(user)
+      || Boolean(initial?.name && (user.roles ?? '').split(',').map((role) => role.trim()).includes(initial.name))),
+    [audience, initial?.name],
   );
   const [assignedUsersOpen, setAssignedUsersOpen] = useState(false);
   const [assignedUsersQuery, setAssignedUsersQuery] = useState('');
   const assignedUsersRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!assignedUsersOpen) return;
-    const closeOutside = (event: PointerEvent) => {
-      if (!assignedUsersRef.current?.contains(event.target as Node)) setAssignedUsersOpen(false);
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setAssignedUsersOpen(false);
-    };
-    document.addEventListener('pointerdown', closeOutside);
-    document.addEventListener('keydown', closeOnEscape);
-    return () => {
-      document.removeEventListener('pointerdown', closeOutside);
-      document.removeEventListener('keydown', closeOnEscape);
-    };
-  }, [assignedUsersOpen]);
+  useDropdownDismiss(assignedUsersOpen, assignedUsersRef, () => setAssignedUsersOpen(false));
   const filteredAssignedUsers = availableUsers.filter(user =>
     `${user.fullName ?? ''} ${user.username ?? ''} ${user.email ?? ''}`.toLocaleLowerCase().includes(assignedUsersQuery.trim().toLocaleLowerCase()),
   );
@@ -599,9 +680,21 @@ function RolePanel({
         : [...current, userId],
     );
   const setMenuPermission = (node: RoleAccessNode, key: "view" | "edit") => {
-    if (key === 'edit' && !menuAccess[node.id]?.edit) {
-      setActionPermissions(current => ({ ...current, [node.id]: [...new Set([...(current[node.id] ?? []), 'READ'])] }));
-    }
+    const enabling = !menuAccess[node.id]?.[key];
+    setActionPermissions(current => {
+      const next = { ...current };
+      const actions = new Set(next[node.id] ?? []);
+      if (enabling) {
+        actions.add('READ');
+        if (key === 'edit') actions.add('UPDATE');
+      } else if (key === 'edit') actions.delete('UPDATE');
+      else {
+        ['READ', 'UPDATE', 'CREATE', 'DELETE'].forEach(action => actions.delete(action));
+        flattenRoleAccessTree(node.children ?? []).forEach(child => { next[child.id] = (next[child.id] ?? []).filter(action => !['READ', 'UPDATE', 'CREATE', 'DELETE'].includes(action)); });
+      }
+      next[node.id] = [...actions];
+      return next;
+    });
     setMenuAccess((current) => {
       const next = { ...current };
       const currentPermission = next[node.id] ?? { view: false, edit: false };
@@ -637,6 +730,7 @@ function RolePanel({
     if (action === 'READ' && !enabling) {
       setMenuAccess(current => ({ ...current, [nodeId]: { ...current[nodeId], edit: false } }));
     }
+    if (enabling) setMenuAccess(current => ({ ...current, [nodeId]: { ...current[nodeId], view: true } }));
   };
   return (
     <div className="relative flex min-h-full min-w-0 flex-col items-start gap-8 overflow-y-auto bg-white px-4 py-14 sm:px-8 lg:px-[72px]">
@@ -734,18 +828,19 @@ function RolePanel({
                   <button
                     key={user.id}
                     type="button"
+                    data-record-inactive={isInactiveRecord(user)}
+                    aria-pressed={assignedUserIds.includes(user.id)}
+                    aria-label={`Assign ${user.fullName || user.username}`}
+                    aria-disabled={isSystemAdministrator || (isInactiveRecord(user) && !assignedUserIds.includes(user.id))}
+                    data-static-selection="true"
                     onClick={() => {
-                      if (!isSystemAdministrator) toggleUser(user.id);
+                      if (!isSystemAdministrator && (!isInactiveRecord(user) || assignedUserIds.includes(user.id))) toggleUser(user.id);
                     }}
-                    className="flex min-h-10 w-full items-center gap-3 rounded-md px-2 text-left hover:bg-[#F8FDFF]"
+                    className={`grid h-10 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-3 rounded-md px-2 text-left ${assignedUserIds.includes(user.id) ? 'bg-[#E5EDF9]' : 'hover:bg-[#F8FDFF]'}`}
                   >
-                    <CheckBox
-                      checked={assignedUserIds.includes(user.id)}
-                      label={`Assign ${user.fullName || user.username}`}
-                      onChange={() => {
-                        if (!isSystemAdministrator) toggleUser(user.id);
-                      }}
-                    />
+                    <span aria-hidden="true" className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${assignedUserIds.includes(user.id) ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>
+                      {assignedUserIds.includes(user.id) && <Check size={12} strokeWidth={2.5} className="text-white" />}
+                    </span>
                     <span className="min-w-0">
                       <span className="block truncate font-montserrat text-[13px] font-medium text-[#10233A]">
                         {user.fullName || user.username}
@@ -765,12 +860,28 @@ function RolePanel({
               </div>}
             </div>
           </div>
+          {!(audience === 'Internal users' && initial) && <section className="flex flex-col gap-3">
+            <h3 className="font-montserrat text-[14px] font-semibold text-[#10233A]">Menu access</h3>
+            <div className="overflow-hidden rounded-md border border-[#D3E1EC] font-montserrat text-[12px]">
+              <div className="grid grid-cols-[1fr_76px] items-center bg-[#F0F6FA] text-[#7288A3] font-medium">
+                <span className="px-3 py-3">Menu item</span><span className="border-l border-[#D3E1EC] py-3 text-center">Visible</span>
+              </div>
+              {ROLE_MENU_ITEMS.map(item => <div key={item.id} className="grid min-h-10 grid-cols-[1fr_76px] items-center border-t border-[#E5EDF9] bg-white">
+                <span className="px-3 font-medium text-[#10233A]">{item.label}</span>
+                <div className="flex h-10 items-center justify-center border-l border-[#E5EDF9]">
+                  <CheckBox checked={isSystemAdministrator || menuVisibility[item.id]} disabled={isSystemAdministrator} disabledReason="Administrator menu access is protected and cannot be removed" label={`Visible ${item.label}`} onChange={() => setMenuVisibility(current => ({ ...current, [item.id]: !current[item.id] }))} />
+                </div>
+              </div>)}
+            </div>
+          </section>}
+          <section className="flex flex-col gap-3">
+            <h3 className="font-montserrat text-[14px] font-semibold text-[#10233A]">Access Rights</h3>
+            {isSystemAdministrator && <p className="font-montserrat text-[12px] text-[#7288A3]">Administrator permissions are protected. Settings, Internal Users, Roles and Users access cannot be removed.</p>}
           <div className="overflow-x-auto">
-            <div className="flex min-w-[714px] flex-col gap-2">
-              <div className="grid grid-cols-[minmax(240px,1fr)_repeat(6,76px)] grid-rows-[32px_32px] items-center rounded-md border border-[#D3E1EC] bg-[#F0F6FA] font-montserrat text-[12px] font-medium leading-[18px] text-[#7288A3]">
-                <span className="col-start-1 row-start-1 row-span-2 px-3 text-[#10233A]">Menu access</span>
-                <span className="col-start-2 col-span-6 row-start-1 border-l border-[#D3E1EC] text-center text-[#10233A]">Action permissions</span>
-                {['View', 'Edit', ...VISIBLE_ACTION_PERMISSIONS.map(action => action.charAt(0) + action.slice(1).toLowerCase())].map((label, index) => <span key={label} style={{ gridColumn: index + 2, gridRow: 2 }} className="flex h-full items-center justify-center border-l border-t border-[#D3E1EC]">{label}</span>)}
+            <div className="flex min-w-[544px] flex-col gap-2">
+              <div className="grid min-h-10 grid-cols-[minmax(240px,1fr)_repeat(4,76px)] items-center rounded-md border border-[#D3E1EC] bg-[#F0F6FA] font-montserrat text-[12px] font-medium leading-[18px] text-[#7288A3]">
+                <span className="px-3 text-[#10233A]">Object / Area</span>
+                {['View', 'Edit', 'Create', 'Delete'].map(label => <span key={label} className="flex h-10 items-center justify-center border-l border-[#D3E1EC]">{label}</span>)}
               </div>
               <RoleAccessTree
                 nodes={ROLE_ACCESS_TREE}
@@ -782,6 +893,7 @@ function RolePanel({
               />
             </div>
           </div>
+          </section>
           {isSystemAdministrator && (
             <div className="grid gap-2 rounded-lg border border-[#C9E3ED] bg-[#F4FBFD] p-3 font-montserrat text-[12px] text-[#10233A] sm:grid-cols-3">
               <span>Organizations: <b>All</b></span>
@@ -805,12 +917,10 @@ function RolePanel({
               const roleName = name.trim();
               const savedMenuAccess = {
                 ...menuAccess,
-                notifications: { view: true, edit: true },
                 info: { view: true, edit: true },
               };
               const savedActionPermissions: Record<string, string[]> = {
                 ...actionPermissions,
-                notifications: [...PERMISSIONS],
                 info: [...PERMISSIONS],
               };
               const normalizedActionPermissions = Object.fromEntries(flattenRoleAccessTree(ROLE_ACCESS_TREE).map(node => [
@@ -826,6 +936,7 @@ function RolePanel({
               onSave({
                 id: initial?.id ?? `role-${Date.now()}`,
                 name: roleName,
+                menuVisibility: JSON.stringify(isSystemAdministrator ? Object.fromEntries(ROLE_MENU_ITEMS.map(item => [item.id, true])) : menuVisibility),
                 actionPermissions: JSON.stringify(normalizedActionPermissions),
                 description: description.trim() || "—",
                 permissions: isSystemAdministrator
@@ -872,6 +983,8 @@ function UserPanel({
   onSave: (row: DirectoryRow) => void;
 }) {
   const availableRoles = useMemo(() => readRoles(audience), [audience]);
+  const copySourceUsers = useMemo(() => loadRows(audience, 'Users'), [audience]);
+  const [copySourceId, setCopySourceId] = useState('');
   const profileFileRef = useRef<HTMLInputElement>(null);
   const [firstName = "", ...lastNameParts] = (initial?.fullName ?? "").split(
     " ",
@@ -887,31 +1000,31 @@ function UserPanel({
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean),
-    sodraUser: initial?.sodraUser ?? "",
-    sodraPassword: initial?.sodraPassword ?? "",
-    edsUser: initial?.edsUser ?? "",
-    edsPassword: initial?.edsPassword ?? "",
     profileImage: initial?.profileImage ?? "",
     lastLogin: initial?.lastLogin ?? "No login recorded",
     loginHistory: initial?.loginHistory ?? "[]",
     activityLog: initial?.activityLog ?? "[]",
     documentsCreated: initial?.documentsCreated ?? "0",
     documentsEdited: initial?.documentsEdited ?? "0",
-    password: "",
-    confirmPassword: "",
     roles: (initial?.roles ?? "")
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean),
-    status: initial?.status ?? "Enabled",
+    status: internalUserStatus(initial?.status),
   });
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [showSodraPassword, setShowSodraPassword] = useState(false);
-  const [showEdsPassword, setShowEdsPassword] = useState(false);
   const [rolesOpen, setRolesOpen] = useState(false);
   const [organizationsOpen, setOrganizationsOpen] = useState(false);
+  const rolesRef = useRef<HTMLDivElement>(null);
+  const organizationsRef = useRef<HTMLDivElement>(null);
+  const statusRef = useRef<HTMLDivElement>(null);
+  const [statusOpen, setStatusOpen] = useState(false);
+  const statusLocked = internalUserStatus(initial?.status) === 'Unactivated';
+  useDropdownDismiss(statusOpen, statusRef, () => setStatusOpen(false));
+  useDropdownDismiss(rolesOpen, rolesRef, () => setRolesOpen(false));
+  useDropdownDismiss(organizationsOpen, organizationsRef, () => setOrganizationsOpen(false));
   const [invitationTemplateOpen, setInvitationTemplateOpen] = useState(false);
+  const invitationTemplateRef = useRef<HTMLDivElement>(null);
+  useDropdownDismiss(invitationTemplateOpen, invitationTemplateRef, () => setInvitationTemplateOpen(false));
   const [invitationTemplate, setInvitationTemplate] = useState(
     initial?.invitationTemplate ?? INVITATION_TEMPLATES[0].id,
   );
@@ -925,7 +1038,6 @@ function UserPanel({
     (organization) => organization.name,
   );
   useEffect(() => {
-    if (audience !== "Internal users") return;
     let active = true;
     void supabase
       .from("companies")
@@ -986,16 +1098,6 @@ function UserPanel({
   };
   const loginHistory = parseHistory(values.loginHistory);
   const activityLog = parseHistory(values.activityLog);
-  const assignedPermissionDetails = useMemo(() => {
-    const roleRows = loadRows(audience, "Roles");
-    return values.roles.map((roleName) => {
-      const role = roleRows.find((item) => item.name === roleName);
-      return {
-        name: roleName,
-        permissions: role?.permissions ?? "No permissions assigned",
-      };
-    });
-  }, [audience, values.roles]);
   const handleProfileImage = (file?: File) => {
     if (!file || !file.type.startsWith("image/")) return;
     const reader = new FileReader();
@@ -1007,12 +1109,11 @@ function UserPanel({
     reader.readAsDataURL(file);
   };
   const valid =
-    values.username.trim() &&
     values.firstName.trim() &&
     values.lastName.trim() &&
     values.email.trim() &&
-    (audience !== "Internal users" || values.position.trim()) &&
-    values.password === values.confirmPassword &&
+    values.roles.some(role => availableRoles.includes(role)) &&
+    values.position.trim() &&
     (Boolean(initial) || invitationMessage.trim());
   const fieldClass =
     "h-10 rounded-lg border border-[#D3E1EC] px-3 font-montserrat text-[13px] outline-none focus:border-[#007EA7]";
@@ -1053,8 +1154,7 @@ function UserPanel({
             </button>
           </div>
           {[
-            ["Username", "username"],
-            ["First Name", "firstName"],
+                        ["First Name", "firstName"],
             ["Last Name", "lastName"],
             ["E-mail", "email"],
             ["Phone number", "phone"],
@@ -1084,7 +1184,73 @@ function UserPanel({
               />
             </label>
           ))}
-          {audience === "Internal users" && (
+          {!initial && <div className="flex flex-col gap-1.5">
+            <span className="font-montserrat text-[12px] font-semibold text-[#10233A]">Copy access from user (optional)</span>
+            <SearchableSelect
+              value={copySourceId}
+              ariaLabel="Copy access from user"
+              placeholder="Select user"
+              disabled={!organizationRecords.length}
+              options={[{ value: '', label: 'None' }, ...copySourceUsers.map(user => ({ value: user.id, label: user.fullName || user.email || user.username, description: user.email }))]}
+              onChange={id => {
+                setCopySourceId(id);
+                const source = copySourceUsers.find(user => user.id === id);
+                if (!source) return;
+                const roles = (source.roles ?? '').split(',').map(role => role.trim()).filter(role => availableRoles.includes(role));
+                const names = (source.organizations ?? '').split(',').map(name => name.trim());
+                const organizations = organizationRecords.filter(organization =>
+                  source.organizations === 'All organizations' || names.includes(organization.name) || readOrganizationAssignments(organization.id, audience).has(source.id),
+                ).map(organization => organization.name);
+                setValues(current => ({ ...current, roles: [...new Set(roles)], organizations: [...new Set(organizations)] }));
+              }}
+              className="h-10 rounded-lg border border-[#D3E1EC] bg-white px-3 pr-9 font-montserrat text-[12px] text-[#10233A]"
+            />
+          </div>}
+          <div ref={rolesRef} className="relative flex min-w-0 flex-col gap-1.5">
+            <span className="font-montserrat text-[12px] font-semibold text-[#10233A]">
+              Role <span className="text-[#D64545]">*</span>
+            </span>
+            <button
+              type="button"
+              aria-label="Role"
+              aria-expanded={rolesOpen}
+              data-static-selection="true"
+              onClick={() => setRolesOpen((value) => !value)}
+              className="flex h-10 min-w-0 items-center justify-between gap-2 rounded-lg border border-[#D3E1EC] px-3 text-left [&>svg]:shrink-0"
+            >
+              <FittingSelection values={values.roles} placeholder="Select roles" />
+              <ChevronDown
+                size={17}
+                className={`text-[#7288A3] ${rolesOpen ? "rotate-180" : ""}`}
+              />
+            </button>
+            {rolesOpen && (
+              <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-52 overflow-y-auto rounded-lg border border-[#D3E1EC] bg-white p-2 shadow-lg">
+                {availableRoles.length ? (
+                  availableRoles.map((role) => (
+                    <button
+                      key={role}
+                      type="button"
+                      aria-pressed={values.roles.includes(role)}
+                      data-static-selection="true"
+                      onClick={() => toggleRole(role)}
+                      className={`grid h-9 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-2 rounded-md px-2 text-left ${values.roles.includes(role) ? 'bg-[#E5EDF9]' : 'hover:bg-[#F8FDFF]'}`}
+                    >
+                      <span aria-hidden="true" className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${values.roles.includes(role) ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}><Check size={12} strokeWidth={2.5} className={values.roles.includes(role) ? 'text-white' : 'invisible'} /></span>
+                      <span className="truncate font-montserrat text-[13px] font-normal leading-5 text-[#10233A]">
+                        {role}
+                      </span>
+                    </button>
+                  ))
+                ) : (
+                  <div className="px-2 py-3 font-montserrat text-[12px] text-[#7288A3]">
+                    Create a role first
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          {(
             <>
               <label className="flex flex-col gap-1.5">
                 <span className="font-montserrat text-[12px] font-medium text-[#10233A]">
@@ -1101,65 +1267,38 @@ function UserPanel({
                   className={fieldClass}
                 />
               </label>
-              <div className="relative flex flex-col gap-1.5">
+              <div ref={organizationsRef} className="relative flex min-w-0 flex-col gap-1.5">
                 <span className="font-montserrat text-[12px] font-semibold text-[#10233A]">
                   Assigned organizations
                 </span>
-                <div className="flex min-h-10 flex-wrap gap-2 rounded-lg border border-[#D3E1EC] p-2">
-                  {values.organizations.length ? (
-                    values.organizations.map((organization) => (
-                      <span
-                        key={organization}
-                        className="inline-flex h-7 items-center gap-2 rounded-md border border-[#D3E1EC] bg-[#F8FDFF] px-2 font-montserrat text-[12px] text-[#10233A]"
-                      >
-                        {organization}
-                        <button
-                          type="button"
-                          aria-label={`Remove ${organization}`}
-                          onClick={() => toggleOrganization(organization)}
-                          className="text-[#7288A3] hover:text-[#10233A]"
-                        >
-                          <X size={13} />
-                        </button>
-                      </span>
-                    ))
-                  ) : (
-                    <span className="px-1 font-montserrat text-[12px] leading-6 text-[#7288A3]">
-                      No organizations assigned
-                    </span>
-                  )}
-                </div>
                 <button
                   type="button"
+                  aria-label="Assigned organizations"
+                  aria-expanded={organizationsOpen}
+                  data-static-selection="true"
                   onClick={() => setOrganizationsOpen((value) => !value)}
-                  className="flex min-h-10 items-center justify-between rounded-lg border border-[#D3E1EC] px-3 text-left"
+                  className="flex h-10 min-w-0 items-center justify-between gap-2 rounded-lg border border-[#D3E1EC] px-3 text-left [&>svg]:shrink-0"
                 >
-                  <span className="font-montserrat text-[12px] text-[#10233A]">
-                    Choose organizations
-                  </span>
+                  <FittingSelection values={values.organizations} placeholder="Select organizations" />
                   <ChevronDown
                     size={17}
                     className={`text-[#7288A3] ${organizationsOpen ? "rotate-180" : ""}`}
                   />
                 </button>
                 {organizationsOpen && (
-                  <div className="max-h-52 overflow-y-auto rounded-lg border border-[#D3E1EC] bg-white p-2 shadow-lg">
+                  <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-52 overflow-y-auto rounded-lg border border-[#D3E1EC] bg-white p-2 shadow-lg">
                     {organizationOptions.length ? (
                       organizationOptions.map((organization) => (
                         <button
                           key={organization}
                           type="button"
+                          aria-pressed={values.organizations.includes(organization)}
+                          data-static-selection="true"
                           onClick={() => toggleOrganization(organization)}
-                          className="flex h-9 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-[#F8FDFF]"
+                          className={`grid h-9 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-2 rounded-md px-2 text-left ${values.organizations.includes(organization) ? 'bg-[#E5EDF9]' : 'hover:bg-[#F8FDFF]'}`}
                         >
-                          <CheckBox
-                            checked={values.organizations.includes(
-                              organization,
-                            )}
-                            label={`Assign ${organization}`}
-                            onChange={() => toggleOrganization(organization)}
-                          />
-                          <span className="font-montserrat text-[13px] text-[#10233A]">
+                          <span aria-hidden="true" className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${values.organizations.includes(organization) ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}><Check size={12} strokeWidth={2.5} className={values.organizations.includes(organization) ? 'text-white' : 'invisible'} /></span>
+                          <span className="truncate font-montserrat text-[13px] font-normal leading-5 text-[#10233A]">
                             {organization}
                           </span>
                         </button>
@@ -1174,129 +1313,14 @@ function UserPanel({
               </div>
             </>
           )}
-          {[
-            ["Password", "password", showPassword, setShowPassword],
-            [
-              "Confirm Password",
-              "confirmPassword",
-              showConfirm,
-              setShowConfirm,
-            ],
-          ].map(([label, key, visible, toggle]) => (
-            <label key={key as string} className="flex flex-col gap-1.5">
-              <span className="font-montserrat text-[12px] font-medium text-[#10233A]">
-                {label as string}
-              </span>
-              <span className="relative">
-                <input
-                  type={visible ? "text" : "password"}
-                  value={values[key as "password" | "confirmPassword"]}
-                  onChange={(event) =>
-                    setValues((current) => ({
-                      ...current,
-                      [key as string]: event.target.value,
-                    }))
-                  }
-                  className={`${fieldClass} w-full pr-11`}
-                />
-                <button
-                  type="button"
-                  onClick={() =>
-                    (toggle as React.Dispatch<React.SetStateAction<boolean>>)(
-                      (value) => !value,
-                    )
-                  }
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#7288A3]"
-                >
-                  {visible ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-              </span>
-            </label>
-          ))}
-          {audience === "Internal users" && (
-            <div className="mt-2 flex flex-col gap-4 border-t border-[#E5EDF9] pt-5">
-              <div>
-                <h3 className="font-montserrat text-[14px] font-semibold text-[#10233A]">
-                  Government integrations
-                </h3>
-                <p className="mt-1 font-montserrat text-[11px] text-[#7288A3]">
-                  Optional credentials for SODRA and VMI (EDS) API integrations.
-                </p>
-              </div>
-              {[
-                ["SODRA username", "sodraUser", false, null],
-                [
-                  "SODRA password",
-                  "sodraPassword",
-                  showSodraPassword,
-                  setShowSodraPassword,
-                ],
-                ["VMI (EDS) username", "edsUser", false, null],
-                [
-                  "VMI (EDS) password",
-                  "edsPassword",
-                  showEdsPassword,
-                  setShowEdsPassword,
-                ],
-              ].map(([label, key, visible, toggle]) => (
-                <label key={key as string} className="flex flex-col gap-1.5">
-                  <span className="font-montserrat text-[12px] font-medium text-[#10233A]">
-                    {label as string}
-                  </span>
-                  <span className="relative">
-                    <input
-                      type={
-                        String(key).toLowerCase().includes("password") &&
-                        !visible
-                          ? "password"
-                          : "text"
-                      }
-                      value={
-                        values[
-                          key as
-                            | "sodraUser"
-                            | "sodraPassword"
-                            | "edsUser"
-                            | "edsPassword"
-                        ]
-                      }
-                      onChange={(event) =>
-                        setValues((current) => ({
-                          ...current,
-                          [key as string]: event.target.value,
-                        }))
-                      }
-                      className={`${fieldClass} w-full ${toggle ? "pr-11" : ""}`}
-                    />
-                    {toggle && (
-                      <button
-                        type="button"
-                        aria-label={`Show ${label as string}`}
-                        onClick={() =>
-                          (
-                            toggle as React.Dispatch<
-                              React.SetStateAction<boolean>
-                            >
-                          )((value) => !value)
-                        }
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-[#7288A3]"
-                      >
-                        {visible ? <EyeOff size={18} /> : <Eye size={18} />}
-                      </button>
-                    )}
-                  </span>
-                </label>
-              ))}
-            </div>
-          )}
-          {audience === "Internal users" && (
+          {initial && (
             <div className="mt-2 flex flex-col gap-5 border-t border-[#E5EDF9] pt-5">
               <div>
                 <h3 className="font-montserrat text-[14px] font-semibold text-[#10233A]">
                   Profile &amp; analytics
                 </h3>
                 <p className="mt-1 font-montserrat text-[11px] text-[#7288A3]">
-                  Meso accountant profile, activity and access control data.
+                  User profile, activity and access control data.
                 </p>
               </div>
 
@@ -1367,54 +1391,6 @@ function UserPanel({
                 ))}
               </div>
 
-              <div className="rounded-xl border border-[#D3E1EC] p-4">
-                <h4 className="font-montserrat text-[12px] font-semibold text-[#10233A]">
-                  Assigned permissions and roles
-                </h4>
-                <div className="mt-3 flex flex-col gap-2">
-                  {assignedPermissionDetails.length ? (
-                    assignedPermissionDetails.map((role) => (
-                      <div
-                        key={role.name}
-                        className="rounded-md bg-[#F8FDFF] px-3 py-2"
-                      >
-                        <p className="font-montserrat text-[12px] font-semibold text-[#10233A]">
-                          {role.name}
-                        </p>
-                        <p className="mt-0.5 font-montserrat text-[10px] text-[#7288A3]">
-                          {role.permissions}
-                        </p>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="font-montserrat text-[11px] text-[#7288A3]">
-                      No roles or permissions assigned
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-[#D3E1EC] p-4">
-                <h4 className="font-montserrat text-[12px] font-semibold text-[#10233A]">
-                  Assigned organizations
-                </h4>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {values.organizations.length ? (
-                    values.organizations.map((organization) => (
-                      <span
-                        key={organization}
-                        className="rounded-md bg-[#EAF4FB] px-2.5 py-1 font-montserrat text-[11px] font-medium text-[#10233A]"
-                      >
-                        {organization}
-                      </span>
-                    ))
-                  ) : (
-                    <span className="font-montserrat text-[11px] text-[#7288A3]">
-                      No organizations assigned
-                    </span>
-                  )}
-                </div>
-              </div>
 
               <div className="rounded-xl border border-[#D3E1EC] p-4">
                 <h4 className="font-montserrat text-[12px] font-semibold text-[#10233A]">
@@ -1476,75 +1452,6 @@ function UserPanel({
               </div>
             </div>
           )}
-          <div className="relative flex flex-col gap-1.5">
-            <span className="font-montserrat text-[12px] font-semibold text-[#10233A]">
-              Assigned roles
-            </span>
-            <div className="flex min-h-10 flex-wrap gap-2 rounded-lg border border-[#D3E1EC] p-2">
-              {values.roles.length ? (
-                values.roles.map((role) => (
-                  <span
-                    key={role}
-                    className="inline-flex h-7 items-center gap-2 rounded-md border border-[#D3E1EC] bg-[#F8FDFF] px-2 font-montserrat text-[12px] text-[#10233A]"
-                  >
-                    {role}
-                    <button
-                      type="button"
-                      aria-label={`Remove ${role}`}
-                      onClick={() => toggleRole(role)}
-                      className="text-[#7288A3] hover:text-[#10233A]"
-                    >
-                      <X size={13} />
-                    </button>
-                  </span>
-                ))
-              ) : (
-                <span className="px-1 font-montserrat text-[12px] leading-6 text-[#7288A3]">
-                  No roles assigned
-                </span>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={() => setRolesOpen((value) => !value)}
-              className="flex min-h-10 items-center justify-between rounded-lg border border-[#D3E1EC] px-3 text-left"
-            >
-              <span className="font-montserrat text-[12px] text-[#10233A]">
-                Choose roles
-              </span>
-              <ChevronDown
-                size={17}
-                className={`text-[#7288A3] ${rolesOpen ? "rotate-180" : ""}`}
-              />
-            </button>
-            {rolesOpen && (
-              <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-52 overflow-y-auto rounded-lg border border-[#D3E1EC] bg-white p-2 shadow-lg">
-                {availableRoles.length ? (
-                  availableRoles.map((role) => (
-                    <button
-                      key={role}
-                      type="button"
-                      onClick={() => toggleRole(role)}
-                      className="flex h-9 w-full items-center gap-2 rounded-md px-2 hover:bg-[#F8FDFF]"
-                    >
-                      <CheckBox
-                        checked={values.roles.includes(role)}
-                        label={`Assign ${role}`}
-                        onChange={() => toggleRole(role)}
-                      />
-                      <span className="font-montserrat text-[13px]">
-                        {role}
-                      </span>
-                    </button>
-                  ))
-                ) : (
-                  <div className="px-2 py-3 font-montserrat text-[12px] text-[#7288A3]">
-                    Create a role first
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
           {!initial && (
             <div className="flex flex-col gap-4 rounded-xl border border-[#D3E1EC] bg-white p-4">
               <div>
@@ -1556,27 +1463,29 @@ function UserPanel({
                   with the invitation.
                 </p>
               </div>
-              <div className="relative flex flex-col gap-1.5">
+              <div ref={invitationTemplateRef} className="relative flex min-w-0 flex-col gap-1.5">
                 <span className="font-montserrat text-[12px] font-medium text-[#10233A]">
                   Message template
                 </span>
                 <button
                   type="button"
+                  aria-label="Message template"
                   aria-haspopup="listbox"
                   aria-expanded={invitationTemplateOpen}
+                  data-static-selection="true"
                   onClick={() =>
                     setInvitationTemplateOpen((current) => !current)
                   }
-                  className="flex h-10 items-center justify-between rounded-lg border border-[#D3E1EC] bg-white px-3 text-left outline-none focus:border-[#007EA7]"
+                  className="flex h-10 min-w-0 items-center justify-between gap-2 rounded-lg border border-[#D3E1EC] bg-white px-3 text-left outline-none focus:border-[#007EA7]"
                 >
-                  <span className="font-montserrat text-[13px] text-[#10233A]">
+                  <span className="min-w-0 truncate font-montserrat text-[13px] text-[#10233A]">
                     {INVITATION_TEMPLATES.find(
                       (template) => template.id === invitationTemplate,
                     )?.label ?? "Choose template"}
                   </span>
                   <ChevronDown
                     size={17}
-                    className={`text-[#7288A3] ${invitationTemplateOpen ? "rotate-180" : ""}`}
+                    className={`shrink-0 text-[#7288A3] ${invitationTemplateOpen ? "rotate-180" : ""}`}
                   />
                 </button>
                 {invitationTemplateOpen && (
@@ -1590,19 +1499,20 @@ function UserPanel({
                         type="button"
                         role="option"
                         aria-selected={invitationTemplate === template.id}
+                        data-static-selection="true"
                         onClick={() => {
                           setInvitationTemplate(template.id);
                           setInvitationMessage(template.message);
                           setInvitationTemplateOpen(false);
                         }}
-                        className="flex h-9 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-[#F0F7FA]"
+                        className={`grid h-9 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-2 rounded-md px-2 text-left ${invitationTemplate === template.id ? 'bg-[#E5EDF9]' : 'hover:bg-[#F8FDFF]'}`}
                       >
-                        <span className="flex h-4 w-4 items-center justify-center rounded border border-[#A9BED0]">
+                        <span aria-hidden="true" className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${invitationTemplate === template.id ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>
                           {invitationTemplate === template.id && (
-                            <Check size={12} className="text-[#007EA7]" />
+                            <Check size={12} strokeWidth={2.5} className="text-white" />
                           )}
                         </span>
-                        <span className="font-montserrat text-[12px] text-[#10233A]">
+                        <span className="truncate font-montserrat text-[12px] text-[#10233A]">
                           {template.label}
                         </span>
                       </button>
@@ -1624,6 +1534,17 @@ function UserPanel({
               </label>
             </div>
           )}
+          <div ref={statusRef} className="relative flex flex-col gap-1.5">
+            <span className="font-montserrat text-[12px] font-semibold text-[#10233A]">Status</span>
+            <button type="button" aria-label="User status" aria-haspopup="listbox" aria-expanded={statusOpen} disabled={statusLocked} data-static-selection="true" onClick={() => setStatusOpen(open => !open)} className="flex h-10 w-full items-center justify-between rounded-lg border border-[#D3E1EC] bg-white px-3 text-left font-montserrat text-[12px] text-[#10233A] disabled:cursor-not-allowed disabled:bg-[#F0F6FA] disabled:text-[#7288A3]">
+              <span>{values.status}</span><ChevronDown size={17} className={`shrink-0 text-[#7288A3] ${statusOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {statusOpen && !statusLocked && <div role="listbox" aria-label="User status options" className="absolute top-full left-0 right-0 z-20 mt-1 rounded-lg border border-[#D3E1EC] bg-white p-2 shadow-lg">
+              {['Active', 'Blocked'].map(status => <button key={status} type="button" role="option" aria-selected={values.status === status} data-static-selection="true" onClick={() => { setValues(current => ({ ...current, status })); setStatusOpen(false); }} className={`grid h-9 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-2 rounded-md px-2 text-left font-montserrat text-[12px] text-[#10233A] ${values.status === status ? 'bg-[#E5EDF9]' : 'hover:bg-[#F8FDFF]'}`}>
+                <span aria-hidden="true" className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${values.status === status ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}><Check size={12} strokeWidth={2.5} className={values.status === status ? 'text-white' : 'invisible'} /></span><span className="truncate">{status}</span>
+              </button>)}
+            </div>}
+          </div>
         </div>
         <div className="flex justify-end gap-3 pt-6">
           <button
@@ -1646,20 +1567,16 @@ function UserPanel({
               );
               onSave({
                 id: userId,
-                username: values.username.trim(),
+                username: values.email.trim(),
                 email: values.email.trim(),
                 phone: values.phone.trim(),
                 fullName: `${values.firstName.trim()} ${values.lastName.trim()}`,
                 position: values.position.trim(),
-                organizations: values.roles.some((role) =>
+                organizations: audience === "Internal users" && values.roles.some((role) =>
                   isSystemAdministratorRole(role),
                 )
                   ? "All organizations"
                   : values.organizations.join(", ") || "Unassigned",
-                sodraUser: values.sodraUser.trim(),
-                sodraPassword: values.sodraPassword,
-                edsUser: values.edsUser.trim(),
-                edsPassword: values.edsPassword,
                 profileImage: values.profileImage,
                 lastLogin: values.lastLogin,
                 loginHistory: values.loginHistory,
@@ -1667,8 +1584,8 @@ function UserPanel({
                   {
                     date: timestamp(),
                     action: initial
-                      ? "Updated internal user profile"
-                      : "Created internal user profile",
+                      ? "Updated user profile"
+                      : "Created user profile",
                   },
                   ...activityLog,
                 ]),
@@ -1717,9 +1634,7 @@ export default function SettingsIdentityManagementView({
   const defaults =
     section === "Roles"
       ? ROLE_COLUMNS
-      : audience === "Internal users"
-        ? INTERNAL_USER_COLUMNS
-        : USER_COLUMNS;
+      : INTERNAL_USER_COLUMNS;
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const filterMenuRef = useRef<HTMLDivElement>(null);
   const [rows, setRows] = useState<DirectoryRow[]>(() =>
@@ -1729,6 +1644,8 @@ export default function SettingsIdentityManagementView({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<DirectoryRow | "new" | null>(null);
   const [roleTemplate, setRoleTemplate] = useState<DirectoryRow | undefined>();
+  const [invitationUser, setInvitationUser] = useState<DirectoryRow | null>(null);
+  const [passwordResetUser, setPasswordResetUser] = useState<DirectoryRow | null>(null);
   const [columns, setColumns] = useState<ColConfig[]>(defaults);
   const [showColumns, setShowColumns] = useState(false);
   const [addFilterOpen, setAddFilterOpen] = useState(false);
@@ -1741,27 +1658,10 @@ export default function SettingsIdentityManagementView({
   const [page, setPage] = useState(1);
   useEffect(() => setPage(1), [query, activeFilterKeys, filterValues, organizationScope?.id]);
   const { startResize } = useColumnResize(columns, setColumns);
-  useEffect(() => {
-    if (!addFilterOpen && openValueFilter === null) return;
-    const closeOutside = (event: PointerEvent) => {
-      const target = event.target;
-      if (target instanceof Node && !filterMenuRef.current?.contains(target)) {
-        setAddFilterOpen(false);
-        setOpenValueFilter(null);
-      }
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setAddFilterOpen(false);
-      setOpenValueFilter(null);
-    };
-    document.addEventListener("pointerdown", closeOutside);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOutside);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [addFilterOpen, openValueFilter]);
+  useDropdownDismiss(addFilterOpen || openValueFilter !== null, filterMenuRef, () => {
+    setAddFilterOpen(false);
+    setOpenValueFilter(null);
+  });
   useEffect(() => {
     if (!createOnOpen || section !== "Users") return;
     setEditing("new");
@@ -1879,6 +1779,7 @@ export default function SettingsIdentityManagementView({
       : scopedRows;
   }, [columnFilteredRows, query, organizationScope, audience]);
   const visibleColumns = columns.filter((column) => column.visible);
+  const actionColumnWidth = section === 'Users' || audience === 'Internal users' ? 104 : 72;
   const { sortedRows, changeSort, directionFor } = useMultiColumnSort(
     filtered,
     (row, column) => row[column],
@@ -1901,39 +1802,22 @@ export default function SettingsIdentityManagementView({
       : `${audience === "Internal users" ? "Internal" : "External"} Users`;
   const audienceLabel =
     audience === "Internal users" ? "Internal Users" : "External Users";
+  const selectedRemovableRows = rows.filter((row) => selected.has(row.id)
+    && !(section === 'Roles' && isProtectedSystemRole(audience, row)));
   const remove = (ids: Set<string>) => {
-    setRows((current) => {
-      const removableIds = new Set(
-        Array.from(ids).filter((id) => {
-          const row = current.find((candidate) => candidate.id === id);
-          return !(
-            section === "Roles" && isSystemAdministratorRole(row?.name)
-          );
-        }),
-      );
-      const nextRows = current.filter((row) => !removableIds.has(row.id));
-      persistRows(audience, section, nextRows);
-      const deletedIds = readDeletedIds(audience, section);
-      removableIds.forEach((id) => deletedIds.add(id));
-      persistDeletedIds(audience, section, deletedIds);
-
-      if (section === "Roles") {
-        const deletedRoleNames = current
-          .filter((row) => removableIds.has(row.id))
-          .map((row) => row.name);
-        const users = loadRows(audience, "Users").map((user) => ({
-          ...user,
-          roles:
-            (user.roles ?? "")
-              .split(",")
-              .map((role) => role.trim())
-              .filter((role) => role && !deletedRoleNames.includes(role))
-              .join(", ") || "Unassigned",
-        }));
-        persistRows(audience, "Users", users);
-      }
-      return nextRows;
-    });
+    // Re-read the directory and its relationships at action time. Assigned roles
+    // and users are retained; deactivation must never erase their assignments.
+    const current = loadRows(audience, section);
+    const removableIds = new Set(current.filter((row) => ids.has(row.id)
+      && !(section === 'Roles' && isProtectedSystemRole(audience, row))).map((row) => row.id));
+    const nextRows = removeOrDeactivateRecords(current, removableIds, key, undefined,
+      (row) => isDirectoryRowLinked(audience, section, row));
+    const retainedIds = new Set(nextRows.map((row) => row.id));
+    const deletedIds = readDeletedIds(audience, section);
+    removableIds.forEach((id) => { if (!retainedIds.has(id)) deletedIds.add(id); });
+    persistDeletedIds(audience, section, deletedIds);
+    persistRows(audience, section, nextRows);
+    setRows(nextRows);
     setSelected(new Set());
   };
   const duplicateRole = (source: DirectoryRow) => {
@@ -1945,10 +1829,27 @@ export default function SettingsIdentityManagementView({
   };
   const save = (row: DirectoryRow) => {
     setRows((current) => {
+      // Personal integration credentials are not editable through user administration.
+      const existing = current.find((item) => item.id === row.id);
+      const savedRow = { ...existing, ...row };
+      if (section === 'Users') {
+        const existingStatus = internalUserStatus(existing?.status);
+        savedRow.status = !existing || existingStatus === 'Unactivated'
+          ? 'Unactivated'
+          : ['Active', 'Blocked'].includes(savedRow.status) ? savedRow.status : existingStatus;
+        if (existing && isInactiveRecord(existing) && savedRow.status === 'Active') {
+          savedRow.inactive = 'false';
+          savedRow.active = 'true';
+        }
+        for (const field of ['sodraUser', 'sodraPassword', 'edsUser', 'edsPassword', 'password', 'confirmPassword']) {
+          delete savedRow[field];
+          if (existing && Object.prototype.hasOwnProperty.call(existing, field)) savedRow[field] = existing[field];
+        }
+      }
       const nextRows =
         editing === "new"
-          ? [...current, row]
-          : current.map((value) => (value.id === row.id ? row : value));
+          ? [...current, savedRow]
+          : current.map((value) => (value.id === row.id ? savedRow : value));
       persistRows(audience, section, nextRows);
       const deletedIds = readDeletedIds(audience, section);
       if (deletedIds.delete(row.id)) {
@@ -1986,7 +1887,7 @@ export default function SettingsIdentityManagementView({
         actions={
           !isEmptyDirectory ? (
             <PageActionButton onClick={() => setEditing("new")}>
-              Create new
+              {section === 'Users' ? 'Create user & send invitation' : 'Create new'}
             </PageActionButton>
           ) : undefined
         }
@@ -1999,7 +1900,7 @@ export default function SettingsIdentityManagementView({
         <span className="text-[#A1B6C6]">{section}</span>
       </div>
       <div className="system-table-toolbar flex h-7 min-h-7 flex-nowrap items-center justify-between gap-4">
-        <div ref={filterMenuRef} className="flex min-w-0 flex-1 flex-nowrap items-center gap-1">
+        <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-1">
           <OcrSearchField
             ariaLabel={`Search ${section.toLowerCase()}`}
             value={query}
@@ -2021,7 +1922,7 @@ export default function SettingsIdentityManagementView({
                 };
               });
             return (
-              <div key={filterKey} className="relative">
+              <div key={filterKey} ref={openValueFilter === filterKey ? filterMenuRef : undefined} className="relative">
                 <button
                   type="button"
                   aria-expanded={openValueFilter === filterKey}
@@ -2054,16 +1955,18 @@ export default function SettingsIdentityManagementView({
                     <div className="max-h-60 overflow-y-auto pt-1">
                       {options.length ? (
                         options.map((option) => (
-                          <div
+                          <button
                             key={option.value}
-                            className="flex min-h-10 w-full cursor-pointer items-center gap-3 rounded-md px-2 text-left hover:bg-[#F8FDFF]"
+                            type="button"
+                            aria-pressed={selectedValues.includes(option.value)}
+                            aria-label={`Filter by ${option.label}`}
+                            data-static-selection="true"
+                            className={`grid h-10 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-3 rounded-md px-2 text-left ${selectedValues.includes(option.value) ? 'bg-[#E5EDF9]' : 'hover:bg-[#F8FDFF]'}`}
                             onClick={() => toggleValue(option.value)}
                           >
-                            <CheckBox
-                              checked={selectedValues.includes(option.value)}
-                              label={`Filter by ${option.label}`}
-                              onChange={() => toggleValue(option.value)}
-                            />
+                            <span aria-hidden="true" className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${selectedValues.includes(option.value) ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>
+                              {selectedValues.includes(option.value) && <Check size={12} strokeWidth={2.5} className="text-white" />}
+                            </span>
                             <span className="min-w-0">
                               <span className="block truncate font-montserrat text-[12px] font-medium text-[#10233A]">
                                 {option.label}
@@ -2074,7 +1977,7 @@ export default function SettingsIdentityManagementView({
                                 </span>
                               )}
                             </span>
-                          </div>
+                          </button>
                         ))
                       ) : (
                         <div className="px-2 py-3 font-montserrat text-[12px] text-[#7288A3]">
@@ -2104,7 +2007,7 @@ export default function SettingsIdentityManagementView({
               </div>
             );
           })}
-          <div className="relative flex-shrink-0">
+          <div ref={addFilterOpen ? filterMenuRef : undefined} className="relative flex-shrink-0">
             <button
               type="button"
               aria-expanded={addFilterOpen}
@@ -2147,6 +2050,7 @@ export default function SettingsIdentityManagementView({
                         key={column.key}
                         type="button"
                         aria-pressed={checked}
+                        data-static-selection="true"
                         onClick={() => {
                           setPendingFilterKeys((current) =>
                             checked
@@ -2155,20 +2059,21 @@ export default function SettingsIdentityManagementView({
                           );
                           setOpenValueFilter(null);
                         }}
-                        className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-[#F2F7FC]"
+                        className={`grid h-9 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-3 rounded-md px-3 text-left ${checked ? 'bg-[#E5EDF9]' : 'hover:bg-[#F8FDFF]'}`}
                       >
                         <span
-                          className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[4px] border ${checked ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
+                          aria-hidden="true"
+                          className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${checked ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
                         >
                           {checked && (
                             <Check
-                              size={13}
+                              size={12}
                               strokeWidth={2.5}
                               className="text-white"
                             />
                           )}
                         </span>
-                        <span className="font-montserrat text-[13px] font-medium text-[#10233A]">
+                        <span className="truncate font-montserrat text-[13px] font-medium text-[#10233A]">
                           {column.label}
                         </span>
                       </button>
@@ -2220,7 +2125,9 @@ export default function SettingsIdentityManagementView({
         </div>
         <div className="flex items-center gap-4">
           <BulkDeleteButton
-            selectedCount={selected.size}
+            selectedCount={selectedRemovableRows.length}
+            linked={selectedRemovableRows.some((row) => isInactiveRecord(row) || isDirectoryRowLinked(audience, section, row))}
+            inactive={selectedRemovableRows.length > 0 && selectedRemovableRows.every(isInactiveRecord)}
             onDelete={() => remove(selected)}
           />
           <ColumnSettingsButton onClick={() => setShowColumns(true)} />
@@ -2245,7 +2152,7 @@ export default function SettingsIdentityManagementView({
                     visibleColumns.reduce(
                       (sum, column) => sum + column.width,
                       0,
-                    ) + 114,
+                    ) + 42 + actionColumnWidth,
                 }}
               />
             </div>
@@ -2256,7 +2163,7 @@ export default function SettingsIdentityManagementView({
               </span>
               <span className="pointer-events-auto">
                 <PageActionButton onClick={() => setEditing("new")}>
-                  Create new
+                  {section === 'Users' ? 'Create user & send invitation' : 'Create new'}
                 </PageActionButton>
               </span>
             </div>
@@ -2282,7 +2189,7 @@ export default function SettingsIdentityManagementView({
                   visibleColumns.reduce(
                     (sum, column) => sum + column.width,
                     0,
-                  ) + 114,
+                  ) + 42 + actionColumnWidth,
               }}
             >
               <div className="mb-3 flex h-6 items-center">
@@ -2320,12 +2227,13 @@ export default function SettingsIdentityManagementView({
                     </div>
                   );
                 })}
-                <div className={`h-full flex-shrink-0 bg-white ${section === 'Roles' && audience === 'Internal users' ? 'w-[104px]' : 'w-[72px]'}`} />
+                <div className={`system-table-row-actions h-full flex-shrink-0 bg-white ${section === 'Users' || audience === 'Internal users' ? 'w-[104px]' : 'w-[72px]'}`} />
               </div>
               <div className="flex flex-col gap-0.5">
                 {displayedRows.map((row, index) => (
                   <div
                     key={row.id}
+                    data-record-inactive={isInactiveRecord(row)}
                     className={`group flex h-10 cursor-default items-center rounded-lg ${index % 2 ? "bg-white" : "bg-[#F8FDFF]"} hover:bg-[#E7F4F9]`}
                   >
                     <div className="flex w-[42px] px-3">
@@ -2348,14 +2256,16 @@ export default function SettingsIdentityManagementView({
                         style={{ width: column.width }}
                         className="flex-shrink-0 overflow-hidden px-3"
                       >
-                        {section === 'Roles' && column.key === 'assignedUsers' && onOpenRoleUsers ? <button type="button" className="font-montserrat text-[12px] text-[#007EA7] hover:underline" aria-label={`View users assigned to ${row.name}`} onClick={() => onOpenRoleUsers(row.name)}>{row.assignedUsers || '0'}</button> : <span className="block truncate font-montserrat text-[12px] font-normal text-[#10233A]">
+                        {section === 'Users' && column.key === 'fullName' ? <button type="button" className="block max-w-full truncate text-left font-montserrat text-[12px] font-normal text-[#007EA7] hover:underline" aria-label={`Edit ${row.fullName}`} title={row.fullName} onClick={() => setEditing(row)}>{row.fullName || '—'}</button> : section === 'Roles' && column.key === 'assignedUsers' && onOpenRoleUsers ? <button type="button" className="font-montserrat text-[12px] text-[#007EA7] hover:underline" aria-label={`View users assigned to ${row.name}`} onClick={() => onOpenRoleUsers(row.name)}>{row.assignedUsers || '0'}</button> : <span className="block truncate font-montserrat text-[12px] font-normal text-[#10233A]">
                           {row[column.key] || "—"}
                         </span>}
                       </div>
                     ))}
                     <div
-                      className={`system-table-row-actions flex h-full ${section === 'Roles' && audience === 'Internal users' ? 'w-[104px]' : 'w-[72px]'} flex-shrink-0 items-center justify-end gap-1 pr-1 ${index % 2 ? "bg-white" : "bg-[#F8FDFF]"} group-hover:bg-[#E7F4F9]`}
+                      className={`system-table-row-actions flex h-full ${section === 'Users' || audience === 'Internal users' ? 'w-[104px]' : 'w-[72px]'} flex-shrink-0 items-center justify-end gap-1 pr-1 ${index % 2 ? "bg-white" : "bg-[#F8FDFF]"} group-hover:bg-[#E7F4F9]`}
                     >
+                      {section === 'Users' && row.status === 'Unactivated' && <button type="button" title="Resend invitation" aria-label={`Resend invitation to ${row.email}`} onClick={() => setInvitationUser(row)} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] hover:border-[#007EA7] hover:text-[#007EA7]"><Mail size={15} /></button>}
+                      {section === 'Users' && row.status === 'Active' && <button type="button" title="Send password reset" aria-label={`Send password reset to ${row.email}`} onClick={() => setPasswordResetUser(row)} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] hover:border-[#007EA7] hover:text-[#007EA7]"><KeyRound size={15} /></button>}
                       {section === 'Roles' && audience === 'Internal users' && (
                         <button
                           type="button"
@@ -2376,8 +2286,10 @@ export default function SettingsIdentityManagementView({
                       >
                         <Pencil size={15} />
                       </button>
-                      <RowDeleteButton
+                      {!(section === 'Roles' && isProtectedSystemRole(audience, row)) && <RowDeleteButton
                         label={`Delete ${row.id}`}
+                        linked={isDirectoryRowLinked(audience, section, row)}
+                        inactive={isInactiveRecord(row)}
                         title={
                           isSystemAdministratorRole(row.name)
                             ? "SYSTEM ROLE CANNOT BE DELETED"
@@ -2386,7 +2298,7 @@ export default function SettingsIdentityManagementView({
                         disabled={isSystemAdministratorRole(row.name)}
                         className="group-hover:bg-[#E7F4F9]"
                         onDelete={() => remove(new Set([row.id]))}
-                      />
+                      />}
                     </div>
                   </div>
                 ))}
@@ -2397,7 +2309,7 @@ export default function SettingsIdentityManagementView({
                       No records
                     </span>
                     <PageActionButton onClick={() => setEditing("new")}>
-                      Create new
+                      {section === 'Users' ? 'Create user & send invitation' : 'Create new'}
                     </PageActionButton>
                   </div>
                 )}
@@ -2416,6 +2328,22 @@ export default function SettingsIdentityManagementView({
           </div>
         </>
       )}
+      {passwordResetUser && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4" onClick={() => setPasswordResetUser(null)}>
+        <div role="dialog" aria-modal="true" aria-label="Send password reset" className="w-full max-w-md rounded-xl border border-[#D3E1EC] bg-white p-6 shadow-xl" onClick={event => event.stopPropagation()}>
+          <h3 className="font-montserrat text-[16px] font-semibold text-[#10233A]">Send password reset</h3>
+          <p className="mt-3 break-words font-montserrat text-[13px] text-[#10233A]">{passwordResetUser.email}</p>
+          <p className="mt-3 font-montserrat text-[12px] text-[#7288A3]">Password reset email delivery is not configured. No email has been sent and the password has not been changed. The user must set their own password using a secure reset link.</p>
+          <div className="mt-5 flex justify-end"><button type="button" onClick={() => setPasswordResetUser(null)} className="h-9 rounded-lg border border-[#D3E1EC] px-4 font-montserrat text-[12px] text-[#7288A3]">Close</button></div>
+        </div>
+      </div>}
+      {invitationUser && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4" onClick={() => setInvitationUser(null)}>
+        <div role="dialog" aria-modal="true" aria-label="Resend invitation" className="w-full max-w-md rounded-xl border border-[#D3E1EC] bg-white p-6 shadow-xl" onClick={event => event.stopPropagation()}>
+          <h3 className="font-montserrat text-[16px] font-semibold text-[#10233A]">Resend invitation</h3>
+          <p className="mt-3 break-words font-montserrat text-[13px] text-[#10233A]">{invitationUser.email}</p>
+          <p className="mt-3 font-montserrat text-[12px] text-[#7288A3]">Invitation delivery is not configured. No email has been sent. Connect the invitation service to send a secure account activation link.</p>
+          <div className="mt-5 flex justify-end"><button type="button" onClick={() => setInvitationUser(null)} className="h-9 rounded-lg border border-[#D3E1EC] px-4 font-montserrat text-[12px] text-[#7288A3]">Close</button></div>
+        </div>
+      </div>}
       {showColumns && (
         <ColumnSettingsPanel
           columns={columns}

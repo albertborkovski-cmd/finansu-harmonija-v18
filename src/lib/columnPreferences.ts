@@ -16,7 +16,28 @@ export function restoreColumnLayout(columns: ColConfig[], stored: unknown): ColC
 }
 
 export function readColumnLayout(key: string, columns: ColConfig[]) {
-  try { return restoreColumnLayout(columns, JSON.parse(window.localStorage.getItem(key) ?? 'null')); }
+  try {
+    let restored = restoreColumnLayout(columns, JSON.parse(window.localStorage.getItem(key) ?? 'null'));
+    const reconciliationLayout = key.includes(':column-layout:reconciliation-examples-layout-');
+    const glDefaultMigration = `${key}:optional-gl-account-v1`;
+    if (reconciliationLayout && columns.some(column => column.key === 'glAccount' && !column.visible) && window.localStorage.getItem(glDefaultMigration) !== 'done') {
+      restored = restored.map(column => column.key === 'glAccount' ? { ...column, visible: false } : column);
+      saveColumnLayout(key, restored);
+      window.localStorage.setItem(glDefaultMigration, 'done');
+    }
+    // Move the former leading reconciliation rate column without resetting
+    // the user's other column positions or visibility preferences.
+    if (reconciliationLayout && restored[0]?.key === 'exchangeRate') {
+      const predecessor = columns[columns.findIndex(column => column.key === 'exchangeRate') - 1]?.key;
+      const anchor = restored.findIndex(column => column.key === predecessor);
+      if (anchor > 0) {
+        const [rate, ...remaining] = restored;
+        remaining.splice(anchor, 0, rate);
+        return remaining;
+      }
+    }
+    return restored;
+  }
   catch { return columns; }
 }
 

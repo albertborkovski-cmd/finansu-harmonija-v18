@@ -17,6 +17,7 @@ function load(path, imports = {}) {
 }
 
 const imports = {
+  '../lib/reconciliation': load('../src/lib/reconciliation.ts'),
   './PageHeader': load('../src/components/PageHeader.tsx'),
   './SearchableSelect': load('../src/components/SearchableSelect.tsx'),
 };

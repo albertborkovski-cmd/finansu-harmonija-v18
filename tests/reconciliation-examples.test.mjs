@@ -29,6 +29,8 @@ const depositId = suffix => `${companyId}:demo-expanded-v3:${suffix}`;
 const isDepositExpansion = item => item.id.startsWith(depositId(''));
 const accountingId = suffix => `${companyId}:demo-expanded-v4:${suffix}`;
 const isAccountingExpansion = item => item.id.startsWith(accountingId(''));
+const isCashExpansion = item => item.id.startsWith(`${companyId}:demo-cash-v1:`);
+const isMissingDocumentExpansion = item => item.id.startsWith(`${companyId}:demo-missing-v1:`);
 const choiceGroups = ['sales-eur', 'purchases-eur', 'sales-usd', 'purchases-usd'];
 const legacyState = () => {
   const state = createReconciliationExamples(companyId);
@@ -46,8 +48,10 @@ function deepFreeze(value) {
 test('showcase is deterministic and preserves every original open-item fixture', () => {
   const state = createReconciliationExamples(companyId);
   assert.deepEqual(state, createReconciliationExamples(companyId));
-  assert.equal(state.items.length, 418);
-  assert.equal(state.items.filter(item => !isChoice(item) && !isDepositExpansion(item) && !isAccountingExpansion(item)).length, 175);
+  assert.equal(state.items.length, 425);
+  assert.equal(state.items.filter(item => !isChoice(item) && !isDepositExpansion(item) && !isAccountingExpansion(item) && !isCashExpansion(item) && !isMissingDocumentExpansion(item)).length, 175);
+  assert.equal(state.items.filter(isCashExpansion).length, 4);
+  assert.equal(state.items.filter(isMissingDocumentExpansion).length, 3);
   assert.equal(state.batches.length, 13);
   assert.deepEqual(state.items.slice(0, 22), engine.createDemoReconciliationState(companyId).items);
   assert.equal(new Set(state.items.map(item => item.id)).size, state.items.length);
@@ -69,11 +73,12 @@ test('examples use real validated balances for full, partial, credit and reverse
   assert.deepEqual(engine.parseReconciliationState(JSON.stringify(state), companyId), state);
 });
 
-test('all six requested statuses are visible without applying or fabricating new data', () => {
+test('all seven current statuses are visible without applying or fabricating new data', () => {
   const state = createReconciliationExamples(companyId);
   const suggestions = engine.suggestReconciliation(state.items);
   const statuses = new Set(state.items.map(item => getReconciliationItemStatus(item, state, suggestions)));
-  assert.deepEqual([...statuses].sort(), ['Reconciled', 'Partially reconciled', 'Suggested', 'Needs review', 'Not reconciled', 'Reversed'].sort());
+  assert.deepEqual([...statuses].sort(), ['Reconciled', 'Partially reconciled', 'Suggested', 'Needs review', 'Not reconciled', 'Reversed', 'Missing document'].sort());
+  assert.ok(state.items.filter(isMissingDocumentExpansion).every(item => getReconciliationItemStatus(item, state, suggestions) === 'Missing document'));
   const expected = [
     ['settled:invoice', 'Reconciled'],
     ['partial:invoice', 'Partially reconciled'],
@@ -240,7 +245,7 @@ test('augmentation does not recreate deleted expansion items, reset reconciliati
   assert.ok(parsed.items.every(item => !removedIds.has(item.id)));
   const onlyOneExpansion = { ...legacyState(), items: [expandedRow(state, 'unpaid-1:invoice')], batches: [] };
   const withLaterExpansion = augmentReconciliationExamples(onlyOneExpansion);
-  assert.equal(withLaterExpansion.items.length, 244);
+  assert.equal(withLaterExpansion.items.length, 1 + 224 + 8 + 11 + 4 + 3);
   assert.deepEqual(withLaterExpansion.items.filter(isExpanded), onlyOneExpansion.items);
   assert.strictEqual(augmentReconciliationExamples(withLaterExpansion), withLaterExpansion);
 });
@@ -248,9 +253,9 @@ test('augmentation does not recreate deleted expansion items, reset reconciliati
 test('augmentation never recreates the original showcase even when a parsed legacy state is empty', () => {
   const empty = engine.parseReconciliationState(JSON.stringify({ version: 1, organizationId: companyId, items: [], batches: [] }), companyId);
   const augmented = augmentReconciliationExamples(empty);
-  assert.equal(augmented.items.length, 145 + 224 + 8 + 11);
+  assert.equal(augmented.items.length, 145 + 224 + 8 + 11 + 4 + 3);
   assert.equal(augmented.batches.length, 9);
-  assert.ok(augmented.items.every(item => isExpanded(item) || isChoice(item) || isDepositExpansion(item) || isAccountingExpansion(item)));
+  assert.ok(augmented.items.every(item => isExpanded(item) || isChoice(item) || isDepositExpansion(item) || isAccountingExpansion(item) || isCashExpansion(item) || isMissingDocumentExpansion(item)));
   assert.ok(augmented.batches.every(isExpanded));
   assert.deepEqual(engine.parseReconciliationState(JSON.stringify(augmented), companyId), augmented);
 });
@@ -276,12 +281,17 @@ test('v2 provides four dense open ledgers with sales, purchases, EUR and USD cho
   }
 });
 
-test('every v2 invoice exposes 33 compatible choices and every funding row exposes 25 invoices', () => {
+test('v2 exposes opposite GL entries across counterparties, with 33 or 25 choices under the default counterparty filter', () => {
   const state = deepFreeze(createReconciliationExamples(companyId));
   const otherCompany = createReconciliationExamples('other-company');
   const mixedItems = [...state.items, ...otherCompany.items];
   for (const source of state.items.filter(isChoice)) {
-    const candidates = manual.getManualReconciliationCandidates(mixedItems, source.id);
+    const allCandidates = manual.getManualReconciliationCandidates(mixedItems, source.id);
+    assert.ok(allCandidates.some(item => item.counterpartyId !== source.counterpartyId));
+    assert.ok(allCandidates.every(item => item.organizationId === source.organizationId
+      && item.currency === source.currency
+      && engine.getReconciliationEntrySide(item) !== engine.getReconciliationEntrySide(source)));
+    const candidates = allCandidates.filter(item => item.counterpartyId === source.counterpartyId);
     assert.equal(candidates.length, source.kind === 'Invoice' ? 33 : 25, source.documentNumber);
     assert.ok(candidates.every(item => item.organizationId === source.organizationId
       && item.counterpartyId === source.counterpartyId
@@ -302,7 +312,7 @@ test('all eight large source records actually allocate the first 20 choices and 
   for (const key of choiceGroups) {
     for (const kind of ['invoice', 'payment']) {
       const source = choiceRow(input, `${key}:${kind}-100`);
-      const candidates = manual.getManualReconciliationCandidates(input.items, source.id);
+      const candidates = manual.getManualReconciliationCandidates(input.items, source.id).filter(item => item.counterpartyId === source.counterpartyId);
       const selected = candidates.slice(0, 20);
       const preview = manual.buildManualReconciliation(input.items, source.id, selected.map(item => item.id));
       assert.equal(preview.allocations.length, 20, source.documentNumber);
@@ -332,7 +342,7 @@ test('large invoice balances cover all 32 ordinary funding rows including credit
     for (const kind of ['invoice', 'payment']) {
       const source = choiceRow(state, `${key}:${kind}-100`);
       const oppositeLargeId = choiceId(`${key}:${kind === 'invoice' ? 'payment' : 'invoice'}-100`);
-      const candidates = manual.getManualReconciliationCandidates(state.items, source.id).filter(item => item.id !== oppositeLargeId);
+      const candidates = manual.getManualReconciliationCandidates(state.items, source.id).filter(item => item.id !== oppositeLargeId && item.counterpartyId === source.counterpartyId);
       assert.equal(candidates.length, kind === 'invoice' ? 32 : 24);
       const preview = manual.buildManualReconciliation(state.items, source.id, candidates.map(item => item.id));
       assert.ok(preview.allocations.every(allocation => allocation.amountMinor > 0 && allocation.remainingMinor === 0));
@@ -402,14 +412,14 @@ test('v3 adds eight manual-only contract deposits with 25 invoice choices each',
       assert.equal(source.kind, 'Deposit');
       assert.equal(source.originalMinor, source.remainingMinor);
       assert.match(source.reference, /Contract LT-2026/);
-      const candidates = manual.getManualReconciliationCandidates(state.items, source.id);
+      const candidates = manual.getManualReconciliationCandidates(state.items, source.id).filter(item => item.counterpartyId === source.counterpartyId);
       assert.equal(candidates.length, 25, source.documentNumber);
       assert.ok(candidates.every(item => item.kind === 'Invoice' && item.counterpartyId === source.counterpartyId && item.currency === source.currency && item.side === source.side));
       assert.equal(suggestions.proposals.some(proposal => proposal.fundingId === source.id), false);
       assert.match(suggestions.unmatched.find(entry => entry.itemId === source.id).reason, /manual allocation/);
     }
     const large = group.find(item => item.id.endsWith('deposit-002'));
-    const selected = manual.getManualReconciliationCandidates(state.items, large.id).slice(0, 24);
+    const selected = manual.getManualReconciliationCandidates(state.items, large.id).filter(item => item.counterpartyId === large.counterpartyId).slice(0, 24);
     const preview = manual.buildManualReconciliation(state.items, large.id, selected.map(item => item.id));
     assert.equal(preview.allocations.length, 24);
     assert.ok(preview.allocations.every(allocation => allocation.amountMinor > 0 && allocation.remainingMinor === 0));

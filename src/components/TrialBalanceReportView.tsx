@@ -1,7 +1,7 @@
 import TablePagination from "./TablePagination";
 import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Download, X } from "lucide-react";
+import { Check, ChevronDown, Download, X } from "lucide-react";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
@@ -16,6 +16,7 @@ import SystemAddFilters from "./SystemAddFilters";
 import { HeaderBackButton } from "./SystemNavigation";
 import { ResizeHandle, useColumnResize } from "./useColumnResize";
 import { usePersistentState } from "../hooks/usePersistentState";
+import { useDropdownDismiss } from "./useDropdownDismiss";
 
 type TrialBalanceRow = {
   code: string;
@@ -402,6 +403,8 @@ export default function TrialBalanceReportView({
   const [to, setTo] = useState("2026-06-30");
   const [exportOpen, setExportOpen] = useState(false);
   const [exportFormatOpen, setExportFormatOpen] = useState(false);
+  const exportFormatRef = useRef<HTMLDivElement>(null);
+  useDropdownDismiss(exportFormatOpen, exportFormatRef, () => setExportFormatOpen(false));
   const [exportFormat, setExportFormat] = useState<ExportFormat>("PDF");
   const [filterKeys, setFilterKeys] = useState<string[]>([]);
   const [filterValues, setFilterValues] = useState<Record<string, string[]>>({});
@@ -519,7 +522,7 @@ export default function TrialBalanceReportView({
                     ))}
                   </div>
 
-                  <div className="relative mt-6">
+                  <div ref={exportFormatRef} className="relative mt-6">
                     <label className="mb-2 block font-montserrat text-[14px] font-semibold leading-5 text-[#10233A]">
                       Format
                     </label>
@@ -552,9 +555,12 @@ export default function TrialBalanceReportView({
                               setExportFormat(format);
                               setExportFormatOpen(false);
                             }}
-                            className={`flex h-10 w-full items-center rounded-md px-3 text-left font-montserrat text-[14px] font-medium text-[#10233A] ${exportFormat === format ? "bg-[#E7F4F9]" : "hover:bg-[#F2F5F9]"}`}
+                            className={`flex h-10 w-full items-center gap-3 rounded-md px-3 text-left font-montserrat text-[14px] font-medium text-[#10233A] ${exportFormat === format ? "bg-[#E5EDF9]" : "hover:bg-[#F2F5F9]"}`}
                           >
-                            {format}
+                            <span aria-hidden="true" className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${exportFormat === format ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}>
+                              {exportFormat === format && <Check size={12} strokeWidth={2.5} className="text-white" />}
+                            </span>
+                            <span className="truncate">{format}</span>
                           </button>
                         ))}
                       </div>

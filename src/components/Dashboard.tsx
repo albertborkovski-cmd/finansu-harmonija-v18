@@ -9,8 +9,9 @@ import {
 import Sidebar from "./Sidebar";
 import { Bell, X, ArrowRight } from 'lucide-react';
 import NotificationDetailsPanel from './NotificationDetailsPanel';
+import NotificationRelativeTime from './NotificationRelativeTime';
 import { ensureImportantNotificationExamples, linkImportantNotificationExamples } from '../lib/importantNotificationExamples';
-import { formatNotificationDateTime, getNotificationModuleLabel, getNotificationRelatedObjectLabel, notificationMessage } from '../lib/notificationPresentation';
+import { getNotificationModuleLabel, getNotificationRelatedObjectLabel, notificationMessage } from '../lib/notificationPresentation';
 import RelatedObjectLink from './RelatedObjectLink';
 import { canAccessAssignedOrganization } from '../lib/linkedSettingsData';
 import { useOrganizationAccessRevision } from './useOrganizationAccessRevision';
@@ -38,6 +39,7 @@ import OrganizationReferenceValuesView, {
 } from "./OrganizationReferenceValuesView";
 import SettingsOrganizationsView from "./SettingsOrganizationsView";
 import OrganizationEmailSettingsView from "./OrganizationEmailSettingsView";
+import AdministratorSettings from './AdministratorSettings';
 import OperationDateValidationView from "./OperationDateValidationView";
 import AutomationSecurityAccessView from "./AutomationSecurityAccessView";
 import ResourceSecurityAccessView, {
@@ -82,7 +84,7 @@ const MENU_FALLBACK_ORDER = [
   "settings-analytics", "info", "ocr-all-documents-processed",
   "ocr-all-documents-uploaded", "ocr-workspace",
   "ocr-ml", "ocr-review-approve-documents", "ocr-review-analytics", "ocr-admin-human-task-types",
-  "ocr-admin-activity",
+  "ocr-admin-document-type", "ocr-admin-activity",
 ];
 
 function firstAccessibleMenu(session: AppSession) {
@@ -153,8 +155,8 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
   const notificationCounts = getNotificationTabCounts(visibleNotifications.records, visibleNotifications.session ?? session);
   const activeImportantNotifications = getRelevantActionsForTab(visibleNotifications.records, visibleNotifications.session ?? session, 'notifications')
     .filter(isImportantNotification);
-  const importantNotificationCount = activeImportantNotifications.length;
-  const importantNotificationBadge = importantNotificationCount > 5 ? '5+' : String(importantNotificationCount);
+  const importantNotificationCount = notificationCounts.notifications;
+  const importantNotificationBadge = String(importantNotificationCount);
   const recentNotifications = [...activeImportantNotifications]
     .sort((left, right) => {
       const leftRank = 'severity' in left && left.severity === 'Critical' ? 0 : 1;
@@ -397,6 +399,7 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
             "ocr-review-approve-documents",
             "ocr-review-analytics",
             "ocr-admin-human-task-types",
+            "ocr-admin-document-type",
             "ocr-admin-activity",
           ].find((candidate) => canViewMenu(session, candidate)) ?? "profile"
         : menu;
@@ -705,6 +708,7 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
         section: "Users",
       },
     } as const;
+    if (activeMenu === 'settings-administrator') return <AdministratorSettings session={session} />;
     if (activeMenu === "settings-organizations")
       return <GeneralLedgerView />;
     if (activeMenu === "settings-vat-classifications")
@@ -730,11 +734,10 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
       string,
       OrganizationReferenceSection
     > = {
-      "settings-organizations-company-status": "Company status",
       "settings-organizations-tax-country": "Tax country",
       "settings-organizations-legal-form": "Legal form",
       "settings-organizations-base-currency": "Base currency",
-      "settings-organizations-document-type": "Document type",
+      "ocr-admin-document-type": "Document type",
       "settings-organizations-document-status": "Document Status",
       "settings-organizations-unit": "Unit",
     };
@@ -743,6 +746,7 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
         <OrganizationReferenceValuesView
           key={activeMenu}
           section={organizationReferenceSections[activeMenu]}
+          breadcrumbParents={activeMenu === "ocr-admin-document-type" ? ["OCR", "Administration"] : undefined}
         />
       );
     }
@@ -837,7 +841,7 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
 
   return (
     <>
-    {canViewMenu(session, 'notifications') && <button type="button" aria-expanded={notificationsOpen} aria-label={`Notifications, ${importantNotificationCount} active important alerts`} title="Notifications" onClick={() => { setNotificationsExpanded(false); setNotificationsOpen(value => !value); }} className="fixed right-4 top-2 z-40 flex h-9 w-9 items-center justify-center rounded-md border border-[#D3E1EC] bg-white text-[#7288A3] shadow-sm hover:text-[#007EA7]">
+    {canViewMenu(session, 'notifications') && <button type="button" aria-expanded={notificationsOpen} aria-label={`Notifications, ${importantNotificationCount} active notifications`} title="Notifications" onClick={() => { setNotificationsExpanded(false); setNotificationsOpen(value => !value); }} className="fixed right-4 top-2 z-40 flex h-9 w-9 items-center justify-center rounded-md border border-[#D3E1EC] bg-white text-[#7288A3] shadow-sm hover:text-[#007EA7]">
       <Bell size={20} />
       {importantNotificationCount > 0 && <span className="absolute -right-1 -top-1 flex min-w-4 items-center justify-center rounded-full bg-[#E65050] px-1 font-montserrat text-[10px] leading-4 text-white">{importantNotificationBadge}</span>}
     </button>}
@@ -856,7 +860,7 @@ export default function Dashboard({ onLogout, session }: DashboardProps) {
               <p className="mt-1 break-words text-[12px] font-semibold leading-[18px] text-[#10233A]">{row.name}</p>
               {notificationMessage(row) !== row.name && <p className="mt-1 line-clamp-2 break-words text-[11px] leading-4 text-[#7288A3]">{notificationMessage(row)}</p>}
               {getNotificationRelatedObjectLabel(row) !== '—' && <p className="mt-1 truncate text-[11px] text-[#7288A3]" title={getNotificationRelatedObjectLabel(row)}>Related object: {getNotificationRelatedObjectLabel(row)}</p>}
-              <div className="mt-2 flex items-center justify-between gap-2"><time className="text-[10px] text-[#7288A3]">{formatNotificationDateTime(row)}</time>{row.relatedObject && row.relatedObject.organizationId === row.organizationId ? <RelatedObjectLink object={row.relatedObject} organizationId={row.organizationId} variant="button" onError={setNotificationNavigationError} onOpen={async object => { await openRelatedObject(object, true); setNotificationsOpen(false); }} /> : <button type="button" onClick={() => { setNotificationsOpen(false); setNotificationDetails(row); }} className="h-7 rounded-md border border-[#D3E1EC] bg-white px-3 text-[11px] font-semibold text-[#007EA7] hover:bg-[#E6F2F6]">View details</button>}</div>
+              <div className="mt-2 flex items-center justify-between gap-2"><span className="text-[10px]"><NotificationRelativeTime row={row} /></span>{row.relatedObject && row.relatedObject.organizationId === row.organizationId ? <RelatedObjectLink object={row.relatedObject} organizationId={row.organizationId} variant="button" onError={setNotificationNavigationError} onOpen={async object => { await openRelatedObject(object, true); setNotificationsOpen(false); }} /> : <button type="button" onClick={() => { setNotificationsOpen(false); setNotificationDetails(row); }} className="h-7 rounded-md border border-[#D3E1EC] bg-white px-3 text-[11px] font-semibold text-[#007EA7] hover:bg-[#E6F2F6]">View details</button>}</div>
             </div></div>
           </article>)}
           {!recentNotifications.length && <p className="px-4 py-8 text-center text-[12px] text-[#7288A3]">No active critical or warning notifications.</p>}

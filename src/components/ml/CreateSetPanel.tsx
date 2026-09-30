@@ -5,6 +5,7 @@ import { TABLE_BATCH_SIZE } from "../../lib/tablePaging";
 import { getAutomationProcesses } from '../automationRunsStore';
 import { SystemCopyToast, useSystemCopyFeedback } from '../SystemCopyFeedback';
 import { useModelCatalog, type ModelRecord } from './modelCatalogStore';
+import { useDropdownDismiss } from '../useDropdownDismiss';
 
 const FIELD_CLASS = 'h-[42px] w-full rounded-lg border border-[#D3E1EC] bg-white px-[14px] font-montserrat text-[14px] font-medium leading-5 text-[#10233A] outline-none placeholder:text-[#A1B6C6] focus:border-[#007EA7]';
 const LABEL_CLASS = 'font-montserrat text-[14px] font-semibold leading-5 text-[#10233A]';
@@ -19,9 +20,14 @@ export function SystemDropdown({ value, options, placeholder, ariaLabel, open, o
   onSelect: (value: string) => void;
 }) {
   const [query, setQuery] = useState('');
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  useDropdownDismiss(open, dropdownRef, () => {
+    setQuery('');
+    if (open) onToggle();
+  });
   const filteredOptions = options.filter(option => option.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   return (
-    <div className="relative w-full">
+    <div ref={dropdownRef} className="relative w-full">
       <input role="combobox" aria-label={ariaLabel} aria-expanded={open} value={open ? query : value} placeholder={placeholder} autoComplete="off" onFocus={(event) => { setQuery(''); if (!open) onToggle(); event.currentTarget.select(); }} onClick={() => { if (!open) onToggle(); }} onChange={(event) => { setQuery(event.target.value); if (!open) onToggle(); }} className={`h-[42px] w-full rounded-lg border bg-white px-[14px] pr-10 font-montserrat text-[14px] font-medium leading-5 text-[#10233A] outline-none transition-colors placeholder:text-[#A1B6C6] ${open ? 'border-[#007EA7] ring-2 ring-[#007EA7]/10' : 'border-[#D3E1EC] hover:border-[#A1B6C6]'}`} />
       <button type="button" tabIndex={-1} aria-label={`Open ${ariaLabel} options`} onMouseDown={event => event.preventDefault()} onClick={() => { setQuery(''); onToggle(); }} className="absolute right-0 top-0 flex h-[42px] w-10 items-center justify-center text-[#7288A3]">
         <ChevronDown size={16} className={`flex-shrink-0 text-[#7288A3] transition-transform ${open ? 'rotate-180' : ''}`} />
@@ -32,7 +38,7 @@ export function SystemDropdown({ value, options, placeholder, ariaLabel, open, o
             const selected = option === value;
             return (
               <button key={option} type="button" role="option" aria-selected={selected} onClick={() => { setQuery(''); onSelect(option); }} className={`flex min-h-10 w-full items-center gap-3 rounded-md px-3 py-2 text-left font-montserrat text-[13px] font-semibold text-[#10233A] transition-colors ${selected ? 'bg-[#E5EDF9]' : 'hover:bg-[#F8FDFF]'}`}>
-                <span className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[5px] border ${selected ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>{selected && <Check size={12} strokeWidth={2.5} className="text-white" />}</span>
+                <span aria-hidden="true" className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[6px] border ${selected ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>{selected && <Check size={12} strokeWidth={2.5} className="text-white" />}</span>
                 <span className="truncate">{option}</span>
               </button>
             );
@@ -121,17 +127,17 @@ function ExecutionModelOptionsModal({ onClose, onSelect }: { onClose: () => void
 
           <div className="flex h-[452px] w-full flex-col justify-between gap-12">
             <div className="flex h-[396px] flex-col gap-4 overflow-hidden">
-              <div className="grid h-5 grid-cols-[minmax(150px,278px)_84px_minmax(150px,250px)_minmax(90px,140px)_36px] items-center px-3 font-montserrat text-[12px] font-medium leading-[18px] text-[#7288A3]">
+              <div className="grid h-5 grid-cols-[minmax(150px,278px)_84px_minmax(150px,250px)_minmax(90px,140px)_minmax(36px,1fr)] items-center px-3 font-montserrat text-[12px] font-medium leading-[18px] text-[#7288A3]">
                 <span className="text-[#10233A]">Name</span><span>Version</span><span>Description</span><span>Status</span><span />
               </div>
               <div ref={tableScrollRef} className="flex h-[360px] flex-col overflow-y-auto">
                 {options.slice(0, page * TABLE_BATCH_SIZE).map((option, index) => (
-                  <div key={option.id} className={`grid h-9 flex-shrink-0 grid-cols-[minmax(150px,278px)_84px_minmax(150px,250px)_minmax(90px,140px)_36px] items-center rounded-lg font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
+                  <div key={option.id} className={`grid h-9 flex-shrink-0 grid-cols-[minmax(150px,278px)_84px_minmax(150px,250px)_minmax(90px,140px)_minmax(36px,1fr)] items-center rounded-lg font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
                     <span className="truncate px-3">{option.name}</span>
                     <span className="truncate px-[10px]">{option.version}</span>
                     <span className="truncate px-[10px]">{option.description}</span>
                     <span className="flex items-center gap-1 px-[10px]"><span className="h-1.5 w-1.5 rounded-full bg-[#0ED8A8]" />{option.status}</span>
-                    <span className="flex h-9 items-center p-1"><button type="button" aria-label={`Select execution model option ${index + 1}`} onClick={() => onSelect(option.name)} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] hover:border-[#007EA7] hover:text-[#007EA7]"><Target size={16} /></button></span>
+                    <span className="system-table-row-actions flex h-9 items-center justify-end p-1"><button type="button" aria-label={`Select execution model option ${index + 1}`} onClick={() => onSelect(option.name)} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] hover:border-[#007EA7] hover:text-[#007EA7]"><Target size={16} /></button></span>
                   </div>
                 ))}
               </div>

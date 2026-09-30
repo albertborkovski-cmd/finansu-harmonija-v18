@@ -110,6 +110,8 @@ function analyticsFilterValue(row: WorkerAnalytics, key: AnalyticsFilterKey) {
 }
 
 function ApproveDocumentsView() {
+  const [teamLeadQueue, setTeamLeadQueue] = usePersistentState<Record<string, WorkspaceTask>>('finansu-harmonija:v18:ocr:team-lead-review', {});
+  const [reviewTaskId, setReviewTaskId] = useState<string | null>(null);
   const [activeDocument, setActiveDocument] = useState<ReviewDocumentReference | null>(null);
   const [documentQueue, setDocumentQueue] = useState<ReviewDocumentReference[]>([]);
   const [documentIndex, setDocumentIndex] = useState(-1);
@@ -171,6 +173,14 @@ function ApproveDocumentsView() {
     setNotice(`${documents.length} document${documents.length === 1 ? "" : "s"} processed and approved.`);
   };
 
+  if (reviewTaskId && teamLeadQueue[reviewTaskId]) {
+    const task = teamLeadQueue[reviewTaskId];
+    return <WorkspaceDocumentEditor key={reviewTaskId} documentName={task.name} documentId={task.id} savedTask={task}
+      onBack={() => setReviewTaskId(null)}
+      onSave={updated => setTeamLeadQueue(current => ({ ...current, [reviewTaskId]: { ...updated,
+        teamLeadReview: { requestedAt: task.teamLeadReview!.requestedAt, status: updated.status === 'Completed' ? 'Approved' : 'Pending' } } }))} />;
+  }
+
   if (activeDocument) {
     const hasNext = documentIndex >= 0 && documentIndex < documentQueue.length - 1;
     return (
@@ -209,6 +219,13 @@ function ApproveDocumentsView() {
         actions={<div ref={setReviewHeaderActions} className="flex items-center" />}
       />
       <OcrBreadcrumb items={["Review", "Approve documents"]} />
+      {Object.values(teamLeadQueue).some(task => task.teamLeadReview?.status === 'Pending') && <section className="rounded-lg border border-[#D3E1EC] p-4">
+        <h2 className="mb-3 font-montserrat text-[14px] font-semibold text-[#10233A]">Team lead review</h2>
+        {Object.values(teamLeadQueue).filter(task => task.teamLeadReview?.status === 'Pending').map(task => <div key={task.id} className="flex items-center justify-between gap-4 rounded-lg bg-[#F8FDFF] px-3 py-2 text-[12px]">
+          <span>{task.name}</span><span className="text-[#7288A3]">Awaiting approval</span>
+          <button onClick={() => setReviewTaskId(task.id)} className="rounded-md border border-[#D3E1EC] px-3 py-1 text-[#007EA7]">Review</button>
+        </div>)}
+      </section>}
       <ProcessedDocumentsTable
         embedded
         reviewOnly

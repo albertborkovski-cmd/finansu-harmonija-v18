@@ -4,6 +4,20 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Inactive persisted records remain legible; actions are never crossed out. */
+[data-record-inactive="true"] {
+  color: #7288A3;
+}
+[data-record-inactive="true"] :is(span, p, a, td, input, div:not(:has(button))):not(button *):not([data-no-strike]),
+[data-record-inactive="true"]:is(input, textarea) {
+  text-decoration: line-through;
+  text-decoration-color: #7288A3;
+}
+[data-record-inactive="true"] button:not([data-button-family]):not(:has(svg)):not([role="checkbox"]) {
+  text-decoration: line-through;
+  text-decoration-color: #7288A3;
+}
+
 /* Shared table viewport: rows scroll, column headings remain visible. */
 [data-system-table-viewport="true"] {
   overflow: auto !important;
@@ -565,17 +579,21 @@ button.h-4.w-4 :where(svg) {
 /*
  * Row actions are the final, non-resizable column in the table's normal flow.
  * They follow visible data columns, including when columns are hidden, resized
- * or reordered; they never pin to the viewport or consume leftover row space.
+ * or reordered. Spare row space sits BEFORE the actions so they align to the
+ * right edge on narrow tables. Wide tables scroll the actions after all data.
  * The legacy selector keeps shared DeleteButton consumers on the same contract.
  */
 .system-table-row-actions,
+.table-row-actions,
 :where(div, span):has(> button[data-button-family="row-delete"]) {
   position: static !important;
   inset: auto !important;
-  margin-left: 0 !important;
+  margin-left: auto !important;
   flex-shrink: 0 !important;
 }
 
+.system-table-row-actions,
+.table-row-actions,
 :where(div, span):has(> button[data-button-family="row-delete"]) {
   justify-content: flex-end !important;
 }
@@ -586,6 +604,8 @@ button.h-4.w-4 :where(svg) {
  * colour from ending before the row-action icons when columns are narrow.
  */
 .system-table-row,
+.flex:has(> .system-table-row-actions),
+.flex:has(> .table-row-actions),
 .group:has(button[data-button-family="row-delete"]) {
   width: max-content !important;
   min-width: 100% !important;
@@ -812,6 +832,14 @@ button:not(:disabled):active {
     background-color 0ms,
     border-color 0ms,
     filter 0ms;
+}
+
+/* Selection controls must never move their labels when toggled. */
+button[data-static-selection]:active,
+button[role="checkbox"]:active,
+button[role="option"]:active {
+  transform: none !important;
+  transition: none !important;
 }
 
 /* Shared system actions follow the Sale invoice / Mark as exported pattern. */

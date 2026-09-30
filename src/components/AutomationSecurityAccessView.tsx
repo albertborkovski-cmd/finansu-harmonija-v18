@@ -1,7 +1,7 @@
 import { toggleFilteredSelection } from '../lib/tableSelection';
 import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Trash2, UsersRound, X } from 'lucide-react';
+import { ArrowLeft, UsersRound, X } from 'lucide-react';
 import { PageActionButton, PageHeader } from './PageHeader';
 import OcrSearchField from './OcrSearchField';
 import { BulkDeleteButton, RowDeleteButton } from './DeleteButtons';
@@ -13,6 +13,7 @@ import HorizontalTableScrollbar from './HorizontalTableScrollbar';
 import TablePagination from './TablePagination';
 import { getAdministrationUsers, saveAdministrationUsers, type AdministrationUserRecord } from './administrationUsersStore';
 import { ResizeHandle, useColumnResize } from './useColumnResize';
+import { isInactiveRecord, isRecordLinked, removeOrDeactivateRecords } from '../lib/recordLifecycle';
 
 interface RoleRecord {
   id: string;
@@ -33,6 +34,11 @@ interface GroupPermission {
 }
 
 export const GROUP_MANAGEMENT_STORAGE_KEY = 'finansu-harmonija-v6:administration:group-management';
+
+function isRoleLinked(role: RoleRecord) {
+  return getAdministrationUsers().some(user => user.groups.split(',').some(group => group.trim().toLowerCase() === role.name.toLowerCase()))
+    || isRecordLinked(role, GROUP_MANAGEMENT_STORAGE_KEY);
+}
 
 const INITIAL_ROLES: RoleRecord[] = [
   { id: 'worker', name: 'Worker', description: 'Document processing workers', permissions: 'READ, UPDATE' },
@@ -247,9 +253,10 @@ function RoleDetails({ role, onBack }: { role: RoleRecord; onBack: () => void })
           <div className="flex h-7 items-center gap-4">
             <RefreshAllButton onRefresh={activeTab === 'users' ? refreshUsers : () => setPermissions(current => current.map(permission => ({ ...permission })))} />
             <BulkDeleteButton
+              linked={activeTab === 'roles'}
               selectedCount={selected.size}
               onDelete={activeTab === 'users' ? removeSelectedUsersFromGroup : () => {
-                  setPermissions(current => current.filter(item => !selected.has(item.id)));
+                  setPermissions(current => removeOrDeactivateRecords(current, selected, permissionStorageKey, undefined, () => true));
                   setSelected(new Set());
                 }}
             />
@@ -276,11 +283,11 @@ function RoleDetails({ role, onBack }: { role: RoleRecord; onBack: () => void })
                   <ResizeHandle onMouseDown={event => startResize(realIndex, event)} />
                 </div>
               )})}
-              <div className="w-[46px] flex-shrink-0" />
+              <div className="system-table-row-actions w-[46px] flex-shrink-0" />
             </div>
 
             {visibleDetails.slice(0, tablePage * TABLE_BATCH_SIZE).map(detailRow => (
-              <div key={detailRow.id} className="flex h-11 items-center border-b border-[#E5EDF9] bg-white transition-colors hover:bg-[#F8FDFF]">
+              <div key={detailRow.id} data-record-inactive={isInactiveRecord(detailRow) || undefined} className="flex h-11 items-center border-b border-[#E5EDF9] bg-white transition-colors hover:bg-[#F8FDFF]">
                 <div className="flex w-[42px] flex-shrink-0 items-center px-3">
                   <RoleCheckbox
                     checked={selected.has(detailRow.id)}
@@ -301,23 +308,20 @@ function RoleDetails({ role, onBack }: { role: RoleRecord; onBack: () => void })
                     })}</div> : <span className="truncate font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A]">{detailRow[column.key as keyof typeof detailRow]}</span>}
                   </div>
                 ))}
-                <div className="flex w-[46px] flex-shrink-0 justify-end pr-1">
-                  <button
-                    type="button"
-                    aria-label="Delete group permission"
-                    title="DELETE"
-                    onClick={() => {
-                      setPermissions(current => current.filter(item => item.id !== detailRow.id));
+                <div className="system-table-row-actions flex w-[46px] flex-shrink-0 justify-end pr-1">
+                  <RowDeleteButton
+                    linked
+                    inactive={isInactiveRecord(detailRow)}
+                    label="Deactivate group permission"
+                    onDelete={() => {
+                      setPermissions(current => removeOrDeactivateRecords(current, new Set([detailRow.id]), permissionStorageKey, undefined, () => true));
                       setSelected(current => {
                         const next = new Set(current);
                         next.delete(detailRow.id);
                         return next;
                       });
                     }}
-                    className="flex h-7 w-7 items-center justify-center text-[#A1B6C6] transition-colors hover:text-[#D64545]"
-                  >
-                    <Trash2 size={15} />
-                  </button>
+                  />
                 </div>
               </div>
             ))}
@@ -337,7 +341,7 @@ function RoleDetails({ role, onBack }: { role: RoleRecord; onBack: () => void })
                   <span className={`truncate font-montserrat text-[12px] font-medium leading-[18px] ${index === 0 ? 'text-[#10233A]' : 'text-[#7288A3]'}`}>{column.label}</span>
                 </div>
               ))}
-              <div className="w-[46px] flex-shrink-0" />
+              <div className="system-table-row-actions w-[46px] flex-shrink-0" />
             </div>
 
             {assignedUsers.slice(0, tablePage * TABLE_BATCH_SIZE).map((user, index) => (
@@ -350,7 +354,7 @@ function RoleDetails({ role, onBack }: { role: RoleRecord; onBack: () => void })
                     {column.key === 'status' ? <span className="flex items-center gap-2 font-montserrat text-[12px] text-[#10233A]"><span className={`h-2 w-2 rounded-full ${user.status === 'Enabled' ? 'bg-[#45B759]' : 'bg-[#A1B6C6]'}`} />{user.status}</span> : <span className="truncate font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A]">{column.key === 'updatedBy' ? (user.updatedBy || user.createdBy) : column.key === 'lastUpdate' ? (user.lastUpdate || user.creationDate) : user[column.key as 'username' | 'fullName' | 'email' | 'groups']}</span>}
                   </div>
                 ))}
-                <div className="w-[46px] flex-shrink-0" />
+                <div className="system-table-row-actions w-[46px] flex-shrink-0" />
               </div>
             ))}
 
@@ -476,7 +480,7 @@ export default function AutomationSecurityAccessView() {
     return next;
   });
   const removeRoles = (ids: Set<string>) => {
-    setRoles(current => current.filter(role => !ids.has(role.id)));
+    setRoles(current => removeOrDeactivateRecords(current, ids, GROUP_MANAGEMENT_STORAGE_KEY, undefined, isRoleLinked));
     setSelected(current => new Set([...current].filter(id => !ids.has(id))));
   };
 
@@ -500,7 +504,7 @@ export default function AutomationSecurityAccessView() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <OcrSearchField ariaLabel="Search roles" value={query} onChange={value => { setQuery(value); setPage(1); }} />
         <div className="flex items-center gap-4">
-          <BulkDeleteButton selectedCount={selected.size} onDelete={() => removeRoles(selected)} />
+          <BulkDeleteButton linked={roles.some(role => selected.has(role.id) && isRoleLinked(role))} selectedCount={selected.size} onDelete={() => removeRoles(selected)} />
           <RefreshAllButton onRefresh={() => setRoles(current => current.map(role => ({ ...role })))} />
           <ColumnSettingsButton onClick={() => setShowColumns(true)} />
         </div>
@@ -518,13 +522,14 @@ export default function AutomationSecurityAccessView() {
                   <ResizeHandle onMouseDown={event => startResize(realIndex, event)} />
                 </div>
               )})}
-              <div className="w-[46px] flex-shrink-0" />
+              <div className="system-table-row-actions w-[46px] flex-shrink-0" />
             </div>
 
             <div className="flex flex-col">
               {displayedRoles.slice(0, page * TABLE_BATCH_SIZE).map((role, index) => (
                 <div
                   key={role.id}
+                  data-record-inactive={isInactiveRecord(role) || undefined}
                   role="button"
                   tabIndex={0}
                   aria-label={`Open ${role.name} group details`}
@@ -545,7 +550,7 @@ export default function AutomationSecurityAccessView() {
                         : <span className="truncate font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A]">{column.key === 'updatedBy' ? (role.updatedBy || 'Administrator') : column.key === 'lastUpdate' ? (role.lastUpdate || '04.08.2026 15:24') : role[column.key as 'description' | 'permissions']}</span>}
                     </div>
                   ))}
-                  <div className="flex w-[46px] flex-shrink-0 justify-end pr-1"><RowDeleteButton label={`Delete role ${role.name}`} onDelete={() => removeRoles(new Set([role.id]))} /></div>
+                  <div className="system-table-row-actions flex w-[46px] flex-shrink-0 justify-end pr-1"><RowDeleteButton linked={isRoleLinked(role)} inactive={isInactiveRecord(role)} label={`Delete role ${role.name}`} onDelete={() => removeRoles(new Set([role.id]))} /></div>
                 </div>
               ))}
             </div>

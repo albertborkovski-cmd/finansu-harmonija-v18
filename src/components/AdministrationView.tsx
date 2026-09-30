@@ -15,6 +15,7 @@ import { PageActionButton, PageHeader } from "./PageHeader";
 import OcrSearchField from "./OcrSearchField";
 import RefreshAllButton from "./RefreshAllButton";
 import { BulkDeleteButton, RowDeleteButton } from "./DeleteButtons";
+import { isInactiveRecord, isRecordLinked, removeOrDeactivateRecords } from "../lib/recordLifecycle";
 import HorizontalTableScrollbar from "./HorizontalTableScrollbar";
 import ColumnSettingsPanel, { type ColConfig } from "./ColumnSettingsPanel";
 import { ColumnSettingsButton } from "./ScopedActionButtons";
@@ -25,6 +26,7 @@ import ColumnSortButton, { useMultiColumnSort } from "./ColumnSortButton";
 import TablePagination from "./TablePagination";
 import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import OcrFieldValidationSettings from "./OcrFieldValidationSettings";
+import { useDropdownDismiss } from "./useDropdownDismiss";
 
 export type AdministrationSection =
   | "human-task-types"
@@ -732,7 +734,7 @@ function AdminTablePage({
     filtered.length > 0 && filtered.every((row) => selected.has(row.id));
   const columns = columnSettings.filter((column) => column.visible);
   const remove = (ids: Set<string>) => {
-    setRows((current) => current.filter((row) => !ids.has(row.id)));
+    setRows((current) => removeOrDeactivateRecords(current, ids, storageKey));
     setSelected(new Set());
   };
   return (
@@ -770,6 +772,7 @@ function AdminTablePage({
         />
         <div className="flex items-center gap-4">
           <BulkDeleteButton
+            linked={rows.some(row => selected.has(row.id) && isRecordLinked(row, storageKey))}
             selectedCount={selected.size}
             onDelete={() => remove(selected)}
           />
@@ -827,12 +830,13 @@ function AdminTablePage({
                 </div>
               );
             })}
-            <div className="w-[48px]" />
+            <div className="system-table-row-actions w-[48px]" />
           </div>
           <div className="flex flex-col gap-0.5">
             {sortedRows.slice(0, currentPage * TABLE_BATCH_SIZE).map((row, index) => (
               <div
                 key={row.id}
+                data-record-inactive={isInactiveRecord(row) || undefined}
                 role="button"
                 tabIndex={0}
                 onClick={() => setEditing(row)}
@@ -869,8 +873,10 @@ function AdminTablePage({
                     </span>
                   </div>
                 ))}
-                <div className="flex w-[48px] justify-end">
+                <div className="system-table-row-actions flex w-[48px] justify-end">
                   <RowDeleteButton
+                    linked={isRecordLinked(row, storageKey)}
+                    inactive={isInactiveRecord(row)}
                     label={`Delete ${row.id}`}
                     onDelete={() => remove(new Set([row.id]))}
                   />
@@ -1105,8 +1111,10 @@ function LogsFilterDropdown({
   onToggle: () => void;
   onSelect: (value: string) => void;
 }) {
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  useDropdownDismiss(open, dropdownRef, () => { if (open) onToggle(); });
   return (
-    <div className="relative flex min-w-0 flex-col">
+    <div ref={dropdownRef} className="relative flex min-w-0 flex-col">
       <span className="font-montserrat text-[13px] font-medium leading-5 text-[#7288A3]">
         {label}
       </span>
@@ -1141,7 +1149,8 @@ function LogsFilterDropdown({
                 className={`flex min-h-10 w-full items-center gap-3 rounded-md px-3 py-2 text-left font-montserrat text-[13px] font-semibold text-[#10233A] transition-colors ${selected ? "bg-[#E5EDF9]" : "hover:bg-[#F8FDFF]"}`}
               >
                 <span
-                  className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[5px] border ${selected ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
+                  aria-hidden="true"
+                  className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[6px] border ${selected ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
                 >
                   {selected && (
                     <Check size={12} strokeWidth={2.5} className="text-white" />

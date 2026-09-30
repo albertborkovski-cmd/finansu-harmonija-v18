@@ -9,7 +9,8 @@ function transpile(relativePath) {
   }).outputText;
 }
 const moduleUrl = source => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
-const accessUrl = moduleUrl(transpile('../src/lib/accessControl.ts'));
+const lifecycleUrl = moduleUrl(transpile('../src/lib/recordLifecycle.ts'));
+const accessUrl = moduleUrl(transpile('../src/lib/accessControl.ts').replace(/(['"])\.\/recordLifecycle\1/g, JSON.stringify(lifecycleUrl)));
 const notificationsUrl = moduleUrl(transpile('../src/lib/notifications.ts'));
 const permissionsSource = transpile('../src/lib/taskPermissions.ts')
   .replace(/(['"])\.\/accessControl\1/g, JSON.stringify(accessUrl))

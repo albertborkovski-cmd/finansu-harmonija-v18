@@ -337,7 +337,7 @@ export default function CompanyGlJournalView({ company }: { company: Company }) 
                 </div>
               );
             })}
-            <div className="w-[70px] flex-shrink-0 px-3 font-montserrat text-[12px] font-medium leading-[18px] text-[#10233A]">
+            <div className="system-table-row-actions w-[70px] flex-shrink-0 px-3 font-montserrat text-[12px] font-medium leading-[18px] text-[#10233A]">
               View
             </div>
           </div>

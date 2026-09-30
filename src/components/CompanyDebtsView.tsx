@@ -56,7 +56,7 @@ export default function CompanyDebtsView({ companyName = "", initialRecordId, on
   const { startResize } = useColumnResize(columns, setColumns);
   const visibleColumns = [
     ...columns.filter(column => column.visible && column.key !== 'actions'),
-    ...columns.filter(column => column.visible && column.key === 'actions'),
+    DEFAULT_COLUMNS.find(column => column.key === 'actions')!,
   ];
 
   useEffect(() => setCurrentPage(1), [activeTab, activeFilterKeys, filterValues, query, companyName]);
@@ -199,9 +199,9 @@ export default function CompanyDebtsView({ companyName = "", initialRecordId, on
             {visibleColumns.map(column => {
               const columnIndex = columns.findIndex(item => item.key === column.key);
               return (
-                <div key={column.key} style={{ width: column.width }} className="relative flex flex-shrink-0 items-center gap-1 whitespace-nowrap pr-3 font-montserrat text-[11px] font-medium text-[#10233A]">
+                <div key={column.key} style={{ width: column.width }} className={`${column.key === 'actions' ? 'system-table-row-actions ' : ''}relative flex flex-shrink-0 items-center gap-1 whitespace-nowrap pr-3 font-montserrat text-[11px] font-medium text-[#10233A]`}>
                   {column.label && <><span>{column.label}</span><ColumnSortButton columnLabel={column.label} direction={directionFor(column.key)} onDirectionChange={direction => changeSort(column.key, direction)} /></>}
-                  <ResizeHandle onMouseDown={event => startResize(columnIndex, event)} />
+                  {column.key !== 'actions' && <ResizeHandle onMouseDown={event => startResize(columnIndex, event)} />}
                 </div>
               );
             })}
@@ -234,7 +234,7 @@ export default function CompanyDebtsView({ companyName = "", initialRecordId, on
         />
       </div>
 
-      {showColumns && <ColumnSettingsPanel columns={columns} onSave={setColumns} onClose={() => setShowColumns(false)} />}
+      {showColumns && <ColumnSettingsPanel columns={columns.filter(column => column.key !== 'actions')} onSave={next => setColumns([...next, DEFAULT_COLUMNS.find(column => column.key === 'actions')!])} onClose={() => setShowColumns(false)} />}
     </div>
   );
 }

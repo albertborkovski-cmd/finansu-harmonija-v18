@@ -1,4 +1,5 @@
 import { toggleFilteredSelection } from '../lib/tableSelection';
+import { useDropdownDismiss } from './useDropdownDismiss';
 import {
   useCallback,
   useEffect,
@@ -8,6 +9,8 @@ import {
   type SetStateAction,
 } from "react";
 import { usePersistentState } from "../hooks/usePersistentState";
+import { isInactiveRecord, isRecordLinked } from '../lib/recordLifecycle';
+import { RowDeleteButton } from './DeleteButtons';
 import {
   Check,
   CheckCircle2,
@@ -17,7 +20,6 @@ import {
   Pencil,
   Plus,
   ScanText,
-  Trash2,
   X,
 } from "lucide-react";
 import { PageHeader } from "./PageHeader";
@@ -60,6 +62,7 @@ interface DocumentRecord {
   duplicateOfId?: string;
   ocrErrorMessage?: string;
   deleted?: boolean;
+  active?: boolean;
   deletedAt?: string;
   accepted?: boolean;
   acceptedAt?: string;
@@ -425,26 +428,7 @@ function FilterDropdown({
   const [open, setOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-
-    const closeOutside = (event: PointerEvent) => {
-      const target = event.target;
-      if (target instanceof Node && !dropdownRef.current?.contains(target)) {
-        setOpen(false);
-      }
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-
-    document.addEventListener("pointerdown", closeOutside);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOutside);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [open]);
+  useDropdownDismiss(open, dropdownRef, () => setOpen(false));
 
   return (
     <div ref={dropdownRef} className="relative flex-shrink-0">
@@ -477,7 +461,7 @@ function FilterDropdown({
         )}
       </button>
       {open && (
-        <div className="absolute left-0 top-[32px] z-50 min-w-[210px] overflow-hidden rounded-lg border border-[#D3E1EC] bg-white p-1.5 shadow-[0_8px_24px_rgba(16,35,58,0.14)]">
+        <div role="listbox" aria-label={label} className="absolute left-0 top-[32px] z-50 min-w-[210px] overflow-hidden rounded-lg border border-[#D3E1EC] bg-white p-1.5 shadow-[0_8px_24px_rgba(16,35,58,0.14)]">
           {[{ value: "", label: "All" }, ...options.map((option) => ({ value: option, label: option }))].map(
             (option) => {
               const checked = option.value === value;
@@ -485,14 +469,18 @@ function FilterDropdown({
                 <button
                   type="button"
                   key={option.value || "all"}
+                  role="option"
+                  aria-selected={checked}
+                  data-static-selection
                   onClick={() => {
                     onChange(option.value);
                     setOpen(false);
                   }}
-                  className="flex min-h-9 w-full items-center gap-3 rounded-md px-2 py-1.5 text-left hover:bg-[#F2F7FC]"
+                  className={`flex min-h-9 w-full items-center gap-3 rounded-md px-2 py-1.5 text-left ${checked ? 'bg-[#E5EDF9]' : 'hover:bg-[#F2F7FC]'}`}
                 >
                   <span
-                    className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[4px] border ${checked ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
+                    aria-hidden="true"
+                    className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[6px] border ${checked ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
                   >
                     {checked && (
                       <Check
@@ -1010,7 +998,7 @@ export default function AllDocumentsView({
   };
 
   const importAllDraftDocuments = () => {
-    const importableDocuments = sectionDocuments.filter((record) => !record.deleted);
+    const importableDocuments = sectionDocuments.filter((record) => !record.deleted && !isInactiveRecord(record));
     if (importableDocuments.length === 0) return;
     importMenuRecords(
       `company:${companyName}:draft`,
@@ -1140,10 +1128,10 @@ export default function AllDocumentsView({
   };
 
   const resendToOcr = () => {
-    if (!resendRecord || !ocrErrorMessage.trim()) return;
+    if (!resendRecord || !ocrErrorMessage.trim() || isInactiveRecord(resendRecord) || resendRecord.deleted || resendRecord.accepted) return;
     setDocuments((current) =>
       current.map((record) =>
-        record.id === resendRecord.id
+        record.id === resendRecord.id && !record.deleted && !record.accepted && !isInactiveRecord(record)
           ? {
               ...record,
               status: "In progress",
@@ -1161,12 +1149,19 @@ export default function AllDocumentsView({
     setOcrErrorMessage("");
   };
 
+  const documentIsLinked = (record: DocumentRecord) =>
+    Boolean(record.accepted || record.duplicateOfId) || isRecordLinked(
+      { ...record, id: record._sourceId || record.id },
+      record._companyStorageKey || `${COMPANY_DOCUMENTS_STORAGE_PREFIX}${companyName || "all"}`,
+    );
+  const deleteRecordIsLinked = deleteRecord ? documentIsLinked(deleteRecord) : false;
+
   const confirmDelete = () => {
     if (!deleteRecord) return;
     setDocuments((current) =>
       current.map((record) =>
-        record.id === deleteRecord.id
-          ? { ...record, deleted: true, deletedAt: new Date().toISOString() }
+        record.id === deleteRecord.id && !record.deleted && !isInactiveRecord(record)
+          ? documentIsLinked(record) ? { ...record, active: false } : { ...record, deleted: true, deletedAt: new Date().toISOString() }
           : record,
       ),
     );
@@ -1181,7 +1176,7 @@ export default function AllDocumentsView({
   const acceptRecord = (recordId: string) => {
     setDocuments((current) =>
       current.map((record) =>
-        record.id === recordId
+        record.id === recordId && !record.deleted && !record.accepted && !isInactiveRecord(record)
           ? { ...record, accepted: true, acceptedAt: new Date().toISOString() }
           : record,
       ),
@@ -1336,7 +1331,7 @@ export default function AllDocumentsView({
             <>
               {scope === "company" || isUploadedOcr ? (
                 <ImportDataButton
-                  disabled={!sectionDocuments.some((record) => !record.deleted)}
+                  disabled={!sectionDocuments.some((record) => !record.deleted && !isInactiveRecord(record))}
                   onClick={importAllDraftDocuments}
                 />
               ) : (
@@ -1411,7 +1406,7 @@ export default function AllDocumentsView({
             <div
               aria-hidden="true"
               style={{ width: rowActionsWidth }}
-              className="h-full flex-shrink-0"
+              className="system-table-row-actions h-full flex-shrink-0"
             />
           </div>
 
@@ -1422,7 +1417,7 @@ export default function AllDocumentsView({
               const editAction = (
                 <div
                   style={{ width: rowActionsWidth }}
-                  className={`flex h-full flex-shrink-0 items-center justify-center gap-2 ${pinRowActionsRight ? "rounded-r-lg bg-inherit px-2" : ""}`}
+                  className={`system-table-row-actions flex h-full flex-shrink-0 items-center justify-end gap-2 ${pinRowActionsRight ? "rounded-r-lg bg-inherit px-2" : ""}`}
                 >
                   {!pinRowActionsRight && (
                     <button
@@ -1441,7 +1436,7 @@ export default function AllDocumentsView({
                         type="button"
                         title="ACCEPT"
                         aria-label={`ACCEPT ${record.fileName}`}
-                        disabled={record.deleted || record.accepted}
+                        disabled={record.deleted || record.accepted || isInactiveRecord(record)}
                         onClick={() => acceptRecord(record.id)}
                         className={`flex h-7 w-7 items-center justify-center rounded-md border transition-colors ${record.accepted ? "cursor-default border-[#12B886] bg-[#12B886] text-white" : "border-[#C8D8E5] bg-transparent text-[#7288A3] hover:border-[#12B886] hover:bg-white hover:text-[#12B886] disabled:cursor-not-allowed disabled:border-[#E5EDF9] disabled:text-[#B4B6B8]"}`}
                       >
@@ -1452,7 +1447,7 @@ export default function AllDocumentsView({
                           type="button"
                           title="Resend to OCR"
                           aria-label={`Resend ${record.fileName} to OCR`}
-                          disabled={record.deleted || record.accepted}
+                          disabled={record.deleted || record.accepted || isInactiveRecord(record)}
                           onClick={() => {
                             setOcrErrorMessage("");
                             setResendRecord(record);
@@ -1462,16 +1457,7 @@ export default function AllDocumentsView({
                           <ScanText size={14} />
                         </button>
                       )}
-                      <button
-                        type="button"
-                        title="DELETE"
-                        aria-label={`DELETE ${record.fileName}`}
-                        disabled={record.deleted}
-                        onClick={() => setDeleteRecord(record)}
-                        className="flex h-7 w-7 items-center justify-center rounded-md border border-[#C8D8E5] bg-transparent text-[#7288A3] transition-colors hover:border-[#FF6200] hover:bg-white hover:text-[#FF6200] disabled:cursor-not-allowed disabled:border-[#E5EDF9] disabled:text-[#B4B6B8]"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      <RowDeleteButton linked={documentIsLinked(record)} inactive={isInactiveRecord(record)} disabled={record.deleted} label={`Delete ${record.fileName}`} onDelete={() => setDeleteRecord(record)} />
                     </>
                   )}
                 </div>
@@ -1480,6 +1466,7 @@ export default function AllDocumentsView({
               return (
                 <div
                   key={record.id}
+                  data-record-inactive={isInactiveRecord(record) || undefined}
                   className={`group flex h-10 items-center rounded-lg font-montserrat text-[12px] font-normal leading-[18px] ${rowBackground} ${record.deleted || record.accepted ? "text-[#A1B6C6]" : "text-[#10233A] hover:bg-[#E7F4F9]"}`}
                 >
                   <div className="flex w-[42px] flex-shrink-0 justify-center">
@@ -1571,7 +1558,7 @@ export default function AllDocumentsView({
             </div>
             <div className="flex justify-end gap-3 border-t border-[#D3E1EC] px-6 py-5">
               <button type="button" onClick={() => setResendRecord(null)} className="h-[42px] min-w-[108px] rounded-lg border-2 border-[#D3E1EC] bg-white px-4 font-montserrat text-[14px] font-semibold text-[#7288A3]">Cancel</button>
-              <button data-system-action="true" type="button" disabled={!ocrErrorMessage.trim()} onClick={resendToOcr} className="h-[42px] min-w-[132px] rounded-lg bg-[#007EA7] px-4 font-montserrat text-[14px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">Send to OCR</button>
+              <button data-system-action="true" type="button" disabled={!ocrErrorMessage.trim() || isInactiveRecord(resendRecord) || resendRecord.deleted || resendRecord.accepted} onClick={resendToOcr} className="h-[42px] min-w-[132px] rounded-lg bg-[#007EA7] px-4 font-montserrat text-[14px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">Send to OCR</button>
             </div>
           </aside>
         </div>
@@ -1581,14 +1568,14 @@ export default function AllDocumentsView({
         <div className="fixed inset-0 z-[210] flex justify-end" onClick={() => setDeleteRecord(null)}>
           <aside className="flex h-full w-[340px] flex-col bg-white px-6 pb-8 pt-6 shadow-[-2px_0_0_#E5EDF9]" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-start justify-between gap-3">
-              <h2 className="font-montserrat text-[22px] font-semibold leading-8 text-[#10233A]">Delete document</h2>
+              <h2 className="font-montserrat text-[22px] font-semibold leading-8 text-[#10233A]">{deleteRecordIsLinked ? 'Deactivate document' : 'Delete document'}</h2>
               <button type="button" aria-label="Close delete document" onClick={() => setDeleteRecord(null)} className="text-[#7288A3] hover:text-[#10233A]"><X size={24} /></button>
             </div>
-            <p className="mt-6 font-montserrat text-[14px] font-medium leading-5 text-[#10233A]">Are you sure that you want to delete {deleteRecord.fileName}?</p>
-            <p className="mt-2 font-montserrat text-[12px] font-normal leading-5 text-[#7288A3]">The record will remain in Draft and will be shown in gray with strikethrough text.</p>
+            <p className="mt-6 font-montserrat text-[14px] font-medium leading-5 text-[#10233A]">{deleteRecordIsLinked ? 'Deactivate' : 'Delete'} {deleteRecord.fileName}?</p>
+            <p className="mt-2 font-montserrat text-[12px] font-normal leading-5 text-[#7288A3]">{deleteRecordIsLinked ? 'This document has links. It will remain in the list with its data and relationships intact, shown with strikethrough text.' : 'The record will be marked as deleted and shown in gray with strikethrough text.'}</p>
             <div className="mt-8 flex gap-4">
               <button type="button" onClick={() => setDeleteRecord(null)} className="h-[42px] flex-1 rounded-lg border-2 border-[#D3E1EC] bg-white font-montserrat text-[14px] font-semibold text-[#7288A3]">Cancel</button>
-              <button data-system-action="true" type="button" onClick={confirmDelete} className="h-[42px] flex-1 rounded-lg bg-[#FF6200] font-montserrat text-[14px] font-semibold text-white">Delete</button>
+              <button data-system-action="true" type="button" disabled={isInactiveRecord(deleteRecord) || deleteRecord.deleted} onClick={confirmDelete} className="h-[42px] flex-1 rounded-lg bg-[#FF6200] font-montserrat text-[14px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{deleteRecordIsLinked ? 'Deactivate' : 'Delete'}</button>
             </div>
           </aside>
         </div>

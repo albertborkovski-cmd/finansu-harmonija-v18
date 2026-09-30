@@ -4,6 +4,7 @@ import TablePagination from '../TablePagination';
 import { TABLE_BATCH_SIZE } from "../../lib/tablePaging";
 import { SystemCopyToast, useSystemCopyFeedback } from '../SystemCopyFeedback';
 import { useModelCatalog, type ModelRecord } from './modelCatalogStore';
+import { useDropdownDismiss } from '../useDropdownDismiss';
 
 const TRAIN_JSON = `{
   "training": {
@@ -39,10 +40,10 @@ function TrainModelOptionsModal({ onClose, onSelect, models }: { onClose: () => 
 
           <div className="flex h-[452px] w-full flex-col justify-between gap-12">
             <div className="flex h-[396px] flex-col gap-4 overflow-hidden">
-              <div className="grid min-w-max h-5 grid-cols-[256px_250px_36px] items-center gap-3 px-3 font-montserrat text-[12px] font-medium leading-[18px] text-[#7288A3]"><span className="text-[#10233A]">Name</span><span>Description</span><span /></div>
+              <div className="grid min-w-max h-5 grid-cols-[256px_250px_minmax(36px,1fr)] items-center gap-3 px-3 font-montserrat text-[12px] font-medium leading-[18px] text-[#7288A3]"><span className="text-[#10233A]">Name</span><span>Description</span><span /></div>
               <div ref={tableScrollRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
                 {options.slice(0, page * TABLE_BATCH_SIZE).map((option, index) => (
-                  <div key={option.id} className={`grid min-w-max h-9 flex-shrink-0 grid-cols-[256px_250px_36px] items-center gap-3 rounded-lg px-3 font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
+                  <div key={option.id} className={`grid min-w-max h-9 flex-shrink-0 grid-cols-[256px_250px_minmax(36px,1fr)] items-center gap-3 rounded-lg px-3 font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
                     <span className="truncate">{option.name}</span><span className="truncate">{option.description}</span>
                     <span className="system-table-row-actions flex justify-end"><button type="button" aria-label={`Select train model option ${index + 1}`} onClick={() => onSelect(option)} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] hover:border-[#007EA7] hover:text-[#007EA7]"><Target size={16} /></button></span>
                   </div>
@@ -68,6 +69,8 @@ export default function TrainModelModal({ onClose, documentSetName }: { onClose:
   const { copied: settingsCopied, copyText: copySettings } = useSystemCopyFeedback();
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [nameMenuOpen, setNameMenuOpen] = useState(false);
+  const nameMenuRef = useRef<HTMLDivElement>(null);
+  useDropdownDismiss(nameMenuOpen, nameMenuRef, () => setNameMenuOpen(false));
   const [name, setName] = useState(models[0]?.name ?? '');
   const [modelDescription, setModelDescription] = useState('');
   const [version, setVersion] = useState('');
@@ -84,9 +87,9 @@ export default function TrainModelModal({ onClose, documentSetName }: { onClose:
         <div className="flex h-[464px] min-h-0 w-full gap-6">
           <div className="flex h-[390px] w-[400px] flex-shrink-0 flex-col gap-6">
             <div className="flex h-[70px] items-end">
-              <label className="relative flex h-[70px] min-w-0 flex-1 flex-col gap-2">
+              <div ref={nameMenuRef} className="relative flex h-[70px] min-w-0 flex-1 flex-col gap-2">
                 <span className="font-montserrat text-[14px] font-semibold leading-5 text-[#10233A]">Name <span className="text-[#FF4550]">*</span></span>
-                <button type="button" aria-label="Train model name" aria-expanded={nameMenuOpen} onClick={() => setNameMenuOpen((open) => !open)} className={`flex h-[42px] items-center justify-between rounded-lg border bg-white px-[14px] font-montserrat text-[14px] font-medium leading-5 outline-none transition-colors ${nameMenuOpen ? 'border-[#007EA7] ring-2 ring-[#007EA7]/10' : 'border-[#D3E1EC] hover:border-[#A1B6C6]'}`}>
+                <button type="button" aria-label="Train model name" aria-haspopup="listbox" aria-expanded={nameMenuOpen} data-static-selection="true" onClick={() => setNameMenuOpen((open) => !open)} className={`flex h-[42px] items-center justify-between rounded-lg border bg-white px-[14px] font-montserrat text-[14px] font-medium leading-5 outline-none transition-colors ${nameMenuOpen ? 'border-[#007EA7] ring-2 ring-[#007EA7]/10' : 'border-[#D3E1EC] hover:border-[#A1B6C6]'}`}>
                   <span className={name ? 'truncate text-[#10233A]' : 'text-[#A1B6C6]'}>{name || 'Choose model'}</span>
                   <ChevronDown size={16} className={`flex-shrink-0 text-[#7288A3] transition-transform ${nameMenuOpen ? 'rotate-180' : ''}`} />
                 </button>
@@ -95,15 +98,15 @@ export default function TrainModelModal({ onClose, documentSetName }: { onClose:
                     {models.map((model) => {
                       const selected = model.name === name;
                       return (
-                        <button key={model.id} type="button" role="option" aria-selected={selected} onClick={() => { setName(model.name); setNameMenuOpen(false); }} className={`flex min-h-10 w-full items-center gap-3 rounded-md px-3 py-2 text-left font-montserrat text-[13px] transition-colors ${selected ? 'bg-[#E5EDF9] text-[#10233A]' : 'text-[#10233A] hover:bg-[#F8FDFF]'}`}>
-                          <span className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[5px] border ${selected ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>{selected && <Check size={12} strokeWidth={2.5} className="text-white" />}</span>
+                        <button key={model.id} type="button" role="option" aria-selected={selected} data-static-selection="true" onClick={() => { setName(model.name); setNameMenuOpen(false); }} className={`flex min-h-10 w-full items-center gap-3 rounded-md px-3 py-2 text-left font-montserrat text-[13px] transition-colors ${selected ? 'bg-[#E5EDF9] text-[#10233A]' : 'text-[#10233A] hover:bg-[#F8FDFF]'}`}>
+                          <span aria-hidden="true" className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[6px] border ${selected ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>{selected && <Check size={12} strokeWidth={2.5} className="text-white" />}</span>
                           <span className="min-w-0 truncate font-semibold">{model.name}</span>
                         </button>
                       );
                     })}
                   </div>
                 )}
-              </label>
+              </div>
               <button type="button" aria-label="Open Train model options" onClick={() => setOptionsOpen(true)} className="flex h-[42px] w-[42px] flex-shrink-0 items-center justify-center rounded-lg text-[#7288A3] hover:bg-[#F8FDFF] hover:text-[#007EA7]"><MoreVertical size={16} /></button>
             </div>
 

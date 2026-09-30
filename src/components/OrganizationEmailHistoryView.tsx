@@ -120,7 +120,7 @@ export default function OrganizationEmailHistoryView({ organizationId, organizat
                   </div>
                 );
               })}
-              <div style={{ width: ACTIONS_WIDTH }} className="flex-shrink-0" />
+              <div style={{ width: ACTIONS_WIDTH }} className="system-table-row-actions flex-shrink-0" />
             </div>
 
             {sortedRows.slice(0, tablePage * TABLE_BATCH_SIZE).map((entry, index) => (

@@ -2,7 +2,7 @@ import { toggleFilteredSelection } from '../lib/tableSelection';
 import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { useState, useRef, useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, RefreshCw, Trash2, ChevronDown, ChevronLeft, ChevronRight, X, Download, Search, Map, AlignLeft, ArrowRight, Copy, Maximize2, Minimize2, Plus, FolderPlus, CheckCircle2, Clock3, ZoomOut, MoreVertical } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Trash2, Check, ChevronDown, ChevronLeft, ChevronRight, X, Download, Search, Map, AlignLeft, ArrowRight, Copy, Maximize2, Minimize2, Plus, FolderPlus, CheckCircle2, Clock3, ZoomOut, MoreVertical } from 'lucide-react';
 import ColumnSettingsPanel, { ColConfig } from './ColumnSettingsPanel';
 import { PageActionButton, PageHeader } from './PageHeader';
 import HorizontalTableScrollbar from './HorizontalTableScrollbar';
@@ -23,6 +23,8 @@ import { ResizeHandle, useColumnResize } from './useColumnResize';
 import ColumnSortButton, { useMultiColumnSort } from './ColumnSortButton';
 import { usePersistentState } from '../hooks/usePersistentState';
 import SearchableSelect from './SearchableSelect';
+import { useDropdownDismiss } from './useDropdownDismiss';
+import { isInactiveRecord, isRecordLinked, removeOrDeactivateRecords } from '../lib/recordLifecycle';
 export type { RunRecord } from './automationRunsStore';
 
 export interface OcrProcess {
@@ -367,6 +369,10 @@ function RunEventLog({ run }: { run: RunRecord }) {
   const [severity, setSeverity] = useState('ALL');
   const [severityOpen, setSeverityOpen] = useState(false);
   const [viewColumnsOpen, setViewColumnsOpen] = useState(false);
+  const viewColumnsRef = useRef<HTMLDivElement>(null);
+  const severityRef = useRef<HTMLDivElement>(null);
+  useDropdownDismiss(viewColumnsOpen, viewColumnsRef, () => setViewColumnsOpen(false));
+  useDropdownDismiss(severityOpen, severityRef, () => setSeverityOpen(false));
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => new Set(['timestamp', 'severity']));
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [refreshNumber, setRefreshNumber] = useState(0);
@@ -423,15 +429,15 @@ function RunEventLog({ run }: { run: RunRecord }) {
         <div className="flex min-w-[260px] flex-1 items-end">
           <OcrSearchField ariaLabel={`Search ${run.id} event log`} value={query} onChange={setQuery} />
         </div>
-        <div className="relative flex w-[235px] flex-col gap-1">
+        <div ref={viewColumnsRef} className="relative flex w-[235px] min-w-0 flex-col gap-1">
           <span className="font-montserrat text-[12px] font-medium text-[#7288A3]">View columns</span>
-          <button type="button" aria-haspopup="listbox" aria-expanded={viewColumnsOpen} onClick={() => { setSeverityOpen(false); setViewColumnsOpen(open => !open); }} className={`flex h-8 items-center justify-between border-b-2 font-montserrat text-[13px] font-medium text-[#10233A] ${viewColumnsOpen ? 'border-[#007EA7]' : 'border-[#D3E1EC]'}`}><span className="truncate">{visibleColumns.size ? columnOptions.filter(column => visibleColumns.has(column)).join(', ') : 'Choose columns'}</span><ChevronDown size={16} className={`ml-2 flex-shrink-0 text-[#7288A3] transition-transform ${viewColumnsOpen ? 'rotate-180' : ''}`} /></button>
-          {viewColumnsOpen && <div role="listbox" aria-label="View event log columns" className="absolute left-0 right-0 top-[54px] z-30 overflow-hidden rounded-lg border border-[#D3E1EC] bg-white p-2 shadow-[0_10px_28px_rgba(16,35,58,0.16)]">{columnOptions.map(column => { const checked = visibleColumns.has(column); return <button key={column} type="button" role="option" aria-selected={checked} onClick={() => toggleColumn(column)} className={`flex h-11 w-full items-center gap-3 rounded-md px-3 text-left hover:bg-[#F8FDFF] ${checked ? 'bg-[#EAF4FB]' : 'bg-white'}`}><span className={`flex h-5 w-5 items-center justify-center rounded-[6px] border ${checked ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>{checked && <svg width="11" height="9" viewBox="0 0 11 9" fill="none"><path d="M1 4.5L4 7.5L10 1" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>}</span><span className="font-montserrat text-[14px] font-medium text-[#10233A]">{column}</span></button>; })}</div>}
+          <button type="button" aria-haspopup="listbox" aria-expanded={viewColumnsOpen} data-static-selection="true" onClick={() => { setSeverityOpen(false); setViewColumnsOpen(open => !open); }} className={`flex h-8 min-w-0 items-center justify-between border-b-2 font-montserrat text-[13px] font-medium text-[#10233A] ${viewColumnsOpen ? 'border-[#007EA7]' : 'border-[#D3E1EC]'}`}><span className="min-w-0 truncate">{visibleColumns.size ? columnOptions.filter(column => visibleColumns.has(column)).join(', ') : 'Choose columns'}</span><ChevronDown size={16} className={`ml-2 flex-shrink-0 text-[#7288A3] transition-transform ${viewColumnsOpen ? 'rotate-180' : ''}`} /></button>
+          {viewColumnsOpen && <div role="listbox" aria-label="View event log columns" aria-multiselectable="true" className="absolute left-0 right-0 top-[54px] z-30 overflow-hidden rounded-lg border border-[#D3E1EC] bg-white p-2 shadow-[0_10px_28px_rgba(16,35,58,0.16)]">{columnOptions.map(column => { const checked = visibleColumns.has(column); return <button key={column} type="button" role="option" aria-selected={checked} data-static-selection="true" onClick={() => toggleColumn(column)} className={`flex h-11 w-full items-center gap-3 rounded-md px-3 text-left ${checked ? 'bg-[#E5EDF9]' : 'bg-white hover:bg-[#F8FDFF]'}`}><span aria-hidden="true" className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[6px] border ${checked ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>{checked && <Check size={12} strokeWidth={2.5} className="text-white" />}</span><span className="font-montserrat text-[14px] font-medium text-[#10233A]">{column}</span></button>; })}</div>}
         </div>
-        <div className="relative flex w-[185px] flex-col gap-1">
+        <div ref={severityRef} className="relative flex w-[185px] flex-col gap-1">
           <span className="font-montserrat text-[12px] font-medium text-[#7288A3]">Filter by severity</span>
-          <button type="button" aria-haspopup="listbox" aria-expanded={severityOpen} onClick={() => { setViewColumnsOpen(false); setSeverityOpen(open => !open); }} className={`flex h-8 items-center justify-between border-b-2 font-montserrat text-[13px] font-medium text-[#10233A] ${severityOpen ? 'border-[#007EA7]' : 'border-[#D3E1EC]'}`}><span>{severity}</span><ChevronDown size={16} className={`text-[#7288A3] transition-transform ${severityOpen ? 'rotate-180' : ''}`} /></button>
-          {severityOpen && <div role="listbox" aria-label="Filter event log by severity" className="absolute left-0 right-0 top-[54px] z-30 overflow-hidden rounded-lg border border-[#D3E1EC] bg-white p-2 shadow-[0_10px_28px_rgba(16,35,58,0.16)]">{['ALL', 'TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR'].map(option => { const checked = severity === option; return <button key={option} type="button" role="option" aria-selected={checked} onClick={() => { setSeverity(option); setSeverityOpen(false); }} className={`flex h-11 w-full items-center gap-3 rounded-md px-3 text-left hover:bg-[#F8FDFF] ${checked ? 'bg-[#EAF4FB]' : 'bg-white'}`}><span className={`flex h-5 w-5 items-center justify-center rounded-[6px] border ${checked ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>{checked && <svg width="11" height="9" viewBox="0 0 11 9" fill="none"><path d="M1 4.5L4 7.5L10 1" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>}</span><span className="font-montserrat text-[14px] font-medium text-[#10233A]">{option}</span></button>; })}</div>}
+          <button type="button" aria-haspopup="listbox" aria-expanded={severityOpen} data-static-selection="true" onClick={() => { setViewColumnsOpen(false); setSeverityOpen(open => !open); }} className={`flex h-8 items-center justify-between border-b-2 font-montserrat text-[13px] font-medium text-[#10233A] ${severityOpen ? 'border-[#007EA7]' : 'border-[#D3E1EC]'}`}><span>{severity}</span><ChevronDown size={16} className={`text-[#7288A3] transition-transform ${severityOpen ? 'rotate-180' : ''}`} /></button>
+          {severityOpen && <div role="listbox" aria-label="Filter event log by severity" className="absolute left-0 right-0 top-[54px] z-30 overflow-hidden rounded-lg border border-[#D3E1EC] bg-white p-2 shadow-[0_10px_28px_rgba(16,35,58,0.16)]">{['ALL', 'TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR'].map(option => { const checked = severity === option; return <button key={option} type="button" role="option" aria-selected={checked} data-static-selection="true" onClick={() => { setSeverity(option); setSeverityOpen(false); }} className={`flex h-11 w-full items-center gap-3 rounded-md px-3 text-left ${checked ? 'bg-[#E5EDF9]' : 'bg-white hover:bg-[#F8FDFF]'}`}><span aria-hidden="true" className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[6px] border ${checked ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>{checked && <Check size={12} strokeWidth={2.5} className="text-white" />}</span><span className="font-montserrat text-[14px] font-medium text-[#10233A]">{option}</span></button>; })}</div>}
         </div>
       </div>
       <div className="flex-1 overflow-auto bg-[#FCFDFE] px-4 py-3 font-mono text-[12px] leading-6">
@@ -585,7 +591,7 @@ export function RunDetailCard({ run, onBack, onUpdate, onRefresh, onDelete, hide
             <div className="flex h-8 items-center gap-1">
               <StopButton stopped={run.status === 'Stopped' || run.status === 'Stopped Idle'} label={`STOP ${run.id}`} onStop={() => onUpdate('Stopped')} />
               <RecordRefreshButton disabled={run.status !== 'Stopped' && run.status !== 'Stopped Idle'} label={`REDO ${run.id}`} onRefresh={onRefresh} />
-              <RowDeleteButton title="DELETE ALL" label={`DELETE ALL ${run.id}`} onDelete={onDelete} />
+              <RowDeleteButton linked inactive={isInactiveRecord(run)} label={`Deactivate ${run.id}`} onDelete={onDelete} />
             </div>
             <span className="font-montserrat text-[12px] text-[#7288A3]">{run.node} user on {run.created}</span>
           </div>
@@ -671,7 +677,7 @@ export function RunsTab({ startSignal, refreshSignal = 0, bulkDeleteSignal, runs
     if (bulkDeleteSignal === handledBulkDeleteSignal.current) return;
     handledBulkDeleteSignal.current = bulkDeleteSignal;
     if (!selectedIds.size) return;
-    setRuns(current => current.filter(run => !selectedIds.has(getRunKey(run))));
+    setRuns(current => current.map(run => selectedIds.has(getRunKey(run)) ? { ...run, inactive: true } : run));
     setSelectedIds(new Set());
   }, [bulkDeleteSignal, selectedIds, setRuns]);
 
@@ -693,7 +699,7 @@ export function RunsTab({ startSignal, refreshSignal = 0, bulkDeleteSignal, runs
   });
   const allSelected = filteredRuns.length > 0 && filteredRuns.every(run => selectedIds.has(getRunKey(run)));
   const visibleColumns = columns.filter(column => column.visible);
-  const gridTemplateColumns = `42px ${visibleColumns.map(column => `${column.width}px`).join(' ')} 100px`;
+  const gridTemplateColumns = `42px ${visibleColumns.map(column => `${column.width}px`).join(' ')} minmax(100px, 1fr)`;
   const tableMinWidth = visibleColumns.reduce((sum, column) => sum + column.width, 0) + 142;
 
   function toggleAll() {
@@ -726,7 +732,7 @@ export function RunsTab({ startSignal, refreshSignal = 0, bulkDeleteSignal, runs
         onBack={() => setSelectedRunKey(null)}
         onUpdate={(status) => setRuns(current => current.map(run => getRunKey(run) === getRunKey(selectedRun) ? { ...run, status } : run))}
         onRefresh={() => setRuns(current => current.map(run => getRunKey(run) === getRunKey(selectedRun) ? { ...run, status: 'In Progress' } : run))}
-        onDelete={() => { setRuns(current => current.filter(run => getRunKey(run) !== getRunKey(selectedRun))); setSelectedRunKey(null); }}
+        onDelete={() => { setRuns(current => current.map(run => getRunKey(run) === getRunKey(selectedRun) ? { ...run, inactive: true } : run)); setSelectedRunKey(null); }}
       />
     );
   }
@@ -760,7 +766,7 @@ export function RunsTab({ startSignal, refreshSignal = 0, bulkDeleteSignal, runs
             {sortedRuns.slice(0, page * TABLE_BATCH_SIZE).map((row, i) => {
               const runKey = getRunKey(row);
               return (
-              <div key={runKey} className={`system-table-row group grid h-10 w-full items-center rounded-lg ${i % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} hover:bg-[#E7F4F9] transition-colors`} style={{ gridTemplateColumns }}>
+              <div key={runKey} data-record-inactive={isInactiveRecord(row) || undefined} className={`system-table-row group grid h-10 w-full items-center rounded-lg ${i % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} hover:bg-[#E7F4F9] transition-colors`} style={{ gridTemplateColumns }}>
                 <div className="system-table-select-cell flex h-10 items-center px-3">
                   <RowCheckbox checked={selectedIds.has(runKey)} onChange={() => toggleOne(runKey)} />
                 </div>
@@ -787,7 +793,7 @@ export function RunsTab({ startSignal, refreshSignal = 0, bulkDeleteSignal, runs
                     label={`REDO run ${row.id}`}
                     onRefresh={() => setRuns(current => current.map(run => getRunKey(run) === runKey ? { ...run, status: 'In Progress' } : run))}
                   />
-                  <RowDeleteButton label={`Delete run ${row.id}`} onDelete={() => { setRuns(current => current.filter(run => getRunKey(run) !== runKey)); setSelectedIds(current => { const next = new Set(current); next.delete(runKey); return next; }); }} />
+                  <RowDeleteButton linked inactive={isInactiveRecord(row)} label={`Deactivate run ${row.id}`} onDelete={() => { setRuns(current => current.map(run => getRunKey(run) === runKey ? { ...run, inactive: true } : run)); setSelectedIds(current => { const next = new Set(current); next.delete(runKey); return next; }); }} />
                 </div>
               </div>
               );
@@ -842,7 +848,7 @@ function Checkbox({ checked, indeterminate = false, onChange }: { checked: boole
   );
 }
 
-export function NodesTab({ refreshSignal, createSignal, bulkDeleteSignal, onSelectionCountChange, onItemCountChange, columns: suppliedColumns, setColumns: setSuppliedColumns, storageKey = 'default', toolbar }: { refreshSignal: number; createSignal: number; bulkDeleteSignal: number; onSelectionCountChange: (count: number) => void; onItemCountChange: (count: number) => void; columns?: ColConfig[]; setColumns?: (columns: ColConfig[]) => void; storageKey?: string; toolbar?: ReactNode }) {
+export function NodesTab({ refreshSignal, createSignal, bulkDeleteSignal, onSelectionCountChange, onSelectionLinkedChange, onItemCountChange, columns: suppliedColumns, setColumns: setSuppliedColumns, storageKey = 'default', toolbar }: { refreshSignal: number; createSignal: number; bulkDeleteSignal: number; onSelectionCountChange: (count: number) => void; onSelectionLinkedChange?: (linked: boolean) => void; onItemCountChange: (count: number) => void; columns?: ColConfig[]; setColumns?: (columns: ColConfig[]) => void; storageKey?: string; toolbar?: ReactNode }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [nodes, setNodes] = usePersistentState(`finansu-harmonija:v7:configuration-parameters:${storageKey}`, NODES_DATA);
   const [localColumns, setLocalColumns] = useState<ColConfig[]>(CONFIGURATION_COLUMNS);
@@ -881,12 +887,13 @@ export function NodesTab({ refreshSignal, createSignal, bulkDeleteSignal, onSele
   }, [createSignal]);
 
   useEffect(() => onSelectionCountChange(selected.size), [selected.size, onSelectionCountChange]);
+  useEffect(() => onSelectionLinkedChange?.(nodes.some(node => selected.has(node.id) && isRecordLinked(node, `finansu-harmonija:v7:configuration-parameters:${storageKey}`))), [nodes, selected, storageKey, onSelectionLinkedChange]);
   useEffect(() => onItemCountChange(nodes.length), [nodes.length, onItemCountChange]);
   useEffect(() => {
     if (bulkDeleteSignal === handledBulkDeleteSignal.current) return;
     handledBulkDeleteSignal.current = bulkDeleteSignal;
     if (!selected.size) return;
-    setNodes(current => current.filter(node => !selected.has(node.id)));
+    setNodes(current => removeOrDeactivateRecords(current, selected, `finansu-harmonija:v7:configuration-parameters:${storageKey}`));
     setSelected(new Set());
   }, [bulkDeleteSignal, selected, setNodes]);
 
@@ -897,7 +904,7 @@ export function NodesTab({ refreshSignal, createSignal, bulkDeleteSignal, onSele
   type ConfigurationColumnKey = 'key' | 'value';
   const { sortedRows: sortedNodes, changeSort, directionFor } = useMultiColumnSort(filteredNodes, (node, key: ConfigurationColumnKey) => key === 'key' ? node.name : node.value);
   const visibleColumns = columns.filter(column => column.visible);
-  const configurationGridTemplate = `42px ${visibleColumns.map(column => `${column.width}px`).join(' ')} 48px`;
+  const configurationGridTemplate = `42px ${visibleColumns.map(column => `${column.width}px`).join(' ')} minmax(48px, 1fr)`;
   const configurationTableMinWidth = visibleColumns.reduce((sum, column) => sum + column.width, 0) + 90;
   const allSelected = filteredNodes.length > 0 && filteredNodes.every(node => selected.has(node.id));
   const someSelected = selected.size > 0 && !allSelected;
@@ -990,7 +997,7 @@ export function NodesTab({ refreshSignal, createSignal, bulkDeleteSignal, onSele
           </div>
           <div className="flex flex-col">
             {sortedNodes.slice(0, page * TABLE_BATCH_SIZE).map((row, i) => (
-              <div key={row.id} className={`group grid h-10 w-full items-center rounded-lg ${i % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} hover:bg-[#E7F4F9] transition-colors`} style={{ gridTemplateColumns: configurationGridTemplate }}>
+              <div key={row.id} data-record-inactive={isInactiveRecord(row) || undefined} className={`group grid h-10 w-full items-center rounded-lg ${i % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} hover:bg-[#E7F4F9] transition-colors`} style={{ gridTemplateColumns: configurationGridTemplate }}>
                 <div className="system-table-select-cell flex h-10 items-center px-3">
                   <Checkbox checked={selected.has(row.id)} onChange={() => toggleRow(row.id)} />
                 </div>
@@ -999,7 +1006,7 @@ export function NodesTab({ refreshSignal, createSignal, bulkDeleteSignal, onSele
                   {column.key === 'value' && <span className="truncate font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A]">{row.value}</span>}
                 </div>)}
                 <div className={`system-table-row-actions table-row-actions flex h-10 items-center justify-end gap-1 pr-2 transition-colors group-hover:bg-[#E7F4F9] ${i % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
-                  <RowDeleteButton label={`Delete ${row.name}`} onDelete={() => { setNodes(current => current.filter(node => node.id !== row.id)); setSelected(current => { const next = new Set(current); next.delete(row.id); return next; }); }} />
+                  <RowDeleteButton linked={isRecordLinked(row, `finansu-harmonija:v7:configuration-parameters:${storageKey}`)} inactive={isInactiveRecord(row)} label={`Delete ${row.name}`} onDelete={() => { setNodes(current => removeOrDeactivateRecords(current, new Set([row.id]), `finansu-harmonija:v7:configuration-parameters:${storageKey}`)); setSelected(current => { const next = new Set(current); next.delete(row.id); return next; }); }} />
                 </div>
               </div>
             ))}
@@ -1654,6 +1661,12 @@ export function AlertsTab({ createSignal, alerts, setAlerts }: {
   const [channelDropdownOpen, setChannelDropdownOpen] = useState(false);
   const [newTemplate, setNewTemplate] = useState('');
   const [templateDropdownOpen, setTemplateDropdownOpen] = useState(false);
+  const triggerDropdownRef = useRef<HTMLDivElement>(null);
+  const channelDropdownRef = useRef<HTMLDivElement>(null);
+  const templateDropdownRef = useRef<HTMLDivElement>(null);
+  useDropdownDismiss(triggerDropdownOpen, triggerDropdownRef, () => setTriggerDropdownOpen(false));
+  useDropdownDismiss(channelDropdownOpen, channelDropdownRef, () => setChannelDropdownOpen(false));
+  useDropdownDismiss(templateDropdownOpen, templateDropdownRef, () => setTemplateDropdownOpen(false));
   const handledCreateSignal = useRef(createSignal);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const [page, setPage] = useState(1);
@@ -1661,7 +1674,7 @@ export function AlertsTab({ createSignal, alerts, setAlerts }: {
   const [columns, setColumns] = useState<ColConfig[]>(ALERT_COLUMNS);
   const { startResize } = useColumnResize(columns, setColumns);
   const visibleColumns = columns.filter(column => column.visible);
-  const notificationGridTemplate = `42px ${visibleColumns.map(column => `${column.width}px`).join(' ')} 44px`;
+  const notificationGridTemplate = `42px ${visibleColumns.map(column => `${column.width}px`).join(' ')} minmax(44px, 1fr)`;
   const notificationTableMinWidth = visibleColumns.reduce((total, column) => total + column.width, 0) + 86;
   const normalizedSearch = searchQuery.trim().toLowerCase();
   const filteredAlerts = normalizedSearch
@@ -1721,7 +1734,7 @@ export function AlertsTab({ createSignal, alerts, setAlerts }: {
           className="flex flex-row items-start bg-white rounded-[4px]"
           style={{ padding: 6, gap: 16, width: 124, height: 28 }}
         >
-          <BulkDeleteButton selectedCount={selected.size} onDelete={() => { setAlerts(current => current.filter(alert => !selected.has(alert.id))); setSelected(new Set()); }} />
+          <BulkDeleteButton linked={alerts.some(row => selected.has(row.id) && isRecordLinked(row))} selectedCount={selected.size} onDelete={() => { setAlerts(current => removeOrDeactivateRecords(current, selected)); setSelected(new Set()); }} />
           <ColumnSettingsButton onClick={() => setShowColumnSettings(true)} />
           <ImportButton scope="Automation process notifications" />
           <RefreshAllButton onRefresh={() => setAlerts(current => current.map(alert => ({ ...alert })))} />
@@ -1752,6 +1765,7 @@ export function AlertsTab({ createSignal, alerts, setAlerts }: {
                 <div
                   key={row.id}
                   className={`group grid h-9 w-full items-center rounded-lg transition-colors ${i % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} hover:bg-[#E7F4F9]`}
+                  data-record-inactive={isInactiveRecord(row) || undefined}
                   style={{ gridTemplateColumns: notificationGridTemplate }}
                 >
                   <div className="system-table-select-cell flex h-9 items-center px-3">
@@ -1762,7 +1776,7 @@ export function AlertsTab({ createSignal, alerts, setAlerts }: {
                   </div>
                   {visibleColumns.map((column) => <div key={column.key} className="flex h-9 items-center overflow-hidden px-3"><span className="truncate font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A]">{String(row[column.key as keyof AlertRecord] ?? '—')}</span></div>)}
                   <div className="system-table-row-actions flex h-9 items-center justify-end pr-1">
-                    <RowDeleteButton label={`Delete notification ${row.id}`} onDelete={() => { setAlerts(current => current.filter(alert => alert.id !== row.id)); setSelected(current => { const next = new Set(current); next.delete(row.id); return next; }); }} />
+                    <RowDeleteButton linked={isRecordLinked(row)} inactive={isInactiveRecord(row)} label={`Delete notification ${row.id}`} onDelete={() => { setAlerts(current => removeOrDeactivateRecords(current, new Set([row.id]))); setSelected(current => { const next = new Set(current); next.delete(row.id); return next; }); }} />
                   </div>
                 </div>
               ))}
@@ -1800,19 +1814,19 @@ export function AlertsTab({ createSignal, alerts, setAlerts }: {
         <div className="fixed inset-0 z-[310] flex justify-end bg-[#10233A]/20" onMouseDown={closeCreate}>
           <div role="dialog" aria-modal="true" aria-label="Create notification" className="flex h-full w-[420px] max-w-[calc(100vw-24px)] flex-col gap-6 bg-white p-6 shadow-[-2px_0_0_#E5EDF9]" onMouseDown={event => event.stopPropagation()}>
             <div className="flex items-center justify-between gap-4"><h2 className="font-montserrat text-[22px] font-semibold leading-8 text-[#10233A]">Create new</h2><button type="button" title="Close" aria-label="Close create notification" onClick={closeCreate} className="text-[#7288A3] hover:text-[#10233A]"><X size={24} /></button></div>
-            <div className="relative flex flex-col gap-2">
+            <div ref={triggerDropdownRef} className="relative flex min-w-0 flex-col gap-2">
               <span className="font-montserrat text-[14px] font-semibold text-[#10233A]">Trigger <span className="text-[#E45858]">*</span></span>
-              <button type="button" aria-haspopup="listbox" aria-expanded={triggerDropdownOpen} onClick={() => { setChannelDropdownOpen(false); setTemplateDropdownOpen(false); setTriggerDropdownOpen(open => !open); }} className={`flex h-[42px] items-center justify-between rounded-lg border bg-white px-[14px] text-left font-montserrat text-[14px] font-medium outline-none ${triggerDropdownOpen ? 'border-[#007EA7]' : 'border-[#D3E1EC]'}`}>
-                <span className={newTrigger ? 'text-[#10233A]' : 'text-[#A1B6C6]'}>{newTrigger || 'Select trigger status'}</span>
-                <ChevronDown size={16} className={`text-[#7288A3] transition-transform ${triggerDropdownOpen ? 'rotate-180' : ''}`} />
+              <button type="button" aria-haspopup="listbox" aria-expanded={triggerDropdownOpen} data-static-selection="true" onClick={() => { setChannelDropdownOpen(false); setTemplateDropdownOpen(false); setTriggerDropdownOpen(open => !open); }} className={`flex h-[42px] min-w-0 items-center justify-between gap-2 rounded-lg border bg-white px-[14px] text-left font-montserrat text-[14px] font-medium outline-none ${triggerDropdownOpen ? 'border-[#007EA7]' : 'border-[#D3E1EC]'}`}>
+                <span className={`min-w-0 truncate ${newTrigger ? 'text-[#10233A]' : 'text-[#A1B6C6]'}`}>{newTrigger || 'Select trigger status'}</span>
+                <ChevronDown size={16} className={`flex-shrink-0 text-[#7288A3] transition-transform ${triggerDropdownOpen ? 'rotate-180' : ''}`} />
               </button>
               {triggerDropdownOpen && (
                 <div role="listbox" aria-label="Trigger statuses" className="absolute left-0 right-0 top-[70px] z-20 max-h-[360px] overflow-y-auto rounded-lg border border-[#D3E1EC] bg-white p-2 shadow-[0_8px_24px_rgba(16,35,58,0.14)]">
                   <span className="block px-3 pb-2 pt-1 font-montserrat text-[13px] font-medium text-[#7288A3]">Statuses</span>
                   {['Submitted', 'Failed', 'Completed', 'In Progress', 'Stopped', 'Stopped Idle', 'Queued', 'Deploying on Node', 'Stopping'].map(status => (
-                    <button key={status} type="button" role="option" aria-selected={newTrigger === status} onClick={() => { setNewTrigger(status); setTriggerDropdownOpen(false); }} className="flex h-11 w-full items-center gap-3 rounded-md px-3 text-left hover:bg-[#F8FDFF]">
-                      <span className={`flex h-[20px] w-[20px] flex-shrink-0 items-center justify-center rounded-[6px] border ${newTrigger === status ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>
-                        {newTrigger === status && <svg width="11" height="9" viewBox="0 0 11 9" fill="none" aria-hidden="true"><path d="M1 4.5L4 7.5L10 1" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                    <button key={status} type="button" role="option" aria-selected={newTrigger === status} data-static-selection="true" onClick={() => { setNewTrigger(status); setTriggerDropdownOpen(false); }} className={`flex h-11 w-full items-center gap-3 rounded-md px-3 text-left ${newTrigger === status ? 'bg-[#E5EDF9]' : 'hover:bg-[#F8FDFF]'}`}>
+                      <span aria-hidden="true" className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[6px] border ${newTrigger === status ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>
+                        {newTrigger === status && <Check size={12} strokeWidth={2.5} className="text-white" />}
                       </span>
                       <span className="font-montserrat text-[14px] font-medium text-[#10233A]">{status}</span>
                     </button>
@@ -1820,18 +1834,18 @@ export function AlertsTab({ createSignal, alerts, setAlerts }: {
                 </div>
               )}
             </div>
-            <div className="relative flex flex-col gap-2">
+            <div ref={channelDropdownRef} className="relative flex min-w-0 flex-col gap-2">
               <span className="font-montserrat text-[14px] font-semibold text-[#10233A]">Channel <span className="text-[#E45858]">*</span></span>
-              <button type="button" aria-haspopup="listbox" aria-expanded={channelDropdownOpen} onClick={() => { setTriggerDropdownOpen(false); setTemplateDropdownOpen(false); setChannelDropdownOpen(open => !open); }} className={`flex h-[42px] items-center justify-between rounded-lg border bg-white px-[14px] text-left font-montserrat text-[14px] font-medium outline-none ${channelDropdownOpen ? 'border-[#007EA7]' : 'border-[#D3E1EC]'}`}>
-                <span className={newChannel ? 'text-[#10233A]' : 'text-[#A1B6C6]'}>{newChannel || 'Select channel'}</span>
-                <ChevronDown size={16} className={`text-[#7288A3] transition-transform ${channelDropdownOpen ? 'rotate-180' : ''}`} />
+              <button type="button" aria-haspopup="listbox" aria-expanded={channelDropdownOpen} data-static-selection="true" onClick={() => { setTriggerDropdownOpen(false); setTemplateDropdownOpen(false); setChannelDropdownOpen(open => !open); }} className={`flex h-[42px] min-w-0 items-center justify-between gap-2 rounded-lg border bg-white px-[14px] text-left font-montserrat text-[14px] font-medium outline-none ${channelDropdownOpen ? 'border-[#007EA7]' : 'border-[#D3E1EC]'}`}>
+                <span className={`min-w-0 truncate ${newChannel ? 'text-[#10233A]' : 'text-[#A1B6C6]'}`}>{newChannel || 'Select channel'}</span>
+                <ChevronDown size={16} className={`flex-shrink-0 text-[#7288A3] transition-transform ${channelDropdownOpen ? 'rotate-180' : ''}`} />
               </button>
               {channelDropdownOpen && (
                 <div role="listbox" aria-label="Notification channels" className="absolute left-0 right-0 top-[70px] z-20 overflow-hidden rounded-lg border border-[#D3E1EC] bg-white p-2 shadow-[0_8px_24px_rgba(16,35,58,0.14)]">
                   {['rpaplatform', 'demo_ap3_matching_results_email'].map(channel => (
-                    <button key={channel} type="button" role="option" aria-selected={newChannel === channel} onClick={() => { setNewChannel(channel); setChannelDropdownOpen(false); }} className={`flex min-h-11 w-full items-center gap-3 rounded-md px-3 py-2 text-left hover:bg-[#F8FDFF] ${newChannel === channel ? 'bg-[#F8FDFF]' : ''}`}>
-                      <span className={`flex h-[20px] w-[20px] flex-shrink-0 items-center justify-center rounded-[6px] border ${newChannel === channel ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>
-                        {newChannel === channel && <svg width="11" height="9" viewBox="0 0 11 9" fill="none" aria-hidden="true"><path d="M1 4.5L4 7.5L10 1" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                    <button key={channel} type="button" role="option" aria-selected={newChannel === channel} data-static-selection="true" onClick={() => { setNewChannel(channel); setChannelDropdownOpen(false); }} className={`flex min-h-11 w-full items-center gap-3 rounded-md px-3 py-2 text-left ${newChannel === channel ? 'bg-[#E5EDF9]' : 'hover:bg-[#F8FDFF]'}`}>
+                      <span aria-hidden="true" className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[6px] border ${newChannel === channel ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>
+                        {newChannel === channel && <Check size={12} strokeWidth={2.5} className="text-white" />}
                       </span>
                       <span className="break-all font-montserrat text-[14px] font-medium text-[#10233A]">{channel}</span>
                     </button>
@@ -1839,18 +1853,18 @@ export function AlertsTab({ createSignal, alerts, setAlerts }: {
                 </div>
               )}
             </div>
-            <div className="relative flex flex-col gap-2">
+            <div ref={templateDropdownRef} className="relative flex min-w-0 flex-col gap-2">
               <span className="font-montserrat text-[14px] font-semibold text-[#10233A]">Template <span className="text-[#E45858]">*</span></span>
-              <button type="button" aria-haspopup="listbox" aria-expanded={templateDropdownOpen} onClick={() => { setTriggerDropdownOpen(false); setChannelDropdownOpen(false); setTemplateDropdownOpen(open => !open); }} className={`flex h-[42px] items-center justify-between rounded-lg border bg-white px-[14px] text-left font-montserrat text-[14px] font-medium outline-none ${templateDropdownOpen ? 'border-[#007EA7]' : 'border-[#D3E1EC]'}`}>
+              <button type="button" aria-haspopup="listbox" aria-expanded={templateDropdownOpen} data-static-selection="true" onClick={() => { setTriggerDropdownOpen(false); setChannelDropdownOpen(false); setTemplateDropdownOpen(open => !open); }} className={`flex h-[42px] min-w-0 items-center justify-between rounded-lg border bg-white px-[14px] text-left font-montserrat text-[14px] font-medium outline-none ${templateDropdownOpen ? 'border-[#007EA7]' : 'border-[#D3E1EC]'}`}>
                 <span className={`truncate ${newTemplate ? 'text-[#10233A]' : 'text-[#A1B6C6]'}`}>{newTemplate || 'Select template'}</span>
                 <ChevronDown size={16} className={`ml-2 flex-shrink-0 text-[#7288A3] transition-transform ${templateDropdownOpen ? 'rotate-180' : ''}`} />
               </button>
               {templateDropdownOpen && (
                 <div role="listbox" aria-label="Notification templates" className="absolute left-0 right-0 top-[70px] z-20 max-h-[300px] overflow-y-auto rounded-lg border border-[#D3E1EC] bg-white p-2 shadow-[0_8px_24px_rgba(16,35,58,0.14)]">
                   {['Invoice Plane Email Template', 'Google Translate Sample Report', 'SAP Email Template', '[DEMOAP-2] Translation Report', '[DEMOAP-3] Matching Results Email Template'].map(template => (
-                    <button key={template} type="button" role="option" aria-selected={newTemplate === template} onClick={() => { setNewTemplate(template); setTemplateDropdownOpen(false); }} className={`flex min-h-11 w-full items-center gap-3 rounded-md px-3 py-2 text-left hover:bg-[#F8FDFF] ${newTemplate === template ? 'bg-[#F8FDFF]' : ''}`}>
-                      <span className={`flex h-[20px] w-[20px] flex-shrink-0 items-center justify-center rounded-[6px] border ${newTemplate === template ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>
-                        {newTemplate === template && <svg width="11" height="9" viewBox="0 0 11 9" fill="none" aria-hidden="true"><path d="M1 4.5L4 7.5L10 1" stroke="white" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                    <button key={template} type="button" role="option" aria-selected={newTemplate === template} data-static-selection="true" onClick={() => { setNewTemplate(template); setTemplateDropdownOpen(false); }} className={`flex min-h-11 w-full items-center gap-3 rounded-md px-3 py-2 text-left ${newTemplate === template ? 'bg-[#E5EDF9]' : 'hover:bg-[#F8FDFF]'}`}>
+                      <span aria-hidden="true" className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[6px] border ${newTemplate === template ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>
+                        {newTemplate === template && <Check size={12} strokeWidth={2.5} className="text-white" />}
                       </span>
                       <span className="font-montserrat text-[14px] font-medium leading-5 text-[#10233A]">{template}</span>
                     </button>
@@ -2053,6 +2067,7 @@ export default function AutomationProcessDetailView({ process, onBack, initialRu
   const [runsSelectedCount, setRunsSelectedCount] = useState(0);
   const [runsBulkDeleteSignal, setRunsBulkDeleteSignal] = useState(0);
   const [configurationSelectedCount, setConfigurationSelectedCount] = useState(0);
+  const [configurationSelectionLinked, setConfigurationSelectionLinked] = useState(false);
   const [configurationItemCount, setConfigurationItemCount] = useState(NODES_DATA.length);
   const [configurationBulkDeleteSignal, setConfigurationBulkDeleteSignal] = useState(0);
   const [startRunSignal, setStartRunSignal] = useState(0);
@@ -2098,8 +2113,8 @@ export default function AutomationProcessDetailView({ process, onBack, initialRu
   const renderTab = () => {
     switch (activeTab) {
       case 'Details': return <DetailTab process={process} refreshSignal={detailRefreshSignal} />;
-      case 'Runs': return <RunsTab startSignal={startRunSignal} refreshSignal={runsRefreshSignal} bulkDeleteSignal={runsBulkDeleteSignal} runs={runs} setRuns={setRuns} onDetailOpenChange={setRunDetailOpen} onSelectionCountChange={setRunsSelectedCount} initialRunId={initialRunId} columns={runColumns} setColumns={setRunColumns} toolbar={runDetailOpen ? undefined : <><BulkDeleteButton selectedCount={runsSelectedCount} onDelete={() => setRunsBulkDeleteSignal(signal => signal + 1)} /><ColumnSettingsButton onClick={() => setShowColumnPanel(true)} /><RefreshAllButton onRefresh={() => setRunsRefreshSignal(signal => signal + 1)} /></>} />;
-      case 'Configuration parameters': return <NodesTab refreshSignal={refreshAllSignal} createSignal={createConfigurationSignal} bulkDeleteSignal={configurationBulkDeleteSignal} onSelectionCountChange={setConfigurationSelectedCount} onItemCountChange={setConfigurationItemCount} columns={configurationColumns} setColumns={setConfigurationColumns} storageKey={`process-${process.id}`} toolbar={<><BulkDeleteButton selectedCount={configurationSelectedCount} onDelete={() => setConfigurationBulkDeleteSignal(signal => signal + 1)} /><ColumnSettingsButton onClick={() => setShowColumnPanel(true)} /><button type="button" data-button-family="export" aria-expanded={exportOpen} title="EXPORT" aria-label={`EXPORT ${process.name} configuration parameters`} onClick={() => setExportOpen(true)} className="flex h-4 w-4 flex-shrink-0 items-center justify-center text-[#7288A3] transition-colors hover:text-[#007EA7]"><Download size={16} /></button><ImportButton scope="Automation process configuration parameters" /><RefreshAllButton onRefresh={() => setRefreshAllSignal(signal => signal + 1)} /></>} />;
+      case 'Runs': return <RunsTab startSignal={startRunSignal} refreshSignal={runsRefreshSignal} bulkDeleteSignal={runsBulkDeleteSignal} runs={runs} setRuns={setRuns} onDetailOpenChange={setRunDetailOpen} onSelectionCountChange={setRunsSelectedCount} initialRunId={initialRunId} columns={runColumns} setColumns={setRunColumns} toolbar={runDetailOpen ? undefined : <><BulkDeleteButton linked selectedCount={runsSelectedCount} onDelete={() => setRunsBulkDeleteSignal(signal => signal + 1)} /><ColumnSettingsButton onClick={() => setShowColumnPanel(true)} /><RefreshAllButton onRefresh={() => setRunsRefreshSignal(signal => signal + 1)} /></>} />;
+      case 'Configuration parameters': return <NodesTab refreshSignal={refreshAllSignal} createSignal={createConfigurationSignal} bulkDeleteSignal={configurationBulkDeleteSignal} onSelectionCountChange={setConfigurationSelectedCount} onSelectionLinkedChange={setConfigurationSelectionLinked} onItemCountChange={setConfigurationItemCount} columns={configurationColumns} setColumns={setConfigurationColumns} storageKey={`process-${process.id}`} toolbar={<><BulkDeleteButton linked={configurationSelectionLinked} selectedCount={configurationSelectedCount} onDelete={() => setConfigurationBulkDeleteSignal(signal => signal + 1)} /><ColumnSettingsButton onClick={() => setShowColumnPanel(true)} /><button type="button" data-button-family="export" aria-expanded={exportOpen} title="EXPORT" aria-label={`EXPORT ${process.name} configuration parameters`} onClick={() => setExportOpen(true)} className="flex h-4 w-4 flex-shrink-0 items-center justify-center text-[#7288A3] transition-colors hover:text-[#007EA7]"><Download size={16} /></button><ImportButton scope="Automation process configuration parameters" /><RefreshAllButton onRefresh={() => setRefreshAllSignal(signal => signal + 1)} /></>} />;
       case 'Input data': return <InputDataTab refreshSignal={inputDataRefreshSignal} />;
       case 'Metrics': return <MonitoringTab runs={runs} />;
       case 'Notifications': return <AlertsTab createSignal={createNotificationSignal} alerts={notifications} setAlerts={setNotifications} />;

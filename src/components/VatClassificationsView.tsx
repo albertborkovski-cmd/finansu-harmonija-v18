@@ -1,4 +1,5 @@
 import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
+import { isInactiveRecord, isRecordLinked } from "../lib/recordLifecycle";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
@@ -576,7 +577,6 @@ function loadVatClassificationTemplates(): VatClassificationTemplate[] {
         storedValue,
       ) as VatClassificationTemplate[];
       let migrated = false;
-      let hasLithuanianTemplate = false;
       const templates = storedTemplates.map((template) => {
         const isLithuanianDefault =
           template.id === DEFAULT_TEMPLATE.id ||
@@ -584,7 +584,6 @@ function loadVatClassificationTemplates(): VatClassificationTemplate[] {
             .trim()
             .toLocaleLowerCase()
             .startsWith("lithuanian vat classifications");
-        if (isLithuanianDefault) hasLithuanianTemplate = true;
         if (
           !isLithuanianDefault ||
           template.sourceRevision === LITHUANIAN_VAT_DATA_REVISION
@@ -603,11 +602,6 @@ function loadVatClassificationTemplates(): VatClassificationTemplate[] {
           classifications: DEFAULT_CLASSIFICATIONS,
         };
       });
-
-      if (!hasLithuanianTemplate) {
-        templates.unshift(DEFAULT_TEMPLATE);
-        migrated = true;
-      }
 
       if (migrated) {
         window.localStorage.setItem(
@@ -908,6 +902,18 @@ export default function VatClassificationsView() {
     );
   };
 
+  const classificationIsLinked = (row: VatClassification) =>
+    isRecordLinked(row, TEMPLATES_STORAGE_KEY);
+  const templateIsLinked = (template: VatClassificationTemplate) =>
+    isRecordLinked(template, TEMPLATES_STORAGE_KEY) || template.classifications.some(classificationIsLinked);
+  const deleteClassifications = (ids: Set<string>) => {
+    persistRows(rows.flatMap((row) => {
+      if (!ids.has(row.id) || isInactiveRecord(row)) return [row];
+      return classificationIsLinked(row) ? [{ ...row, active: false }] : [];
+    }));
+    setSelectedClassifications(new Set());
+  };
+
   const visibleRows = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
     return classificationSorter.sortedRows.filter((row) => {
@@ -1048,7 +1054,10 @@ export default function VatClassificationsView() {
       visibleTemplateColumns.reduce((sum, column) => sum + column.width, 0) +
       80;
     const deleteTemplates = (ids: Set<string>) => {
-      persistTemplates(templates.filter((template) => !ids.has(template.id)));
+      persistTemplates(templates.flatMap((template) => {
+        if (!ids.has(template.id) || isInactiveRecord(template)) return [template];
+        return templateIsLinked(template) ? [{ ...template, active: false }] : [];
+      }));
       setSelectedTemplates(new Set());
     };
     return (
@@ -1100,6 +1109,7 @@ export default function VatClassificationsView() {
           <div className="flex items-center gap-4">
             <BulkDeleteButton
               selectedCount={selectedTemplates.size}
+              linked={templates.some((template) => selectedTemplates.has(template.id) && templateIsLinked(template))}
               onDelete={() => deleteTemplates(selectedTemplates)}
             />
             <ColumnSettingsButton
@@ -1158,12 +1168,13 @@ export default function VatClassificationsView() {
                   </div>
                 );
               })}
-              <div className="w-[80px] flex-shrink-0" />
+              <div className="system-table-row-actions w-[80px] flex-shrink-0" />
             </div>
             <div className="flex flex-col gap-0.5">
               {visibleTemplates.slice(0, fixedPage0 * TABLE_BATCH_SIZE).map((template, rowIndex) => (
                 <div
                   key={template.id}
+                  data-record-inactive={isInactiveRecord(template) || undefined}
                   role="button"
                   tabIndex={0}
                   onClick={() => {
@@ -1213,7 +1224,7 @@ export default function VatClassificationsView() {
                       )}
                     </div>
                   ))}
-                  <div className="flex w-[80px] flex-shrink-0 justify-end gap-1">
+                  <div className="system-table-row-actions flex w-[80px] flex-shrink-0 justify-end gap-1">
                     <button
                       type="button"
                       aria-label={`Edit ${template.name}`}
@@ -1227,6 +1238,8 @@ export default function VatClassificationsView() {
                     </button>
                     <RowDeleteButton
                       label={`Delete ${template.name}`}
+                      linked={templateIsLinked(template)}
+                      inactive={isInactiveRecord(template)}
                       onDelete={() => deleteTemplates(new Set([template.id]))}
                     />
                   </div>
@@ -1364,12 +1377,8 @@ export default function VatClassificationsView() {
           </span>
           <BulkDeleteButton
             selectedCount={selectedClassifications.size}
-            onDelete={() => {
-              persistRows(
-                rows.filter((row) => !selectedClassifications.has(row.id)),
-              );
-              setSelectedClassifications(new Set());
-            }}
+            linked={rows.some((row) => selectedClassifications.has(row.id) && classificationIsLinked(row))}
+            onDelete={() => deleteClassifications(selectedClassifications)}
           />
           <ColumnSettingsButton
             onClick={() => setShowClassificationColumns(true)}
@@ -1423,13 +1432,14 @@ export default function VatClassificationsView() {
                 </div>
               );
             })}
-            <div className="h-6 w-[80px] flex-shrink-0 bg-white" />
+            <div className="system-table-row-actions h-6 w-[80px] flex-shrink-0 bg-white" />
           </div>
 
           <div className="flex flex-col gap-0.5">
             {visibleRows.slice(0, fixedPage1 * TABLE_BATCH_SIZE).map((row, rowIndex) => (
               <div
                 key={row.id}
+                data-record-inactive={isInactiveRecord(row) || undefined}
                 className={`group flex h-10 items-center rounded-lg font-montserrat text-[12px] text-[#10233A] transition-colors ${rowIndex % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} hover:bg-[#E7F4F9]`}
               >
                 <div className="flex w-[42px] flex-shrink-0 px-3">
@@ -1492,7 +1502,7 @@ export default function VatClassificationsView() {
                   </div>
                 ))}
                 <div
-                  className={`flex h-10 w-[80px] flex-shrink-0 items-center justify-end gap-1 transition-colors ${rowIndex % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} group-hover:bg-[#E7F4F9]`}
+                  className={`system-table-row-actions flex h-10 w-[80px] flex-shrink-0 items-center justify-end gap-1 transition-colors ${rowIndex % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} group-hover:bg-[#E7F4F9]`}
                 >
                   <button
                     type="button"
@@ -1505,9 +1515,9 @@ export default function VatClassificationsView() {
                   <RowDeleteButton
                     variant="plain"
                     label={`Delete ${row.code}`}
-                    onDelete={() =>
-                      persistRows(rows.filter((item) => item.id !== row.id))
-                    }
+                    linked={classificationIsLinked(row)}
+                    inactive={isInactiveRecord(row)}
+                    onDelete={() => deleteClassifications(new Set([row.id]))}
                   />
                 </div>
               </div>

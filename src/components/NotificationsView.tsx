@@ -1,6 +1,8 @@
 import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { RefreshCw, ChevronDown, X, Check, Pencil, Trash2 } from "lucide-react";
+import { RefreshCw, ChevronDown, X, Check, Pencil } from "lucide-react";
+import { RowDeleteButton } from './DeleteButtons';
+import { isInactiveRecord, isRecordLinked, removeOrDeactivateRecords } from '../lib/recordLifecycle';
 import ColumnSettingsPanel, { type ColConfig } from "./ColumnSettingsPanel";
 import { PageActionButton, PageHeader } from "./PageHeader";
 import { SystemBreadcrumb } from "./SystemNavigation";
@@ -14,6 +16,7 @@ import ColumnSortButton, { useMultiColumnSort } from "./ColumnSortButton";
 import { matchesTextSearch } from "../utils/textSearch";
 import { usePersistentState } from "../hooks/usePersistentState";
 import SystemAddFilters from "./SystemAddFilters";
+import { useDropdownDismiss } from "./useDropdownDismiss";
 
 import { SAMPLE_NOTIFICATIONS, SAMPLE_REMINDERS, type NotificationRow, type ReminderRow, type NotificationTab as Tab } from "../lib/notifications";
 
@@ -116,6 +119,12 @@ export default function NotificationsView({ initialTab = "notifications", initia
     useState(false);
   const [showReminderTypeMenu, setShowReminderTypeMenu] = useState(false);
   const [showReminderDaysMenu, setShowReminderDaysMenu] = useState(false);
+  const notificationTypeRef = useRef<HTMLDivElement>(null);
+  const reminderTypeRef = useRef<HTMLDivElement>(null);
+  const reminderDaysRef = useRef<HTMLDivElement>(null);
+  useDropdownDismiss(showNotificationTypeMenu, notificationTypeRef, () => setShowNotificationTypeMenu(false));
+  useDropdownDismiss(showReminderTypeMenu, reminderTypeRef, () => setShowReminderTypeMenu(false));
+  useDropdownDismiss(showReminderDaysMenu, reminderDaysRef, () => setShowReminderDaysMenu(false));
   const [formDaysTillRemind, setFormDaysTillRemind] = useState("");
   const [formDescription, setFormDescription] = useState("");
   const [formActive, setFormActive] = useState(true);
@@ -422,7 +431,7 @@ export default function NotificationsView({ initialTab = "notifications", initia
                 onViewDetails={openEditNotification}
                 onDelete={(row) =>
                   setNotificationRows((current) =>
-                    current.filter((item) => item.id !== row.id),
+                    removeOrDeactivateRecords(current, new Set([row.id]), 'finansu-harmonija:v7:notifications'),
                   )
                 }
                 columns={notifColumns}
@@ -435,7 +444,7 @@ export default function NotificationsView({ initialTab = "notifications", initia
                 onViewDetails={openEditReminder}
                 onDelete={(row) =>
                   setReminderRows((current) =>
-                    current.filter((item) => item.id !== row.id),
+                    removeOrDeactivateRecords(current, new Set([row.id]), 'finansu-harmonija:v7:reminders'),
                   )
                 }
                 columns={remindColumns}
@@ -514,19 +523,20 @@ export default function NotificationsView({ initialTab = "notifications", initia
                     Notification type
                     <span className="ml-1 text-[#D64545]">*</span>
                   </span>
-                  <div className="relative">
+                  <div ref={notificationTypeRef} className="relative">
                     <button
                       type="button"
                       aria-label="Notification type"
+                      aria-haspopup="listbox"
                       aria-expanded={showNotificationTypeMenu}
                       onClick={() =>
                         setShowNotificationTypeMenu((value) => !value)
                       }
-                      className={`flex min-h-[42px] w-full items-center justify-between rounded-lg border bg-white px-[14px] text-left font-montserrat text-[14px] font-medium leading-[140%] transition-colors ${showNotificationTypeMenu ? "border-[#007EA7] ring-2 ring-[#007EA7]/10" : "border-[#D3E1EC]"}`}
+                      className={`flex h-[42px] w-full items-center justify-between gap-2 rounded-lg border bg-white px-[14px] text-left font-montserrat text-[14px] font-medium leading-[140%] transition-colors ${showNotificationTypeMenu ? "border-[#007EA7] ring-2 ring-[#007EA7]/10" : "border-[#D3E1EC]"}`}
                     >
                       <span
                         className={
-                          formType ? "text-[#10233A]" : "text-[#A1B6C6]"
+                          `min-w-0 truncate ${formType ? "text-[#10233A]" : "text-[#A1B6C6]"}`
                         }
                       >
                         {formType || "Select type"}
@@ -537,23 +547,26 @@ export default function NotificationsView({ initialTab = "notifications", initia
                       />
                     </button>
                     {showNotificationTypeMenu && (
-                      <div className="absolute left-0 right-0 top-[46px] z-40 rounded-lg border border-[#D3E1EC] bg-white p-1.5 shadow-[0_8px_24px_rgba(16,35,58,0.14)]">
+                      <div role="listbox" aria-label="Notification type options" className="absolute left-0 right-0 top-[46px] z-40 rounded-lg border border-[#D3E1EC] bg-white p-1.5 shadow-[0_8px_24px_rgba(16,35,58,0.14)]">
                         {notificationTypeOptions.map((type) => {
                           const selected = formType === type;
                           return (
                             <button
                               key={type}
                               type="button"
+                              role="option"
+                              aria-selected={selected}
                               onClick={() => selectNotificationType(type)}
-                              className={`flex h-9 w-full items-center gap-2 rounded-md px-2 text-left transition-colors ${selected ? "bg-[#F0F7FA]" : "hover:bg-[#F7FBFC]"}`}
+                              className={`flex h-9 w-full items-center gap-2 rounded-md px-2 text-left transition-colors ${selected ? "bg-[#E5EDF9]" : "hover:bg-[#F7FBFC]"}`}
                             >
                               <span
-                                className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded border ${selected ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
+                                aria-hidden="true"
+                                className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${selected ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
                               >
                                 {selected && (
                                   <Check
-                                    size={13}
-                                    strokeWidth={3}
+                                    size={12}
+                                    strokeWidth={2.5}
                                     className="text-white"
                                   />
                                 )}
@@ -577,10 +590,11 @@ export default function NotificationsView({ initialTab = "notifications", initia
                   <span className="font-montserrat font-semibold text-[14px] leading-[140%] text-[#10233A]">
                     Reminder type<span className="ml-1 text-[#D64545]">*</span>
                   </span>
-                  <div className="relative">
+                  <div ref={reminderTypeRef} className="relative">
                     <button
                       type="button"
                       aria-label="Reminder type"
+                      aria-haspopup="listbox"
                       aria-expanded={showReminderTypeMenu}
                       onClick={() => {
                         setShowReminderTypeMenu((value) => !value);
@@ -590,7 +604,7 @@ export default function NotificationsView({ initialTab = "notifications", initia
                     >
                       <span
                         className={
-                          formType ? "text-[#10233A]" : "text-[#A1B6C6]"
+                          `min-w-0 truncate ${formType ? "text-[#10233A]" : "text-[#A1B6C6]"}`
                         }
                       >
                         {formType || "Select reminder type"}
@@ -601,26 +615,29 @@ export default function NotificationsView({ initialTab = "notifications", initia
                       />
                     </button>
                     {showReminderTypeMenu && (
-                      <div className="absolute left-0 right-0 top-[46px] z-40 rounded-lg border border-[#D3E1EC] bg-white p-1.5 shadow-[0_8px_24px_rgba(16,35,58,0.14)]">
+                      <div role="listbox" aria-label="Reminder type options" className="absolute left-0 right-0 top-[46px] z-40 rounded-lg border border-[#D3E1EC] bg-white p-1.5 shadow-[0_8px_24px_rgba(16,35,58,0.14)]">
                         {reminderTypeOptions.map((option) => {
                           const selected = formType === option;
                           return (
                             <button
                               key={option}
                               type="button"
+                              role="option"
+                              aria-selected={selected}
                               onClick={() => {
                                 setFormType(option);
                                 setShowReminderTypeMenu(false);
                               }}
-                              className={`flex h-9 w-full items-center gap-2 rounded-md px-2 text-left transition-colors ${selected ? "bg-[#F0F7FA]" : "hover:bg-[#F7FBFC]"}`}
+                              className={`flex h-9 w-full items-center gap-2 rounded-md px-2 text-left transition-colors ${selected ? "bg-[#E5EDF9]" : "hover:bg-[#F7FBFC]"}`}
                             >
                               <span
-                                className={`flex h-[18px] w-[18px] items-center justify-center rounded border ${selected ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
+                                aria-hidden="true"
+                                className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${selected ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
                               >
                                 {selected && (
                                   <Check
-                                    size={13}
-                                    strokeWidth={3}
+                                    size={12}
+                                    strokeWidth={2.5}
                                     className="text-white"
                                   />
                                 )}
@@ -645,10 +662,11 @@ export default function NotificationsView({ initialTab = "notifications", initia
                     Days till remind
                     <span className="ml-1 text-[#D64545]">*</span>
                   </span>
-                  <div className="relative">
+                  <div ref={reminderDaysRef} className="relative">
                     <button
                       type="button"
                       aria-label="Days till remind"
+                      aria-haspopup="listbox"
                       aria-expanded={showReminderDaysMenu}
                       onClick={() => {
                         setShowReminderDaysMenu((value) => !value);
@@ -658,9 +676,9 @@ export default function NotificationsView({ initialTab = "notifications", initia
                     >
                       <span
                         className={
-                          formDaysTillRemind
+                          `min-w-0 truncate ${formDaysTillRemind
                             ? "text-[#10233A]"
-                            : "text-[#A1B6C6]"
+                            : "text-[#A1B6C6]"}`
                         }
                       >
                         {formDaysTillRemind
@@ -673,26 +691,29 @@ export default function NotificationsView({ initialTab = "notifications", initia
                       />
                     </button>
                     {showReminderDaysMenu && (
-                      <div className="absolute left-0 right-0 top-[46px] z-40 rounded-lg border border-[#D3E1EC] bg-white p-1.5 shadow-[0_8px_24px_rgba(16,35,58,0.14)]">
+                      <div role="listbox" aria-label="Days till remind options" className="absolute left-0 right-0 top-[46px] z-40 rounded-lg border border-[#D3E1EC] bg-white p-1.5 shadow-[0_8px_24px_rgba(16,35,58,0.14)]">
                         {reminderDaysOptions.map((option) => {
                           const selected = formDaysTillRemind === option;
                           return (
                             <button
                               key={option}
                               type="button"
+                              role="option"
+                              aria-selected={selected}
                               onClick={() => {
                                 setFormDaysTillRemind(option);
                                 setShowReminderDaysMenu(false);
                               }}
-                              className={`flex h-9 w-full items-center gap-2 rounded-md px-2 text-left transition-colors ${selected ? "bg-[#F0F7FA]" : "hover:bg-[#F7FBFC]"}`}
+                              className={`flex h-9 w-full items-center gap-2 rounded-md px-2 text-left transition-colors ${selected ? "bg-[#E5EDF9]" : "hover:bg-[#F7FBFC]"}`}
                             >
                               <span
-                                className={`flex h-[18px] w-[18px] items-center justify-center rounded border ${selected ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
+                                aria-hidden="true"
+                                className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${selected ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
                               >
                                 {selected && (
                                   <Check
-                                    size={13}
-                                    strokeWidth={3}
+                                    size={12}
+                                    strokeWidth={2.5}
                                     className="text-white"
                                   />
                                 )}
@@ -835,6 +856,7 @@ function NotificationsTable({
         {sortedRows.slice(0, page * TABLE_BATCH_SIZE).map((row, rowIndex) => (
           <div
             key={row.id}
+            data-record-inactive={isInactiveRecord(row) || undefined}
             className={`flex h-9 flex-row items-center rounded-lg ${
               rowIndex % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"
             } group hover:bg-[#E7F4F9] transition-colors`}
@@ -872,15 +894,7 @@ function NotificationsTable({
               >
                 <Pencil size={14} />
               </button>
-              <button
-                type="button"
-                onClick={() => onDelete(row)}
-                title="DELETE"
-                aria-label={`DELETE ${row.name}`}
-                className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] transition-colors hover:border-[#D75B67] hover:text-[#D75B67]"
-              >
-                <Trash2 size={14} />
-              </button>
+              <RowDeleteButton linked={isRecordLinked(row, 'finansu-harmonija:v7:notifications')} inactive={isInactiveRecord(row)} label={`Delete ${row.name}`} onDelete={() => onDelete(row)} />
             </div>
           </div>
         ))}
@@ -948,6 +962,7 @@ function RemindersTable({
         {sortedRows.slice(0, page * TABLE_BATCH_SIZE).map((row, rowIndex) => (
           <div
             key={row.id}
+            data-record-inactive={isInactiveRecord(row) || undefined}
             className={`flex h-9 flex-row items-center rounded-lg ${
               rowIndex % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"
             } group hover:bg-[#E7F4F9] transition-colors`}
@@ -985,15 +1000,7 @@ function RemindersTable({
               >
                 <Pencil size={14} />
               </button>
-              <button
-                type="button"
-                onClick={() => onDelete(row)}
-                title="DELETE"
-                aria-label={`DELETE ${row.name}`}
-                className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] transition-colors hover:border-[#D75B67] hover:text-[#D75B67]"
-              >
-                <Trash2 size={14} />
-              </button>
+              <RowDeleteButton linked={isRecordLinked(row, 'finansu-harmonija:v7:reminders')} inactive={isInactiveRecord(row)} label={`Delete ${row.name}`} onDelete={() => onDelete(row)} />
             </div>
           </div>
         ))}

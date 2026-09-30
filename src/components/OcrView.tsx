@@ -17,6 +17,8 @@ import { BulkDeleteButton, RowDeleteButton } from './DeleteButtons';
 import ImportButton from './ImportButton';
 import type { SecurityAccessTarget } from './ResourceSecurityAccessView';
 import { matchesTextSearch } from '../utils/textSearch';
+import { isInactiveRecord, isRecordLinked, removeOrDeactivateRecords } from '../lib/recordLifecycle';
+import { getProcessRuns } from './automationRunsStore';
 
 interface OcrProcess {
   id: string;
@@ -48,6 +50,14 @@ const INITIAL_COLUMNS: ColConfig[] = [
 
 const ROWS_PER_PAGE = TABLE_BATCH_SIZE;
 const PROCESS_STORAGE_KEY = 'finansu-harmonija-v4:automation-processes';
+
+function isProcessLinked(process: OcrProcess) {
+  return getProcessRuns(process.id).length > 0 || isRecordLinked(process, PROCESS_STORAGE_KEY);
+}
+
+function removeProcesses(processes: OcrProcess[], ids: Set<string>) {
+  return removeOrDeactivateRecords(processes, ids, PROCESS_STORAGE_KEY, undefined, isProcessLinked);
+}
 
 function Checkbox({ checked, onChange, label = 'Select record' }: { checked: boolean; onChange: () => void; label?: string }) {
   return (
@@ -183,7 +193,7 @@ export default function OcrView({ onNavigateToAdministration }: { onNavigateToAd
             </div>
 
             <div className="flex flex-row items-center p-[6px] gap-4 bg-white rounded flex-shrink-0">
-              <BulkDeleteButton selectedCount={selectedRows.size} onDelete={() => { setProcesses(current => current.filter(row => !selectedRows.has(row.id))); setSelectedRows(new Set()); }} />
+              <BulkDeleteButton linked={processes.some(row => selectedRows.has(row.id) && isProcessLinked(row))} selectedCount={selectedRows.size} onDelete={() => { setProcesses(current => removeProcesses(current, selectedRows)); setSelectedRows(new Set()); }} />
               <ColumnSettingsButton onClick={() => setShowColumnSettings(true)} />
               <ImportButton scope="Automation processes" label="IMPORT FIRST" />
               <button onClick={() => setProcesses(current => current.map(process => ({ ...process })))} className="w-4 h-4 flex items-center justify-center text-[#7288A3] hover:text-[#007EA7] transition-colors" title="REFRESH ALL">
@@ -225,7 +235,7 @@ export default function OcrView({ onNavigateToAdministration }: { onNavigateToAd
               {/* Rows */}
               <div className="flex flex-col">
                 {rows.map((row, i) => (
-                  <div key={row.id} className={`group flex flex-row items-center w-full h-9 rounded-lg ${i % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} hover:bg-[#E7F4F9] transition-colors`}>
+                  <div key={row.id} data-record-inactive={isInactiveRecord(row) || undefined} className={`group flex flex-row items-center w-full h-9 rounded-lg ${i % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} hover:bg-[#E7F4F9] transition-colors`}>
                     <div className="system-table-select-cell flex flex-row items-center px-3 py-[9px] gap-[6px] flex-shrink-0" style={{ width: visibleColumns[0]?.width ?? 200 }}>
                       <Checkbox checked={selectedRows.has(row.id)} onChange={() => toggleRow(row.id)} label={`Select ${row.name} ${row.id}`} />
                       {visibleColumns[0]?.key === 'name' ? (
@@ -276,7 +286,7 @@ export default function OcrView({ onNavigateToAdministration }: { onNavigateToAd
                       >
                         <SecurityAccessIcon />
                       </button>
-                      <RowDeleteButton label={`Delete ${row.name}`} onDelete={() => { setProcesses(current => current.filter(item => item.id !== row.id)); setSelectedRows(current => { const next = new Set(current); next.delete(row.id); return next; }); }} />
+                      <RowDeleteButton linked={isProcessLinked(row)} inactive={isInactiveRecord(row)} label={`Delete ${row.name}`} onDelete={() => { setProcesses(current => removeProcesses(current, new Set([row.id]))); setSelectedRows(current => { const next = new Set(current); next.delete(row.id); return next; }); }} />
                     </div>
                   </div>
                 ))}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, FileSpreadsheet, Trash2, X } from "lucide-react";
+import { Download, FileSpreadsheet, X } from "lucide-react";
 import type { Company } from "../lib/supabase";
+import { isInactiveRecord, isRecordLinked, removeOrDeactivateRecords } from '../lib/recordLifecycle';
 import { usePersistentState } from "../hooks/usePersistentState";
 import OcrSearchField from "./OcrSearchField";
 import SystemAddFilters from "./SystemAddFilters";
@@ -13,6 +14,7 @@ import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import ColumnSortButton, { useMultiColumnSort } from "./ColumnSortButton";
 import { ResizeHandle, useColumnResize } from "./useColumnResize";
 import RelatedObjectPreview from "./RelatedObjectPreview";
+import { RowDeleteButton } from './DeleteButtons';
 
 import { seedClients, type ClientRow } from '../lib/companyRelatedObjectData';
 type ClientColumnKey =
@@ -117,8 +119,9 @@ export default function CompanyClientsView({ company, initialRecordId, onRelated
 }
 
 function CompanyClientsTable({ company }: { company: Company }) {
+  const clientStorageKey = `finansu-harmonija:v12:company-clients:${company.id}`;
   const [clients, setClients] = usePersistentState<ClientRow[]>(
-    `finansu-harmonija:v12:company-clients:${company.id}`,
+    clientStorageKey,
     () => seedClients(company),
   );
   const [columns, setColumns] = usePersistentState<ColConfig[]>(
@@ -214,7 +217,7 @@ function CompanyClientsTable({ company }: { company: Company }) {
     };
     setClients((current) =>
       editingId
-        ? current.map((client) => (client.id === editingId ? normalized : client))
+        ? current.map((client) => (client.id === editingId ? { ...client, ...normalized } : client))
         : [...current, normalized],
     );
     setEditorOpen(false);
@@ -343,13 +346,14 @@ function CompanyClientsTable({ company }: { company: Company }) {
                 />
               </div>
             ))}
-            <div className="w-[100px] flex-shrink-0 px-3 text-right">Actions</div>
+            <div className="system-table-row-actions w-[100px] flex-shrink-0 px-3 text-right">Actions</div>
           </div>
 
           <div className={`flex flex-col gap-0.5 transition-opacity ${refreshing ? "opacity-35" : "opacity-100"}`}>
             {pageRows.map((client, index) => (
               <div
                 key={client.id}
+                data-record-inactive={isInactiveRecord(client)}
                 className={`flex min-h-10 items-center rounded-lg font-montserrat text-[12px] text-[#10233A] transition-colors ${index % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} hover:bg-[#E7F4F9]`}
               >
                 {visibleColumns.map((column) => (
@@ -369,14 +373,12 @@ function CompanyClientsTable({ company }: { company: Company }) {
                   >
                     EDIT
                   </button>
-                  <button
-                    type="button"
-                    aria-label={`Delete ${client.name}`}
-                    onClick={() => setDeleteClient(client)}
-                    className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] hover:border-[#E45858] hover:text-[#E45858]"
-                  >
-                    <Trash2 size={15} />
-                  </button>
+                  <RowDeleteButton
+                    label={`Delete ${client.name}`}
+                    linked={isRecordLinked(client, clientStorageKey)}
+                    inactive={isInactiveRecord(client)}
+                    onDelete={() => setDeleteClient(client)}
+                  />
                 </div>
               </div>
             ))}
@@ -474,21 +476,23 @@ function CompanyClientsTable({ company }: { company: Company }) {
       {deleteClient && (
         <div className="fixed inset-0 z-[95] flex items-center justify-center bg-[#10233A]/20 p-6" onMouseDown={() => setDeleteClient(null)}>
           <div className="w-[420px] rounded-2xl bg-white p-6 shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
-            <h2 className="font-montserrat text-[22px] font-semibold text-[#10233A]">Delete client</h2>
+            <h2 className="font-montserrat text-[22px] font-semibold text-[#10233A]">{isRecordLinked(deleteClient, clientStorageKey) || isInactiveRecord(deleteClient) ? 'Deactivate' : 'Delete'} client</h2>
             <p className="mt-4 font-montserrat text-[14px] leading-5 text-[#10233A]">
-              Delete {deleteClient.name} from {company.name} clients?
+              {isRecordLinked(deleteClient, clientStorageKey) || isInactiveRecord(deleteClient)
+                ? `Deactivate ${deleteClient.name}? Linked records will be preserved and the client will remain visible as inactive.`
+                : `Delete ${deleteClient.name} from ${company.name} clients?`}
             </p>
             <div className="mt-6 flex justify-end gap-2">
               <CancelButton onClick={() => setDeleteClient(null)} />
               <button
                 type="button"
                 onClick={() => {
-                  setClients((current) => current.filter((client) => client.id !== deleteClient.id));
+                  setClients((current) => removeOrDeactivateRecords(current, new Set([deleteClient.id]), clientStorageKey));
                   setDeleteClient(null);
                 }}
                 className="h-[42px] rounded-lg bg-[#E45858] px-4 font-montserrat text-[16px] font-semibold text-white hover:bg-[#CC4C4C]"
               >
-                Delete
+                {isRecordLinked(deleteClient, clientStorageKey) || isInactiveRecord(deleteClient) ? 'Deactivate' : 'Delete'}
               </button>
             </div>
           </div>

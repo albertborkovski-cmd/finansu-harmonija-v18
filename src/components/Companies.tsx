@@ -10,7 +10,6 @@ import {
   Plus,
   Pencil,
   ShieldAlert,
-  Trash2,
   X,
   RefreshCw,
   Download,
@@ -54,6 +53,9 @@ import { loadGeneralLedgerTemplateNames } from "./GeneralLedgerView";
 import { loadVatClassificationTemplateNames } from "./VatClassificationsView";
 import SearchableSelect from "./SearchableSelect";
 import ManageCompanyView from "./ManageCompanyView";
+import { useDropdownDismiss } from './useDropdownDismiss';
+import { RowDeleteButton } from './DeleteButtons';
+import { deactivateRecord, isInactiveRecord, isRecordLinked, removeOrDeactivateRecords } from '../lib/recordLifecycle';
 
 const ROWS_PER_PAGE = TABLE_BATCH_SIZE;
 
@@ -223,13 +225,7 @@ function AccountantMultiSelect({ options, value, onChange, label = 'Accountants'
   const rootRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
-  useEffect(() => {
-    const close = (event: PointerEvent) => {
-      if (event.target instanceof Node && !rootRef.current?.contains(event.target)) setOpen(false);
-    };
-    document.addEventListener('pointerdown', close);
-    return () => document.removeEventListener('pointerdown', close);
-  }, []);
+  useDropdownDismiss(open, rootRef, () => { setOpen(false); setSearch(''); });
   const selected = options.filter((option) => value.includes(option.id));
   const filtered = options.filter((option) => option.label.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
   return (
@@ -240,17 +236,19 @@ function AccountantMultiSelect({ options, value, onChange, label = 'Accountants'
         <button type="button" aria-label={`Toggle ${label.toLowerCase()}`} aria-expanded={open} onClick={() => { setSearch(''); setOpen((current) => !current); }} className="flex h-6 w-6 flex-shrink-0 items-center justify-center text-[#7288A3]"><ChevronDown size={16} className={open ? 'rotate-180' : ''} /></button>
       </div>
       {open && (
-        <div id={`${inputId}-options`} className="absolute left-0 right-0 top-[68px] z-[110] max-h-[240px] overflow-y-auto rounded-lg border border-[#D3E1EC] bg-white p-1 shadow-[0_8px_24px_rgba(16,35,58,0.14)]">
+        <div id={`${inputId}-options`} role="listbox" aria-label={label} aria-multiselectable={!single} className="absolute left-0 right-0 top-[68px] z-[110] max-h-[240px] overflow-y-auto rounded-lg border border-[#D3E1EC] bg-white p-1 shadow-[0_8px_24px_rgba(16,35,58,0.14)]">
           {filtered.map((option) => (
-            <label key={option.id} className="flex min-h-[42px] cursor-pointer items-center gap-3 rounded-md px-3 py-2 hover:bg-[#F0F7FA]">
-              <input type="checkbox" checked={value.includes(option.id)} onChange={() => {
+            <button key={option.id} type="button" role="option" aria-selected={value.includes(option.id)} data-static-selection onClick={() => {
                 if (single) { onChange([option.id]); setSearch(''); setOpen(false); }
                 else onChange(value.includes(option.id) ? value.filter((id) => id !== option.id) : [...value, option.id]);
-              }} className="h-[18px] w-[18px] flex-shrink-0 accent-[#007EA7]" />
+              }} className={`flex min-h-[42px] w-full cursor-pointer items-center gap-3 rounded-md px-3 py-2 text-left ${value.includes(option.id) ? 'bg-[#E5EDF9]' : 'hover:bg-[#F0F7FA]'}`}>
+              <span aria-hidden="true" className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${value.includes(option.id) ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>
+                {value.includes(option.id) && <Check size={12} strokeWidth={2.5} className="text-white" />}
+              </span>
               <span className="min-w-0 break-words font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A]">
                 {option.label}
               </span>
-            </label>
+            </button>
           ))}
           {!filtered.length && <p className="px-3 py-3 font-montserrat text-[12px] text-[#7288A3]">No users found</p>}
         </div>
@@ -281,6 +279,7 @@ function OrganizationSelect({
   strictOptions?: boolean;
 }) {
   const triggerRef = useRef<HTMLInputElement>(null);
+  const rootRef = useRef<HTMLLabelElement>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [fixedPosition, setFixedPosition] = useState<{
@@ -292,6 +291,7 @@ function OrganizationSelect({
   const [customOptions, setCustomOptions] = useState<string[]>([]);
   const [addingOption, setAddingOption] = useState(false);
   const [newOption, setNewOption] = useState("");
+  useDropdownDismiss(open, rootRef, () => { setOpen(false); setQuery(''); setAddingOption(false); });
   const optionName = label.replace(" *", "");
   const optionNameLower = optionName.toLowerCase();
   const visibleOptions = Array.from(
@@ -356,7 +356,7 @@ function OrganizationSelect({
     setOpen(false);
   };
   return (
-    <label className="flex flex-col gap-2 font-montserrat text-[14px] font-semibold text-[#10233A]">
+    <label ref={rootRef} className="flex flex-col gap-2 font-montserrat text-[14px] font-semibold text-[#10233A]">
       <span>
         {optionName}
         {label.trim().endsWith("*") && (
@@ -399,19 +399,21 @@ function OrganizationSelect({
                   key={option}
                   type="button"
                   role="option"
+                  data-static-selection
                   aria-selected={selected}
                   onClick={() => {
                     onChange(option);
                     setOpen(false);
                     setQuery("");
                   }}
-                  className={`flex min-h-9 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left ${selected ? "bg-[#F0F7FA]" : "hover:bg-[#F7FBFC]"}`}
+                  className={`flex min-h-9 w-full items-center gap-3 rounded-md px-2 py-1.5 text-left ${selected ? "bg-[#E5EDF9]" : "hover:bg-[#F7FBFC]"}`}
                 >
                   <span
-                    className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded border ${selected ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
+                    aria-hidden="true"
+                    className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[6px] border ${selected ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
                   >
                     {selected && (
-                      <Check size={13} strokeWidth={3} className="text-white" />
+                      <Check size={12} strokeWidth={2.5} className="text-white" />
                     )}
                   </span>
                   <span className="font-montserrat text-[13px] font-medium text-[#10233A]">
@@ -779,6 +781,7 @@ function renderDataCell(key: string, row: Company) {
 }
 
 interface CompaniesProps {
+  counterpartyCompanyId?: string;
   onOpenOrganizationSetup?: (company: Company) => void;
   onOrganizationCreated?: (company: Company) => void;
   onOpenRequiredActions?: (company: Company) => void;
@@ -792,6 +795,7 @@ interface CompaniesProps {
 }
 
 export default function Companies({
+  counterpartyCompanyId,
   onOpenOrganizationSetup,
   onOrganizationCreated,
   onOpenRequiredActions,
@@ -803,6 +807,9 @@ export default function Companies({
   dataSource = "companies",
   breadcrumbs,
 }: CompaniesProps) {
+  const counterpartyStorageKey = counterpartyCompanyId
+    ? `finansu-harmonija:v18:company-counterparties:${counterpartyCompanyId}`
+    : 'finansu-harmonija:v7:settings:counterparties';
   const attentionActions = useAttentionNotifications(true);
   const managedTaxCountries = loadOrganizationReferenceValues("Tax country");
   const managedLegalForms = loadOrganizationReferenceValues("Legal form");
@@ -1085,7 +1092,7 @@ export default function Companies({
     if (dataSource === "counterparties") {
       try {
         const stored = window.localStorage.getItem(
-          "finansu-harmonija:v7:settings:counterparties",
+          counterpartyStorageKey,
         );
         setCompanies(stored ? (JSON.parse(stored) as Company[]) : []);
       } catch {
@@ -1109,7 +1116,7 @@ export default function Companies({
       );
     }
     setLoading(false);
-  }, [dataSource]);
+  }, [dataSource, counterpartyStorageKey]);
 
   useEffect(() => {
     fetchCompanies();
@@ -1181,11 +1188,10 @@ export default function Companies({
   const deleteCounterparty = () => {
     if (dataSource !== "counterparties" || !counterpartyToDelete) return;
 
-    const next = companies.filter(
-      (company) => company.id !== counterpartyToDelete.id,
-    );
+    const next = removeOrDeactivateRecords(companies, new Set([counterpartyToDelete.id]), counterpartyStorageKey,
+      (company) => ({ ...deactivateRecord(company), company_status: 'Inactive' }));
     window.localStorage.setItem(
-      "finansu-harmonija:v7:settings:counterparties",
+      counterpartyStorageKey,
       JSON.stringify(next),
     );
     window.dispatchEvent(new CustomEvent("counterparties-updated"));
@@ -1291,7 +1297,7 @@ export default function Companies({
           )
         : [...companies, counterparty];
       window.localStorage.setItem(
-        "finansu-harmonija:v7:settings:counterparties",
+        counterpartyStorageKey,
         JSON.stringify(next),
       );
       window.dispatchEvent(new CustomEvent("counterparties-updated"));
@@ -1597,7 +1603,7 @@ export default function Companies({
       ),
     ];
     window.localStorage.setItem(
-      "finansu-harmonija:v7:settings:counterparties",
+      counterpartyStorageKey,
       JSON.stringify(next),
     );
     window.dispatchEvent(new CustomEvent("counterparties-updated"));
@@ -2452,6 +2458,7 @@ export default function Companies({
                     </div>
                   );
                 })}
+                <div aria-hidden="true" className="system-table-row-actions h-5 flex-shrink-0" style={{ width: actionColumnWidth }} />
               </div>
 
               {/* Rows */}
@@ -2508,6 +2515,7 @@ export default function Companies({
                   rows.map((row, i) => (
                     <div
                       key={row.id}
+                      data-record-inactive={isInactiveRecord(row)}
                       className={`group flex h-9 w-full flex-row items-center rounded-lg transition-colors hover:bg-[#E7F4F9] ${i % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"}`}
                     >
                       <div className="flex h-9 min-w-0 flex-shrink-0 flex-row items-center gap-3 px-2 py-[9px]">
@@ -2594,15 +2602,12 @@ export default function Companies({
                           </button>
                         )}
                         {entityLabel === "counterparty" && (
-                          <button
-                            type="button"
-                            onClick={() => setCounterpartyToDelete(row)}
-                            title="DELETE"
-                            aria-label={`DELETE ${row.name}`}
-                            className="flex h-7 w-7 items-center justify-center rounded-md border-2 border-[#D3E1EC] bg-white text-[#7288A3] transition-colors hover:border-[#D64545] hover:text-[#D64545]"
-                          >
-                            <Trash2 size={14} />
-                          </button>
+                          <RowDeleteButton
+                            onDelete={() => setCounterpartyToDelete(row)}
+                            label={`DELETE ${row.name}`}
+                            linked={isRecordLinked(row, counterpartyStorageKey)}
+                            inactive={isInactiveRecord(row)}
+                          />
                         )}
                       </div>
                     </div>
@@ -2979,6 +2984,7 @@ export default function Companies({
                       counterpartyBankAccounts.map((account, index) => (
                         <div
                           key={account.id}
+                          data-record-inactive={isInactiveRecord(account)}
                           className="rounded-xl border border-[#DDE7F0] bg-[#FBFDFE] p-4"
                         >
                           <div className="mb-4 flex items-center justify-between">
@@ -2991,6 +2997,7 @@ export default function Companies({
                             <div className="flex items-center gap-2">
                               <button
                                 type="button"
+                                disabled={isInactiveRecord(account)}
                                 onClick={() =>
                                   setCounterpartyBankAccounts((current) =>
                                     current.map((item) => ({
@@ -3003,28 +3010,27 @@ export default function Companies({
                               >
                                 {account.primary ? "Primary" : "Set primary"}
                               </button>
-                              <button
-                                type="button"
-                                aria-label={`Delete bank account ${index + 1}`}
-                                onClick={() =>
+                              <RowDeleteButton
+                                label={`Delete bank account ${index + 1}`}
+                                linked={isRecordLinked(account, counterpartyStorageKey)}
+                                inactive={isInactiveRecord(account)}
+                                onDelete={() =>
                                   setCounterpartyBankAccounts((current) => {
-                                    const next = current.filter(
-                                      (item) => item.id !== account.id,
-                                    );
+                                    const next = removeOrDeactivateRecords(current, new Set([account.id]), counterpartyStorageKey,
+                                      (item) => ({ ...deactivateRecord(item), primary: false }));
+                                    const replacementIndex = next.findIndex((item) => !isInactiveRecord(item));
                                     if (
                                       account.primary &&
-                                      next.length &&
+                                      replacementIndex >= 0 &&
                                       !next.some((item) => item.primary)
                                     ) {
-                                      next[0] = { ...next[0], primary: true };
+                                      next[replacementIndex] = { ...next[replacementIndex], primary: true };
                                     }
                                     return next;
                                   })
                                 }
                                 className="flex h-8 w-8 items-center justify-center rounded-md text-[#7288A3] hover:bg-[#FCEEEE] hover:text-[#D64545]"
-                              >
-                                <Trash2 size={16} />
-                              </button>
+                              />
                             </div>
                           </div>
                           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -3292,7 +3298,9 @@ export default function Companies({
                         title: "Risk indicators",
                         lines: [
                           "No overdue payments",
-                          "Counterparty is active",
+                          isInactiveRecord(companies.find((company) => company.id === editingCounterpartyId))
+                            ? "Counterparty is inactive"
+                            : "Counterparty is active",
                           "No frequent data changes",
                         ],
                       },
@@ -3751,7 +3759,7 @@ export default function Companies({
                 id="delete-counterparty-title"
                 className="font-montserrat text-[22px] font-semibold leading-8 text-[#10233A]"
               >
-                Delete counterparty
+                {isRecordLinked(counterpartyToDelete, counterpartyStorageKey) || isInactiveRecord(counterpartyToDelete) ? 'Deactivate' : 'Delete'} counterparty
               </h2>
               <button
                 type="button"
@@ -3763,7 +3771,9 @@ export default function Companies({
               </button>
             </div>
             <p className="mt-6 font-montserrat text-[14px] font-medium leading-5 text-[#10233A]">
-              Are you sure that you want to delete {counterpartyToDelete.name}?
+              {isRecordLinked(counterpartyToDelete, counterpartyStorageKey) || isInactiveRecord(counterpartyToDelete)
+                ? `Deactivate ${counterpartyToDelete.name}? Linked records will be preserved and the counterparty will remain visible as inactive.`
+                : `Are you sure that you want to delete ${counterpartyToDelete.name}?`}
             </p>
             <div className="mt-8 flex gap-2">
               <button
@@ -3778,7 +3788,7 @@ export default function Companies({
                 onClick={deleteCounterparty}
                 className="h-[42px] flex-1 rounded-lg bg-[#D64545] px-4 font-montserrat text-[16px] font-semibold text-white transition-colors hover:bg-[#bd3535]"
               >
-                Delete
+                {isRecordLinked(counterpartyToDelete, counterpartyStorageKey) || isInactiveRecord(counterpartyToDelete) ? 'Deactivate' : 'Delete'}
               </button>
             </div>
           </aside>

@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { rememberReconciliationLedgerUsage } from '../lib/generalLedgerUsage';
 import { ChevronDown, FileQuestion, Eye, Link2, Pencil, RotateCcw, SlidersHorizontal } from 'lucide-react';
 import ReconciliationDocumentPreview from './ReconciliationDocumentPreview';
 import { reconciliationDocumentAmounts, reconciliationEntryCount, reconciliationPartners, reconciliationSuggestionAmounts } from '../lib/reconciliationPresentation';
 import { prepareReconciliationCorrection, replaceReconciliation } from '../lib/reconciliationCorrection';
+import { prepareMissingDocumentReconciliation, receiveAndReconcileDocument } from '../lib/reconciliationMissingDocument';
 import { PageActionButton, PageHeader } from './PageHeader';
 import CompanyBreadcrumb from './CompanyBreadcrumb';
 import type { ColConfig } from './ColumnSettingsPanel';
@@ -13,7 +15,7 @@ import ReconciliationGlAccountDialog from './ReconciliationGlAccountDialog';
 import GeneralLedgerAccountSelect from './GeneralLedgerAccountSelect';
 import { loadCompanyGeneralLedgerAccountHierarchy } from './GeneralLedgerView';
 import { suggestPreviousGlAccount } from '../lib/reconciliationGlSuggestions';
-import { applyReconciliation, assignReconciliationGlAccount, getReconciliationRoute, hasReconciliationClient, isClientReconciliationItem, parseReconciliationState, DEFAULT_RECONCILIATION_RULES, reverseReconciliation, suggestReconciliation, type ReconciliationBatch, type ReconciliationItem, type ReconciliationProposal, type ReconciliationState, type ReconciliationSuggestions } from '../lib/reconciliation';
+import { applyReconciliation, assignReconciliationGlAccount, getReconciliationEntrySide, getReconciliationRoute, hasReconciliationClient, isClientReconciliationItem, parseReconciliationState, DEFAULT_RECONCILIATION_RULES, reverseReconciliation, suggestReconciliation, type ReconciliationBatch, type ReconciliationItem, type ReconciliationProposal, type ReconciliationState, type ReconciliationSuggestions } from '../lib/reconciliation';
 import { getCurrentUserName } from '../lib/currentUser';
 import { augmentReconciliationExamples, createReconciliationExamples, getReconciliationItemStatus } from '../lib/reconciliationExamples';
 import { exchangeRate, exchangeRates } from '../lib/reconciliationExchangeRate';
@@ -23,10 +25,10 @@ import SearchableSelect from './SearchableSelect';
 import { paymentPurpose, paymentPurposes } from '../lib/reconciliationPaymentPurpose';
 
 const number = (minor: number) => new Intl.NumberFormat('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(minor / 100);
-const column = (key: string, label: string, width: number, visible = true): ColConfig => ({ key, label, width, visible });
+const column = (key: string, label: string, width: number, visible = key !== 'glAccount'): ColConfig => ({ key, label, width, visible });
 const OPEN_COLUMNS = [
   column('documentNumber', 'Document No.', 150), column('counterparty', 'Counterparty', 200),
-  column('kind', 'Type', 160), column('documentDate', 'Date', 120),
+  column('kind', 'Type', 160), column('glEntry', 'GL entry', 150), column('glAccount', 'GL account', 170), column('documentDate', 'Date', 120),
   column('dueDate', 'Payment date', 120), column('overdueDays', 'Overdue days', 110),
   column('currency', 'Currency', 88), column('exchangeRate', 'Exchange rate', 210), column('debit', 'Debit in currency', 140),
   column('credit', 'Credit in currency', 140), column('remaining', 'Balance in currency', 150),
@@ -35,18 +37,18 @@ const OPEN_COLUMNS = [
   column('reference', 'Reference', 200, false),
   column('reason', 'Matching result', 320, false),
   column('clientAssignment', 'Counterparty assignment', 150, false),
-  column('category', 'Operation category', 165, false), column('glAccount', 'GL account', 170, false),
+  column('category', 'Operation category', 165, false),
 ];
 const ACCOUNTING_COLUMNS = [
   column('documentNumber', 'Document No.', 155),
-  column('counterparty', 'Counterparty', 175), column('category', 'Operation category', 160),
+  column('counterparty', 'Counterparty', 175), column('category', 'Operation category', 160), column('glEntry', 'GL entry', 120),
   column('documentDate', 'Date', 115), column('currency', 'Currency', 88), column('exchangeRate', 'Exchange rate', 210),
   column('paymentPurpose', 'Payment purpose', 260), column('glAccount', 'GL account', 210),
   column('status', 'Status', 150), column('reference', 'Reference', 260, false),
   column('clientAssignment', 'Counterparty assignment', 150, false), column('reason', 'Reason', 320, false),
 ];
-const PROPOSAL_COLUMNS = [column('exchangeRate', 'Exchange rate', 210), column('paymentPurpose', 'Payment purpose', 260), column('counterparty', 'Counterparty', 160), column('funding', 'Payment / credit', 150), column('paymentCurrency', 'Payment currency', 145), column('invoices', 'Invoice(s)', 160), column('invoiceCurrency', 'Invoice currency', 145), column('amount', 'Match amount', 135), column('confidence', 'Confidence', 145), column('rule', 'Rule', 175, false), column('reason', 'Reason', 310, false)];
-const HISTORY_COLUMNS = [column('exchangeRate', 'Exchange rate', 210), column('paymentPurpose', 'Payment purpose', 260), column('at', 'Confirmed at', 180), column('actor', 'User', 180), column('documents', 'Documents', 250), column('amounts', 'Reconciled amount', 180), column('status', 'Status', 105), column('reversedAt', 'Reversed at', 180, false)];
+const PROPOSAL_COLUMNS = [column('paymentPurpose', 'Payment purpose', 260), column('counterparty', 'Counterparty', 160), column('funding', 'Payment / credit', 150), column('paymentCurrency', 'Payment currency', 145), column('invoices', 'Invoice(s)', 160), column('invoiceCurrency', 'Invoice currency', 145), column('exchangeRate', 'Exchange rate', 210), column('glEntry', 'GL entry', 220), column('glAccount', 'GL account', 220), column('amount', 'Match amount', 135), column('confidence', 'Confidence', 145), column('rule', 'Rule', 175, false), column('reason', 'Reason', 310, false)];
+const HISTORY_COLUMNS = [column('paymentPurpose', 'Payment purpose', 260), column('at', 'Confirmed at', 180), column('actor', 'User', 180), column('documents', 'Documents', 250), column('glEntry', 'GL entry', 220), column('glAccount', 'GL account', 220), column('amounts', 'Reconciled amount', 180), column('exchangeRate', 'Exchange rate', 210), column('status', 'Status', 105), column('reversedAt', 'Reversed at', 180, false)];
 const EMPTY_SUGGESTIONS: ReconciliationSuggestions = { proposals: [], unmatched: [] };
 const ROW_ICON_BUTTON = 'flex h-7 w-7 shrink-0 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] transition-colors hover:border-[#007EA7] hover:text-[#007EA7]';
 type Tab = 'All items' | 'Reconciled' | 'Suggestions' | 'Open items' | 'Accounting operations' | 'Advances & deposits' | 'Missing document' | 'Cash transactions' | 'History';
@@ -64,6 +66,20 @@ function StatusLabel({ status }: { status: string }) {
     <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: STATUS_COLORS[status] ?? '#8AA1B7' }} />
     <span className="truncate">{status}</span>
   </span>;
+}
+const distinctItems = (items: ReconciliationItem[]) => [...new Map(items.map(item => [item.id, item])).values()];
+const glEntryText = (items: ReconciliationItem[]) => distinctItems(items).map(item => `${item.documentNumber}: ${getReconciliationEntrySide(item)}`).join(' · ') || '—';
+const glAccountText = (items: ReconciliationItem[]) => distinctItems(items).map(item => `${item.documentNumber}: ${item.glAccountCode || '—'}`).join(' · ') || '—';
+function GlRecordSummary({ items, account = false }: { items: ReconciliationItem[]; account?: boolean }) {
+  const records = distinctItems(items);
+  if (!records.length) return <>—</>;
+  const text = account ? glAccountText(records) : glEntryText(records);
+  return <div className="min-w-0 text-[11px] leading-[14px]" title={text} aria-label={text}>
+    {records.slice(0, 2).map((item, index) => <div key={item.id} className="flex min-w-0 items-center gap-1">
+      <span className="truncate">{item.documentNumber}: {account ? item.glAccountCode || '—' : getReconciliationEntrySide(item)}</span>
+      {index === 1 && records.length > 2 && <span className="shrink-0 text-[#7288A3]">+{records.length - 2}</span>}
+    </div>)}
+  </div>;
 }
 function suggestionsFor(state: ReconciliationState, rules = DEFAULT_RECONCILIATION_RULES) {
   return suggestReconciliation(state.items.filter((item) => item.remainingMinor > 0), rules);
@@ -143,6 +159,7 @@ export default function CompanyReconciliationView({ companyId, companyName, gene
   const [generation, setGeneration] = useState(0);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [manualItem, setManualItem] = useState<ReconciliationItem | null>(null);
+  const [receivedDocument, setReceivedDocument] = useState<{ item: ReconciliationItem; draft: ReconciliationState; base: ReconciliationState } | null>(null);
   const [editingMatch, setEditingMatch] = useState<{ item: ReconciliationItem; items: ReconciliationItem[]; amounts: Record<string, number>; base: ReconciliationState; proposalId?: string } | null>(null);
   const [detailItem, setDetailItem] = useState<ReconciliationItem | null>(null);
   const [confirmation, setConfirmation] = useState<ReconciliationProposal[] | null>(null);
@@ -167,6 +184,7 @@ export default function CompanyReconciliationView({ companyId, companyName, gene
   const refreshSuggestions = (next: ReconciliationState) => { setSuggestions(suggestionsFor(next, rules)); setConfirmation(null); setGeneration((value) => value + 1); };
   const refresh = () => {
     setEditingMatch(null);
+    setReceivedDocument(null);
     try {
       const raw = localStorage.getItem(storageKey);
       const next = loadTestState(companyId, raw);
@@ -180,6 +198,7 @@ export default function CompanyReconciliationView({ companyId, companyName, gene
     const onStorage = (event: StorageEvent) => {
       if (event.key !== storageKey) return;
       setEditingMatch(null);
+      setReceivedDocument(null);
       baseline.current = event.newValue;
       setConfirmation(null); setManualItem(null); setAccountingItem(null); setUndoBatch(null); setBatchReview(null);
       try {
@@ -195,6 +214,8 @@ export default function CompanyReconciliationView({ companyId, companyName, gene
   const saveTestState = (next: ReconciliationState, resetting = false) => {
     if (storageBlocked.current && !resetting) throw new Error('Stored test data could not be loaded. Reset the demo before confirming new matches.');
     if (localStorage.getItem(storageKey) !== baseline.current) throw new Error('Test balances changed in another tab. Refresh and run Auto match again. Nothing was applied.');
+    rememberReconciliationLedgerUsage(state, companyId, generalLedgerName);
+    rememberReconciliationLedgerUsage(next, companyId, generalLedgerName);
     const raw = JSON.stringify(next); localStorage.setItem(storageKey, raw); baseline.current = raw; storageBlocked.current = false; setState(next);
   };
   const mutate = (action: () => void) => {
@@ -204,12 +225,29 @@ export default function CompanyReconciliationView({ companyId, companyName, gene
     catch (cause) { setError(cause instanceof Error ? cause.message : 'The operation could not be saved. Nothing was applied.'); }
     finally { mutationLock.current = false; setBusy(false); }
   };
-  const toggleMissingDocument = (item: ReconciliationItem) => mutate(() => {
+  const markMissingDocument = (item: ReconciliationItem) => mutate(() => {
     if (!canEditGlAccounts) return;
-    const next = { ...state, items: state.items.map(record => record.id === item.id ? { ...record, missingDocument: !record.missingDocument, missingDocumentMarkedAt: new Date().toISOString(), missingDocumentMarkedBy: getCurrentUserName() } : record) };
+    const next = { ...state, items: state.items.map(record => record.id === item.id ? { ...record, missingDocument: true, missingDocumentMarkedAt: new Date().toISOString(), missingDocumentMarkedBy: getCurrentUserName() } : record) };
     saveTestState(next);
     refreshSuggestions(next);
   });
+  const openReceivedDocument = (item: ReconciliationItem) => {
+    if (!canEditGlAccounts || busy) return;
+    setError('');
+    try {
+      const draft = prepareMissingDocumentReconciliation(state, item.id);
+      setReceivedDocument({ item: draft.items.find(record => record.id === item.id)!, draft, base: state });
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not open the document selection form.'); }
+  };
+  const reconcileReceivedDocument = (proposals: ReconciliationProposal[]) => {
+    if (!receivedDocument || !canEditGlAccounts) return;
+    mutate(() => {
+      if (state !== receivedDocument.base) throw new Error('Balances changed. Close and reopen the document selection form before saving.');
+      const next = receiveAndReconcileDocument(state, receivedDocument.item.id, proposals, { id: crypto.randomUUID(), at: new Date().toISOString(), actor: getCurrentUserName() || 'Test user' });
+      saveTestState(next); refreshSuggestions(next); setReceivedDocument(null);
+      setNotice('Document received and selected records reconciled.');
+    });
+  };
   const runMatching = (ids: string[]) => {
     const selected = new Set(ids);
     const scopedItems = state.items.filter((item) => selected.has(item.id) && item.remainingMinor > 0 && isClientReconciliationItem(item));
@@ -304,7 +342,7 @@ export default function CompanyReconciliationView({ companyId, companyName, gene
       values: {
         counterparty: clientAssigned ? item.counterpartyName : '—', documentNumber: item.documentNumber, kind,
         clientAssignment: clientAssigned ? 'Counterparty assigned' : 'No counterparty assigned',
-        exchangeRate: exchangeRate(item), category: route.category, glAccount: glAccountLabel, paymentPurpose: paymentPurpose(item),
+        exchangeRate: exchangeRate(item), category: route.category, glEntry: getReconciliationEntrySide(item), glAccount: glAccountLabel, paymentPurpose: paymentPurpose(item),
         overdueDays, debit: accountingOperation ? '—' : amounts.debitMinor, credit: accountingOperation ? '—' : amounts.creditMinor,
         side: item.side, dueDate: item.dueDate || '—', documentDate: item.documentDate,
         currency: item.currency, original: item.originalMinor, settled: amounts.settledMinor, amount: '—',
@@ -312,7 +350,7 @@ export default function CompanyReconciliationView({ companyId, companyName, gene
       },
       display: {
         counterparty: <span className="inline-flex max-w-full items-center gap-2" title={clientAssigned ? 'Counterparty assigned · ' + item.counterpartyName : '—'}><span aria-hidden="true" className={'h-2 w-2 shrink-0 rounded-full ' + (clientAssigned ? 'bg-[#16A085]' : 'bg-[#E3A008]')} /><span className="truncate">{clientAssigned ? item.counterpartyName : '—'}</span></span>,
-        glAccount: accountingOperation ? <GeneralLedgerAccountSelect value={item.glAccountCode ?? ''} companyId={companyId} generalLedgerName={generalLedgerName} compact borderless disabled={!canEditGlAccounts || busy} ariaLabel={`GL account for ${item.documentNumber}`} placeholder="Select GL account" onChange={code => saveGlAccount(code, '', item)} /> : '—',
+        glAccount: accountingOperation ? <GeneralLedgerAccountSelect value={item.glAccountCode ?? ''} companyId={companyId} generalLedgerName={generalLedgerName} compact borderless disabled={!canEditGlAccounts || busy} ariaLabel={`GL account for ${item.documentNumber}`} placeholder="Select GL account" onChange={code => saveGlAccount(code, '', item)} /> : glAccountLabel,
         debit: accountingOperation ? <span title="Not applicable: accounting operation, not a counterparty debt settlement. See Amount and GL account." aria-label="Debit not applicable to debt settlement">—</span> : number(amounts.debitMinor), credit: accountingOperation ? <span title="Not applicable: accounting operation, not a counterparty debt settlement. See Amount and GL account." aria-label="Credit not applicable to debt settlement">—</span> : number(amounts.creditMinor),
         original: number(item.originalMinor), settled: number(amounts.settledMinor),
         remaining: accountingOperation ? <span title="Not applicable: this operation has no counterparty debt balance. See Amount and GL account." aria-label="Debt balance not applicable">—</span> : number(amounts.balanceMinor),
@@ -322,10 +360,10 @@ export default function CompanyReconciliationView({ companyId, companyName, gene
         documentNumber: <button type="button" className="text-[#007EA7]" onClick={() => setPreviewItem(item)}>{item.documentNumber}</button>,
       },
       actions: item.missingDocument
-        ? <button type="button" disabled={!canEditGlAccounts || busy} className="h-7 rounded border border-[#D3E1EC] px-2 text-[12px] text-[#007EA7] disabled:opacity-40" onClick={() => toggleMissingDocument(item)}>Document received</button>
+        ? <button type="button" disabled={!canEditGlAccounts || busy} className="h-7 rounded border border-[#D3E1EC] px-2 text-[12px] text-[#007EA7] disabled:opacity-40" onClick={() => openReceivedDocument(item)}>Document received</button>
         : accountingOperation
         ? <button type="button" aria-label={`Edit ${item.documentNumber}`} className="flex h-7 items-center justify-center gap-1.5 rounded border border-[#D3E1EC] bg-white px-2 text-[12px] font-medium leading-[18px] text-[#7288A3] transition-colors hover:border-[#007EA7] hover:text-[#007EA7]" onClick={() => openItemDetails(item)}><Pencil size={14} />Edit</button>
-        : <>{item.remainingMinor > 0 && <button type="button" className={ROW_ICON_BUTTON} disabled={!canEditGlAccounts || busy} title="Mark as Missing document" aria-label={`Mark ${item.documentNumber} as Missing document`} onClick={() => toggleMissingDocument(item)}><FileQuestion size={14} /></button>}<button type="button" title="EDIT" aria-label={`Edit ${item.documentNumber}`} className={ROW_ICON_BUTTON} onClick={() => openItemDetails(item)}><Pencil size={14} /></button><button type="button" disabled={item.remainingMinor === 0} className="flex h-7 shrink-0 items-center justify-center gap-1.5 rounded border border-[#D3E1EC] bg-white px-2 text-[12px] font-medium leading-[18px] text-[#7288A3] transition-colors hover:border-[#007EA7] hover:text-[#007EA7] disabled:cursor-not-allowed disabled:border-[#D3E1EC] disabled:bg-[#F6F8FA] disabled:text-[#A1B6C6]" onClick={() => { setError(''); setManualItem(item); }}><Link2 size={14} />Reconcile</button></>,
+        : <>{item.remainingMinor > 0 && <button type="button" className={ROW_ICON_BUTTON} disabled={!canEditGlAccounts || busy} title="Mark as Missing document" aria-label={`Mark ${item.documentNumber} as Missing document`} onClick={() => markMissingDocument(item)}><FileQuestion size={14} /></button>}<button type="button" title="EDIT" aria-label={`Edit ${item.documentNumber}`} className={ROW_ICON_BUTTON} onClick={() => openItemDetails(item)}><Pencil size={14} /></button><button type="button" disabled={item.remainingMinor === 0} className="flex h-7 shrink-0 items-center justify-center gap-1.5 rounded border border-[#D3E1EC] bg-white px-2 text-[12px] font-medium leading-[18px] text-[#7288A3] transition-colors hover:border-[#007EA7] hover:text-[#007EA7] disabled:cursor-not-allowed disabled:border-[#D3E1EC] disabled:bg-[#F6F8FA] disabled:text-[#A1B6C6]" onClick={() => { setError(''); setManualItem(item); }}><Link2 size={14} />Reconcile</button></>,
     };
   });
   // Make the large choice-set examples immediately accessible, followed by
@@ -347,7 +385,9 @@ export default function CompanyReconciliationView({ companyId, companyName, gene
   const reconciledRows = exampleRows.filter((row) => itemMap.get(row.id)!.remainingMinor === 0 && isClientReconciliationItem(itemMap.get(row.id)!)).map(row => {
     const item = itemMap.get(row.id)!;
     const partners = reconciliationPartners(state, item.id);
-    return { ...row, actions: <><button type="button" className={ROW_ICON_BUTTON} title="View document" aria-label={'View document ' + item.documentNumber} onClick={() => setPreviewItem(item)}><Eye size={14} /></button><button type="button" className={ROW_ICON_BUTTON + ' disabled:cursor-not-allowed disabled:opacity-40'} disabled={!canEditGlAccounts} title={canEditGlAccounts ? 'Edit reconciliation' : 'Companies edit access required'} aria-label={'Edit reconciliation ' + item.documentNumber} onClick={() => editReconciled(item)}><Pencil size={14} /></button></>, values: { ...row.values, paymentPurpose: paymentPurposes([item, ...partners.map(partner => partner.item)]), matchedWith: partners.map(partner => partner.item.documentNumber).join(', ') }, display: { ...row.display,
+    const linkedItems = [item, ...partners.map(partner => partner.item)];
+    return { ...row, actions: <><button type="button" className={ROW_ICON_BUTTON} title="View document" aria-label={'View document ' + item.documentNumber} onClick={() => setPreviewItem(item)}><Eye size={14} /></button><button type="button" className={ROW_ICON_BUTTON + ' disabled:cursor-not-allowed disabled:opacity-40'} disabled={!canEditGlAccounts} title={canEditGlAccounts ? 'Edit reconciliation' : 'Companies edit access required'} aria-label={'Edit reconciliation ' + item.documentNumber} onClick={() => editReconciled(item)}><Pencil size={14} /></button></>, values: { ...row.values, glEntry: glEntryText(linkedItems), glAccount: glAccountText(linkedItems), paymentPurpose: paymentPurposes(linkedItems), matchedWith: partners.map(partner => partner.item.documentNumber).join(', ') }, display: { ...row.display,
+      glEntry: <GlRecordSummary items={linkedItems} />, glAccount: <GlRecordSummary items={linkedItems} account />,
       documentNumber: <div className="min-w-0"><button type="button" className="block max-w-full truncate text-left text-[12px] leading-[18px] text-[#007EA7]" onClick={() => setPreviewItem(item)}>{item.documentNumber}</button>{partners.length > 0 && <div className="flex min-w-0 items-center gap-1 text-[11px] leading-[14px] text-[#7288A3]"><span aria-hidden="true" className="shrink-0">↳</span><button type="button" className="min-w-0 truncate text-left hover:text-[#007EA7]" aria-label={`Reconciled with ${partners[0].item.documentNumber}`} title={`Reconciled with ${partners[0].item.documentNumber} · ${number(partners[0].amountMinor)} ${item.currency}`} onClick={() => setPreviewItem(partners[0].item)}>{partners[0].item.documentNumber}</button>{partners.length > 1 && <button type="button" className="shrink-0 text-[#007EA7]" aria-label={`View all ${partners.length} reconciled documents for ${item.documentNumber}`} title={partners.map(partner => `${partner.item.documentNumber} · ${number(partner.amountMinor)} ${item.currency}`).join('\n')} onClick={() => setPreviewItem(item)}>+{partners.length - 1}</button>}</div>}</div>,
     } };
   });
@@ -371,16 +411,22 @@ export default function CompanyReconciliationView({ companyId, companyName, gene
     const funding = itemMap.get(proposal.fundingId)!;
     const amount = proposal.allocations.reduce((sum, allocation) => sum + allocation.amountMinor, 0);
     const invoices = proposal.allocations.map(entry => itemMap.get(entry.invoiceId)).filter((item): item is ReconciliationItem => Boolean(item));
-    return { id: proposal.id, values: { exchangeRate: exchangeRates([funding, ...invoices]), paymentPurpose: paymentPurpose(funding), counterparty: funding.counterpartyName, funding: funding.documentNumber, invoices: proposal.allocations.map((entry) => itemMap.get(entry.invoiceId)?.documentNumber).join(', '), paymentCurrency: funding.currency, invoiceCurrency: [...new Set(invoices.map(item => item.currency))].join(', ') || '—', amount, confidence: proposal.confidence, rule: proposal.rule, reason: proposal.reason }, display: { funding: documentWithType(funding), invoices: <div className="flex min-w-0 items-center gap-1.5"><div className="min-w-0 flex-1">{invoices[0] ? documentWithType(invoices[0]) : '—'}</div>{invoices.length > 1 && <button type="button" className="shrink-0 text-[11px] font-medium text-[#007EA7]" aria-label={`View ${invoices.length - 1} more documents`} title={invoices.slice(1).map(item => item.documentNumber).join(', ')} onClick={() => setInvoiceLinks(invoices)}>+{invoices.length - 1}</button>}</div>, amount: number(amount), confidence: <span className={'inline-flex items-center gap-1.5 ' + (proposal.confidence === 'High' ? 'text-[#007EA7]' : 'text-[#9A6500]')}><span className={'h-1.5 w-1.5 shrink-0 rounded-full ' + (proposal.confidence === 'High' ? 'bg-[#0DB89A]' : 'bg-[#E3A008]')} />{proposal.confidence}</span> }, actions: <><button type="button" aria-label={'Review proposal for ' + funding.documentNumber} title="Review proposal" className={ROW_ICON_BUTTON} onClick={() => { setError(''); setConfirmation([proposal]); }}><Eye size={14} /></button><button type="button" aria-label={'Edit suggestion ' + funding.documentNumber} title={canEditGlAccounts ? 'Edit suggestion' : 'Companies edit access required'} className={ROW_ICON_BUTTON + ' disabled:cursor-not-allowed disabled:opacity-40'} disabled={!canEditGlAccounts} onClick={() => editSuggestion(proposal)}><Pencil size={14} /></button></> };
+    const linkedItems = [funding, ...invoices];
+    return { id: proposal.id, values: { glEntry: glEntryText(linkedItems), glAccount: glAccountText(linkedItems), exchangeRate: exchangeRates(linkedItems), paymentPurpose: paymentPurpose(funding), counterparty: funding.counterpartyName, funding: funding.documentNumber, invoices: proposal.allocations.map((entry) => itemMap.get(entry.invoiceId)?.documentNumber).join(', '), paymentCurrency: funding.currency, invoiceCurrency: [...new Set(invoices.map(item => item.currency))].join(', ') || '—', amount, confidence: proposal.confidence, rule: proposal.rule, reason: proposal.reason }, display: { glEntry: <GlRecordSummary items={linkedItems} />, glAccount: <GlRecordSummary items={linkedItems} account />, funding: documentWithType(funding), invoices: <div className="flex min-w-0 items-center gap-1.5"><div className="min-w-0 flex-1">{invoices[0] ? documentWithType(invoices[0]) : '—'}</div>{invoices.length > 1 && <button type="button" className="shrink-0 text-[11px] font-medium text-[#007EA7]" aria-label={`View ${invoices.length - 1} more documents`} title={invoices.slice(1).map(item => item.documentNumber).join(', ')} onClick={() => setInvoiceLinks(invoices)}>+{invoices.length - 1}</button>}</div>, amount: number(amount), confidence: <span className={'inline-flex items-center gap-1.5 ' + (proposal.confidence === 'High' ? 'text-[#007EA7]' : 'text-[#9A6500]')}><span className={'h-1.5 w-1.5 shrink-0 rounded-full ' + (proposal.confidence === 'High' ? 'bg-[#0DB89A]' : 'bg-[#E3A008]')} />{proposal.confidence}</span> }, actions: <><button type="button" aria-label={'Review proposal for ' + funding.documentNumber} title="Review proposal" className={ROW_ICON_BUTTON} onClick={() => { setError(''); setConfirmation([proposal]); }}><Eye size={14} /></button><button type="button" aria-label={'Edit suggestion ' + funding.documentNumber} title={canEditGlAccounts ? 'Edit suggestion' : 'Companies edit access required'} className={ROW_ICON_BUTTON + ' disabled:cursor-not-allowed disabled:opacity-40'} disabled={!canEditGlAccounts} onClick={() => editSuggestion(proposal)}><Pencil size={14} /></button></> };
   });
-  const historyRows: ReconciliationTableRow[] = [...state.batches].reverse().map((batch) => ({ id: batch.id, values: { exchangeRate: exchangeRates(batch.allocations.flatMap(allocation => [itemMap.get(allocation.fundingId), itemMap.get(allocation.invoiceId)].filter((item): item is ReconciliationItem => Boolean(item)))), paymentPurpose: paymentPurposes(batch.allocations.flatMap(allocation => { const item = itemMap.get(allocation.fundingId); return item ? [item] : []; })), at: batch.at.replace('T', ' ').slice(0, 19) + ' UTC', actor: batch.actor, documents: [...new Set(batch.allocations.flatMap((allocation) => [itemMap.get(allocation.fundingId)?.documentNumber, itemMap.get(allocation.invoiceId)?.documentNumber]))].join(', '), amounts: batchAmounts(batch, itemMap), status: batch.reversedAt ? 'Reversed' : 'Applied', reversedAt: batch.reversedAt?.replace('T', ' ').slice(0, 19) ?? '—' }, actions: <><button type="button" aria-label={'Review batch ' + batch.id} title="View batch" className="text-[#7288A3] hover:text-[#007EA7]" onClick={() => setBatchReview(batch)}><Eye size={16} /></button>{!batch.reversedAt && <button type="button" aria-label={'Reverse batch ' + batch.id} title="Reverse test reconciliation" className="text-[#7288A3] hover:text-[#007EA7]" onClick={() => { setError(''); setUndoBatch(batch); }}><RotateCcw size={16} /></button>}</> }));
+  const historyRows: ReconciliationTableRow[] = [...state.batches].reverse().map((batch) => {
+    const linkedItems = distinctItems(batch.allocations.flatMap(allocation => [itemMap.get(allocation.fundingId), itemMap.get(allocation.invoiceId)].filter((item): item is ReconciliationItem => Boolean(item))));
+    return { id: batch.id, values: { glEntry: glEntryText(linkedItems), glAccount: glAccountText(linkedItems), exchangeRate: exchangeRates(linkedItems), paymentPurpose: paymentPurposes(batch.allocations.flatMap(allocation => { const item = itemMap.get(allocation.fundingId); return item ? [item] : []; })), at: batch.at.replace('T', ' ').slice(0, 19) + ' UTC', actor: batch.actor, documents: linkedItems.map(item => item.documentNumber).join(', '), amounts: batchAmounts(batch, itemMap), status: batch.reversedAt ? 'Reversed' : 'Applied', reversedAt: batch.reversedAt?.replace('T', ' ').slice(0, 19) ?? '—' }, display: { glEntry: <GlRecordSummary items={linkedItems} />, glAccount: <GlRecordSummary items={linkedItems} account /> }, actions: <><button type="button" aria-label={'Review batch ' + batch.id} title="View batch" className="text-[#7288A3] hover:text-[#007EA7]" onClick={() => setBatchReview(batch)}><Eye size={16} /></button>{!batch.reversedAt && <button type="button" aria-label={'Reverse batch ' + batch.id} title="Reverse test reconciliation" className="text-[#7288A3] hover:text-[#007EA7]" onClick={() => { setError(''); setUndoBatch(batch); }}><RotateCcw size={16} /></button>}</> };
+  });
   const suggestionSummaryRows: ReconciliationTableRow[] = suggestions.proposals.map(proposal => {
     const funding = itemMap.get(proposal.fundingId)!;
     const amounts = reconciliationSuggestionAmounts(funding, proposal);
     const fundingRow = allRows.find(row => row.id === funding.id)!;
     const balanceHint = `Current amounts of ${funding.documentNumber}. Proposed allocation: ${number(amounts.amount)} ${funding.currency}. Not applied to balances.`;
-    const invoices = proposal.allocations.map(allocation => itemMap.get(allocation.invoiceId)?.documentNumber).join(', ');
-    return { id: 'suggestion:' + proposal.id, selectable: false, values: { ...fundingRow.values, ...amounts, documentNumber: funding.documentNumber + ' → ' + invoices, kind: 'Reconciliation suggestion', status: 'Suggested', reason: proposal.reason + ' ' + balanceHint }, display: { ...fundingRow.display, documentNumber: <button type="button" className="text-[#007EA7]" title={balanceHint} onClick={() => setConfirmation([proposal])}>{funding.documentNumber} → {invoices}</button>, debit: <span title={balanceHint}>{number(amounts.debit)}</span>, credit: <span title={balanceHint}>{number(amounts.credit)}</span>, remaining: <span title={balanceHint}>{number(amounts.remaining)}</span>, amount: number(amounts.amount), status: <StatusLabel status="Suggested" /> }, actions: <button type="button" className={ROW_ICON_BUTTON} aria-label={'View suggestion ' + funding.documentNumber} onClick={() => setConfirmation([proposal])}><Eye size={14} /></button> };
+    const invoiceItems = proposal.allocations.map(allocation => itemMap.get(allocation.invoiceId)).filter((item): item is ReconciliationItem => Boolean(item));
+    const invoices = invoiceItems.map(item => item.documentNumber).join(', ');
+    const linkedItems = [funding, ...invoiceItems];
+    return { id: 'suggestion:' + proposal.id, selectable: false, values: { ...fundingRow.values, ...amounts, glEntry: glEntryText(linkedItems), glAccount: glAccountText(linkedItems), documentNumber: funding.documentNumber + ' → ' + invoices, kind: 'Reconciliation suggestion', status: 'Suggested', reason: proposal.reason + ' ' + balanceHint }, display: { ...fundingRow.display, glEntry: <GlRecordSummary items={linkedItems} />, glAccount: <GlRecordSummary items={linkedItems} account />, documentNumber: <button type="button" className="text-[#007EA7]" title={balanceHint} onClick={() => setConfirmation([proposal])}>{funding.documentNumber} → {invoices}</button>, debit: <span title={balanceHint}>{number(amounts.debit)}</span>, credit: <span title={balanceHint}>{number(amounts.credit)}</span>, remaining: <span title={balanceHint}>{number(amounts.remaining)}</span>, amount: number(amounts.amount), status: <StatusLabel status="Suggested" /> }, actions: <button type="button" className={ROW_ICON_BUTTON} aria-label={'View suggestion ' + funding.documentNumber} onClick={() => setConfirmation([proposal])}><Eye size={14} /></button> };
   });
   const allEntryRows = [...exampleRows, ...suggestionSummaryRows];
   const prepaymentRows = allRows.filter(row => {
@@ -419,6 +465,7 @@ export default function CompanyReconciliationView({ companyId, companyName, gene
       { label: 'Counterparty', value: item.counterpartyName?.trim() || '—' },
       { label: 'Payee', value: item.payeeName?.trim() || item.counterpartyName?.trim() || '—' },
       { label: 'Operation category', value: getReconciliationRoute(item).category },
+      { label: 'GL entry', value: getReconciliationEntrySide(item) },
       { label: 'GL account', value: item.glAccountCode || '—' },
       { label: 'Type', value: item.kind },
       { label: 'Side', value: item.side },
@@ -510,9 +557,10 @@ export default function CompanyReconciliationView({ companyId, companyName, gene
     {previewItem && ((tab === 'Reconciled' || tab === 'Advances & deposits') ? <ReconciliationConfirmationDialog state={state} proposals={[]} appliedItem={itemMap.get(previewItem.id) ?? previewItem} onConfirm={() => {}} onClose={() => setPreviewItem(null)} /> : <ReconciliationDocumentPreview item={itemMap.get(previewItem.id) ?? previewItem} state={state} companyName={companyName} onClose={() => setPreviewItem(null)} onOpen={setPreviewItem} />)}
     {accountingItem && <ReconciliationGlAccountDialog item={accountingItem} category={getReconciliationRoute(accountingItem).category} reason={getReconciliationRoute(accountingItem).reason} accounts={glAccounts} history={(state.glAssignments ?? []).filter(entry => entry.itemId === accountingItem.id)} suggestedAccount={suggestPreviousGlAccount(state.items, accountingItem, state.glAssignments ?? [], glAccounts.map(account => account.code))} onSave={saveGlAccount} onClose={() => { setAccountingItem(null); setError(''); }} error={error} busy={busy} readOnly={!canEditGlAccounts} />}
     {manualItem && <ReconciliationMatchDialog item={manualItem} items={state.items} onClose={() => { setManualItem(null); setError(''); }} onConfirm={reconcileSelectedItems} error={error} busy={busy} />}
+    {receivedDocument && <ReconciliationMatchDialog key={'received:' + receivedDocument.item.id} item={receivedDocument.item} items={receivedDocument.draft.items} title="Document received · Select records" onClose={() => { setReceivedDocument(null); setError(''); }} onConfirm={reconcileReceivedDocument} error={error} busy={busy} />}
     {editingMatch && <ReconciliationMatchDialog key={editingMatch.proposalId ?? editingMatch.item.id} item={editingMatch.item} items={editingMatch.items} initialAmounts={editingMatch.amounts} title={editingMatch.proposalId ? 'Edit suggestion · Select records' : 'Edit reconciliation · Select records'} confirmLabel={editingMatch.proposalId ? 'Save suggestion' : 'Save changes'} description={editingMatch.proposalId ? 'Change the selected documents or amounts. Saving this suggestion does not reconcile it.' : 'Change the selected documents or amounts. Save changes replaces this document’s active links and preserves their history. Cancel leaves all balances unchanged.'} onClose={() => { setEditingMatch(null); setError(''); }} onConfirm={saveEditedMatch} error={error} busy={busy} />}
     {detailItem && <ReconciliationDialog title={'Reconciliation · ' + detailItem.documentNumber} onClose={() => setDetailItem(null)}>
-      <dl className="grid grid-cols-2 gap-4 text-[12px]">{[['Counterparty', detailItem.counterpartyName], ['Type', detailItem.kind], ['Date', detailItem.documentDate], ['Payment date', detailItem.dueDate || '—'], ['Currency', detailItem.currency], ['Amount', number(detailItem.originalMinor)], ['Settled', number(detailItem.originalMinor - detailItem.remainingMinor)], ['Balance', number(detailItem.remainingMinor)]].map(([label, value]) => <div key={label}><dt className="text-[#7288A3]">{label}</dt><dd className="mt-1">{value}</dd></div>)}</dl>
+      <dl className="grid grid-cols-2 gap-4 text-[12px]">{[['Counterparty', detailItem.counterpartyName], ['Type', detailItem.kind], ['GL entry', getReconciliationEntrySide(detailItem)], ['GL account', detailItem.glAccountCode || '—'], ['Date', detailItem.documentDate], ['Payment date', detailItem.dueDate || '—'], ['Currency', detailItem.currency], ['Amount', number(detailItem.originalMinor)], ['Settled', number(detailItem.originalMinor - detailItem.remainingMinor)], ['Balance', number(detailItem.remainingMinor)]].map(([label, value]) => <div key={label}><dt className="text-[#7288A3]">{label}</dt><dd className="mt-1">{value}</dd></div>)}</dl>
       <h3 className="mt-6 mb-3 text-[14px] font-semibold">Reconciliation history</h3>
       {state.batches.filter(batch => batch.allocations.some(allocation => allocation.invoiceId === detailItem.id || allocation.fundingId === detailItem.id)).map(batch => <button key={batch.id} type="button" className="mb-2 block w-full rounded-lg bg-[#F8FDFF] p-3 text-left text-[12px] text-[#007EA7]" onClick={() => setBatchReview(batch)}>{batch.at.slice(0, 10)} · {batch.actor} · {batchAmounts(batch, itemMap)} · {batch.reversedAt ? 'Reversed' : 'Applied'}</button>)}
       {!state.batches.some(batch => batch.allocations.some(allocation => allocation.invoiceId === detailItem.id || allocation.fundingId === detailItem.id)) && <p className="text-[12px] text-[#7288A3]">No reconciliations yet.</p>}

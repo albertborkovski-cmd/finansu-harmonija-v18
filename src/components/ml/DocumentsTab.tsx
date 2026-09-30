@@ -13,6 +13,7 @@ import ColumnSortButton, { useMultiColumnSort } from '../ColumnSortButton';
 import { BulkDeleteButton } from '../DeleteButtons';
 import { ColumnSettingsButton } from '../ScopedActionButtons';
 import ImportButton from '../ImportButton';
+import { isInactiveRecord, isRecordLinked, removeOrDeactivateRecords } from '../../lib/recordLifecycle';
 
 const INITIAL_COLUMNS: ColConfig[] = [
   { key: 'name', label: 'Name', width: 226, visible: true },
@@ -137,7 +138,7 @@ export default function DocumentsTab({
           <OcrSearchField ariaLabel="Search documents" value={query} onChange={(value) => { setQuery(value); setCurrentPage(1); }} />
         </div>
         <div className="flex flex-row items-center p-[6px] gap-4 bg-white rounded flex-shrink-0">
-          <BulkDeleteButton selectedCount={selectedRows.size} onDelete={() => { setDocuments(current => current.filter(document => !selectedRows.has(document.id))); setSelectedRows(new Set()); }} />
+          <BulkDeleteButton linked={documents.some(row => selectedRows.has(row.id) && isRecordLinked(row, 'finansu-harmonija:v7:ml-documents'))} selectedCount={selectedRows.size} onDelete={() => { setDocuments(current => removeOrDeactivateRecords(current, selectedRows, 'finansu-harmonija:v7:ml-documents', document => ({ ...document, inactive: true }))); setSelectedRows(new Set()); }} />
           <button className="w-4 h-4 flex items-center justify-center text-[#7288A3] hover:text-[#007EA7] transition-colors" title="Settings">
             <Settings size={16} />
           </button>
@@ -175,6 +176,7 @@ export default function DocumentsTab({
           {sortedRows.slice(0, currentPage * TABLE_BATCH_SIZE).map((doc, idx) => (
             <div
               key={doc.id}
+              data-record-inactive={isInactiveRecord(doc) || undefined}
               className={`flex min-w-max flex-row items-center gap-3 h-9 rounded-lg px-3 transition-colors group ${
                 idx % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'
               } hover:bg-[#E7F4F9]`}

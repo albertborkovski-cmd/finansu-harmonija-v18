@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, Plus, Search, X } from "lucide-react";
+import { useDropdownDismiss } from "./useDropdownDismiss";
 
 export interface SystemFilterColumn {
   key: string;
@@ -105,31 +106,12 @@ export default function SystemAddFilters({
     );
   }, [activeKeys, hydratedKey, persistenceKey, values]);
 
-  useEffect(() => {
-    if (!addOpen && openFilter === null) return;
-    const closeOutside = (event: PointerEvent) => {
-      const target = event.target;
-      if (target instanceof Node && !filterMenuRef.current?.contains(target)) {
-        setAddOpen(false);
-        setOpenFilter(null);
-        setOptionQuery("");
-        setColumnQuery("");
-      }
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setAddOpen(false);
-      setOpenFilter(null);
-      setOptionQuery("");
-      setColumnQuery("");
-    };
-    document.addEventListener("pointerdown", closeOutside);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOutside);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [addOpen, openFilter]);
+  useDropdownDismiss(addOpen || openFilter !== null, filterMenuRef, () => {
+    setAddOpen(false);
+    setOpenFilter(null);
+    setOptionQuery("");
+    setColumnQuery("");
+  });
 
   const applyDraftFilters = () => {
     const nextValues = { ...values };
@@ -153,7 +135,7 @@ export default function SystemAddFilters({
   };
 
   return (
-    <div ref={filterMenuRef} data-system-add-filters="true" className="system-add-filters flex flex-shrink-0 flex-nowrap items-center gap-1">
+    <div data-system-add-filters="true" className="system-add-filters flex flex-shrink-0 flex-nowrap items-center gap-1">
       {showActiveFilters &&
         activeKeys.map((key) => {
           const column = columns.find((item) => item.key === key);
@@ -161,11 +143,12 @@ export default function SystemAddFilters({
           const selectedValues = values[key] ?? [];
           const isOpen = openFilter === key;
           return (
-            <div key={key} className="relative flex-shrink-0">
+            <div key={key} ref={isOpen ? filterMenuRef : undefined} className="relative flex-shrink-0">
               <button
                 type="button"
                 aria-label={`Filter by ${column.label}`}
                 aria-expanded={isOpen}
+                data-static-selection="true"
                 onClick={() => {
                   setOpenFilter(isOpen ? null : key);
                   setAddOpen(false);
@@ -206,8 +189,10 @@ export default function SystemAddFilters({
                   </label>
                   <button
                     type="button"
+                    aria-pressed={selectedValues.length === 0}
+                    data-static-selection="true"
                     onClick={() => onValuesChange({ ...values, [key]: [] })}
-                    className="flex h-9 w-full items-center gap-3 rounded-md px-2 text-left hover:bg-[#F2F7FC]"
+                    className={`flex h-9 w-full items-center gap-3 rounded-md px-2 text-left ${selectedValues.length === 0 ? "bg-[#E5EDF9]" : "hover:bg-[#F2F7FC]"}`}
                   >
                     <FilterCheck checked={selectedValues.length === 0} />
                     <span className="font-montserrat text-[13px] font-medium text-[#10233A]">
@@ -221,6 +206,8 @@ export default function SystemAddFilters({
                         <button
                           key={option}
                           type="button"
+                          aria-pressed={checked}
+                          data-static-selection="true"
                           onClick={() => {
                             const current = values[key] ?? [];
                             onValuesChange({
@@ -230,7 +217,7 @@ export default function SystemAddFilters({
                                 : [...current, option],
                             });
                           }}
-                          className="flex min-h-9 w-full items-center gap-3 rounded-md px-2 py-1.5 text-left hover:bg-[#F2F7FC]"
+                          className={`flex min-h-9 w-full items-center gap-3 rounded-md px-2 py-1.5 text-left ${checked ? "bg-[#E5EDF9]" : "hover:bg-[#F2F7FC]"}`}
                         >
                           <FilterCheck checked={checked} />
                           <span className="font-montserrat text-[13px] font-medium text-[#10233A]">
@@ -246,11 +233,12 @@ export default function SystemAddFilters({
           );
         })}
 
-      <div className="relative flex-shrink-0">
+      <div ref={addOpen ? filterMenuRef : undefined} className="relative flex-shrink-0">
         <button
           type="button"
           aria-label="Add filters"
           aria-expanded={addOpen}
+          data-static-selection="true"
           onClick={() => {
             setAddOpen((current) => {
               if (!current) {
@@ -287,6 +275,8 @@ export default function SystemAddFilters({
                   <button
                     key={column.key}
                     type="button"
+                    aria-pressed={checked}
+                    data-static-selection="true"
                     onClick={() =>
                       setDraftKeys((current) =>
                         checked
@@ -294,7 +284,7 @@ export default function SystemAddFilters({
                           : [...current, column.key],
                       )
                     }
-                    className="flex h-9 w-full items-center gap-3 rounded-md px-2 text-left hover:bg-[#F2F7FC]"
+                    className={`flex h-9 w-full items-center gap-3 rounded-md px-2 text-left ${checked ? "bg-[#E5EDF9]" : "hover:bg-[#F2F7FC]"}`}
                   >
                     <FilterCheck checked={checked} />
                     <span className="font-montserrat text-[13px] font-medium text-[#10233A]">
@@ -334,7 +324,8 @@ export default function SystemAddFilters({
 function FilterCheck({ checked }: { checked: boolean }) {
   return (
     <span
-      className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[4px] border ${checked ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
+      aria-hidden="true"
+      className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[6px] border ${checked ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
     >
       {checked && <Check size={12} strokeWidth={2.5} className="text-white" />}
     </span>

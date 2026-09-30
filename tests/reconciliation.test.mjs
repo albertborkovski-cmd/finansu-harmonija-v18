@@ -27,6 +27,28 @@ test('missing documents remain stored and cannot generate suggestions', () => {
   assert.equal(suggestReconciliation(items).proposals.length, 0);
   assert.ok(JSON.parse(JSON.stringify({ ...state, items })).items.every(item => item.missingDocument));
 });
+test('reload preserves missing-document restrictions and bank accounting classification', () => {
+  const initial = state([
+    invoice('missing', { missingDocument: true, missingDocumentMarkedAt: '2026-09-14T10:00:00.000Z', missingDocumentMarkedBy: 'Accountant' }),
+    funding('payment', { paymentPurpose: 'Bank service fee', reference: '', exchangeRate: 1.12, exchangeRateCurrency: 'USD' }),
+  ]);
+  const reloaded = parseReconciliationState(JSON.stringify(initial), organizationId);
+  assert.deepEqual(reloaded, initial);
+  assert.equal(reloaded.items[0].missingDocument, true);
+  assert.equal(getReconciliationRoute(reloaded.items[1]).kind, 'accounting');
+  assert.equal(suggestReconciliation(reloaded.items).proposals.length, 0);
+});
+test('parser validates known matching metadata instead of silently dropping malformed values', () => {
+  for (const patch of [
+    { paymentPurpose: 1 }, { paymentPurpose: null }, { missingDocument: 'false' }, { missingDocument: null },
+    { missingDocumentMarkedAt: 'yesterday' }, { missingDocumentMarkedAt: '2026-02-30T00:00:00.000Z' },
+    { missingDocumentMarkedBy: '' }, { missingDocumentMarkedBy: null },
+    { exchangeRate: 0 }, { exchangeRate: -1 }, { exchangeRate: null }, { exchangeRate: '1.1' },
+    { exchangeRateCurrency: 'usd' }, { exchangeRateCurrency: '' }, { exchangeRateCurrency: null },
+  ]) assert.throws(() => parseReconciliationState(JSON.stringify(state([invoice('invalid', patch)])), organizationId), /Saved reconciliation data/);
+  const valid = state([invoice('valid', { paymentPurpose: '', missingDocument: false, exchangeRate: 1, exchangeRateCurrency: 'EUR' })]);
+  assert.deepEqual(parseReconciliationState(JSON.stringify(valid), organizationId), valid);
+});
 test('cash movements are classified by purpose and direction without matching customer debts', () => {
   const payment = { kind: 'Payment', counterpartyId: '', counterpartyName: '', reference: '' };
   assert.equal(getReconciliationRoute({ ...payment, side: 'Receivable', paymentPurpose: 'Grynųjų pinigų įnešimas' }).category, 'Cash deposit');
@@ -446,12 +468,11 @@ test('apply validates item existence, document kind, proposal scope, and expecte
   for (const proposal of invalid) assert.throws(() => applyReconciliation(input, [proposal], batch));
 });
 
-test('apply rechecks organization, counterparty, currency, and side on the actual items', () => {
+test('apply rechecks accounting organization, currency, and opposite GL side on the actual items', () => {
   const original = state();
   const { proposals } = suggestReconciliation(original.items);
   for (const patch of [
     { organizationId: 'organization-2' },
-    { counterpartyId: 'counterparty-2' },
     { currency: 'USD' },
     { side: 'Payable' },
   ]) {
@@ -672,10 +693,9 @@ test('parser rejects invalid allocation amounts and unknown or wrong-kind docume
   }
 });
 
-test('parser requires persisted allocations to share counterparty, currency, side, and organization', () => {
+test('parser requires persisted allocations to share accounting organization and currency with opposite GL entry sides', () => {
   const valid = persistedHistory();
   for (const patch of [
-    { counterpartyId: 'counterparty-2' },
     { currency: 'USD' },
     { side: 'Payable' },
     { organizationId: 'organization-2' },
@@ -859,7 +879,7 @@ test('deposit funding cannot bypass scope, safe-cent or stale-balance validation
     confidence: 'Review required', rule: 'Manual selection', reason: 'Partial release',
     expectedRemaining: { 'deposit-1': 10000, 'invoice-1': 10000 },
   };
-  for (const patch of [{ organizationId: 'another-company' }, { counterpartyId: 'another-client' }, { currency: 'USD' }, { side: 'Payable' }]) {
+  for (const patch of [{ organizationId: 'another-company' }, { currency: 'USD' }, { side: 'Payable' }]) {
     const incompatible = deepFreeze({ ...initial, items: initial.items.map(row => row.kind === 'Deposit' ? { ...row, ...patch } : row) });
     assert.throws(() => applyReconciliation(incompatible, [proposal], batch), /organization|counterparty|currency|side/i);
   }

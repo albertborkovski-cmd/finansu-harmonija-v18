@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { supabase, type Company } from "../lib/supabase";
+import { isInactiveRecord } from '../lib/recordLifecycle';
 import HorizontalTableScrollbar from "./HorizontalTableScrollbar";
 import { SaveButton } from "./ScopedActionButtons";
 import { HeaderBackButton } from "./SystemNavigation";
@@ -16,6 +17,7 @@ import { getCurrentUserName } from "../lib/currentUser";
 import { loadCompanyGeneralLedgerAccountOptions } from "./GeneralLedgerView";
 import GeneralLedgerAccountSelect from "./GeneralLedgerAccountSelect";
 import SearchableSelect from "./SearchableSelect";
+import { useDropdownDismiss } from "./useDropdownDismiss";
 import {
   loadOrganizationReferenceRecords,
   loadOrganizationReferenceValues,
@@ -188,12 +190,21 @@ function EditablePartyField({
   counterparties: Company[];
   onSelect: (counterparty: Company) => void;
 }) {
+  // Keep the document's saved party readable without offering inactive parties
+  // for a new relationship. Do not filter the underlying history/lookup data.
+  const options = counterparties
+    .filter((counterparty) => !isInactiveRecord(counterparty) || counterparty.id === selectedId)
+    .map((counterparty) => ({
+      value: counterparty.id,
+      label: `${counterparty.name}${counterparty.company_code ? ` · ${counterparty.company_code}` : ''}${isInactiveRecord(counterparty) ? ' · Inactive' : ''}`,
+      disabled: isInactiveRecord(counterparty),
+    }));
   return (
     <div className="relative flex min-w-0 flex-col gap-2">
       <span className="font-montserrat text-[14px] font-semibold leading-5 text-[#10233A]">
         {label}
       </span>
-      <SearchableSelect ariaLabel={label} value={selectedId} placeholder={value || "Select counterparty"} emptyMessage="No counterparties configured" options={counterparties.map((counterparty) => ({ value: counterparty.id, label: `${counterparty.name}${counterparty.company_code ? ` · ${counterparty.company_code}` : ""}` }))} onChange={(id) => { const counterparty = counterparties.find((item) => item.id === id); if (counterparty) onSelect(counterparty); }} className="h-8 rounded-md border border-[#D3E1EC] bg-white px-2 pr-9 font-montserrat text-[14px] font-medium leading-5 text-[#10233A]" />
+      <SearchableSelect ariaLabel={label} value={selectedId} placeholder={value || "Select counterparty"} emptyMessage="No active counterparties configured" options={options} onChange={(id) => { const counterparty = loadCounterparties().find((item) => item.id === id); if (counterparty && !isInactiveRecord(counterparty)) onSelect(counterparty); }} className="h-8 rounded-md border border-[#D3E1EC] bg-white px-2 pr-9 font-montserrat text-[14px] font-medium leading-5 text-[#10233A]" />
     </div>
   );
 }
@@ -436,18 +447,10 @@ function LookupDropdownCell({
       });
   }, [companyId, generalLedgerName, lookupType, open, scopedLookupType]);
 
-  useEffect(() => {
-    if (!open) return;
-    function handler(e: MouseEvent) {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
-      )
-        setOpen(false);
-    }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
+  useDropdownDismiss(open, containerRef, () => {
+    setOpen(false);
+    setQuery("");
+  });
 
   async function handleAdd() {
     const trimmed = newVal.trim();
@@ -539,6 +542,7 @@ function LookupDropdownCell({
                 type="button"
                 role="option"
                 aria-selected={opt === value}
+                data-static-selection="true"
                 onClick={async () => {
                   if (lookupType === "product_group") {
                     await ensureOrganizationProductGroup(companyId, opt);
@@ -547,26 +551,19 @@ function LookupDropdownCell({
                   setOpen(false);
                   setQuery("");
                 }}
-                className={`flex min-h-9 w-full items-center rounded-md px-2 py-1.5 text-left font-montserrat text-[12px] font-medium transition-colors hover:bg-[#F2F7FC] ${opt === value ? "bg-[#F2F7FC]" : ""} ${lookupType === "unit" ? "gap-3" : "justify-between"}`}
-                style={{ color: opt === value ? "#007EA7" : "#10233A" }}
+                className={`grid h-9 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-3 rounded-md px-2 text-left font-montserrat text-[12px] font-medium text-[#10233A] ${opt === value ? "bg-[#E5EDF9]" : "hover:bg-[#F2F7FC]"}`}
               >
-                {lookupType === "unit" && (
-                  <span
-                    className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[5px] border ${opt === value ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
-                  >
-                    {opt === value && (
-                      <Check size={12} strokeWidth={2.5} className="text-white" />
-                    )}
-                  </span>
-                )}
+                <span
+                  aria-hidden="true"
+                  className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${opt === value ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
+                >
+                  {opt === value && <Check size={12} strokeWidth={2.5} className="text-white" />}
+                </span>
                 <span className="min-w-0 flex-1 truncate">
                   {lookupType === "unit"
                     ? `${opt} — ${optionLabels[opt] ?? opt}`
                     : opt}
                 </span>
-                {lookupType !== "unit" && opt === value && (
-                  <Check size={11} className="text-[#007EA7] flex-shrink-0" />
-                )}
               </button>
             ))}
           </div>
@@ -1223,6 +1220,15 @@ export default function DocumentDetailPanel({
 
   async function handleSaveChanges() {
     if (readOnly) return;
+    const selectedCounterparty = loadCounterparties().find((item) => item.id === counterpartyId);
+    const preservesExistingCounterparty = doc.counterpartyId
+      ? counterpartyId === doc.counterpartyId
+      : counterparty.trim().toLocaleLowerCase() === doc.clientCounterparty.trim().toLocaleLowerCase();
+    if (selectedCounterparty && isInactiveRecord(selectedCounterparty) && !preservesExistingCounterparty) {
+      setSaveMessage('');
+      setSaveError('This counterparty is inactive. Select an active counterparty to change the document relationship.');
+      return;
+    }
     if (!activeLinesValid) {
       setSaveMessage("");
       setSaveError("Please complete all required document line fields.");

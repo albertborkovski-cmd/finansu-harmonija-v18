@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { X, ChevronDown, ChevronUp, Trash2, Paperclip, ArrowLeft, Send, FileText } from 'lucide-react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { X, Check, ChevronDown, ChevronUp, Trash2, Paperclip, ArrowLeft, Send, FileText } from 'lucide-react';
 import { loadOrganizationReferenceValues } from '../OrganizationReferenceValuesView';
 import { loadVatClassificationTemplateNames } from '../VatClassificationsView';
 import { supabase, type Company } from '../../lib/supabase';
@@ -9,6 +9,7 @@ import { publishChatMessageNotification } from '../../lib/chatNotifications';
 import HorizontalTableScrollbar from '../HorizontalTableScrollbar';
 import { PageActionButton } from '../PageHeader';
 import SearchableSelect from '../SearchableSelect';
+import { useDropdownDismiss } from '../useDropdownDismiss';
 import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import SendInvoicePanel from './SendInvoicePanel';
@@ -1640,6 +1641,9 @@ function CounterpartyTitleField({
   onSelect: (counterparty: Company) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const fieldRef = useRef<HTMLDivElement>(null);
+  const optionsId = useId();
+  useDropdownDismiss(open, fieldRef, () => setOpen(false));
   const normalized = value.trim().toLowerCase();
   const matches = counterparties.filter((counterparty) =>
     !normalized || counterparty.name.toLowerCase().includes(normalized),
@@ -1648,13 +1652,20 @@ function CounterpartyTitleField({
   return (
     <div className={`relative flex h-9 w-full items-center rounded-lg bg-white px-3 font-montserrat text-[12px] leading-[18px] ${open ? 'z-40' : 'z-0'}`}>
       <span className="w-[200px] flex-shrink-0 font-normal text-[#10233A]">Title</span>
-      <div className="relative min-w-0 flex-1">
+      <div ref={fieldRef} className="relative min-w-0 flex-1" onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+      }}>
         <input
           type="text"
+          role="combobox"
+          aria-label="Counterparty title"
+          aria-expanded={open && matches.length > 0}
+          aria-controls={optionsId}
+          aria-autocomplete="list"
           value={value}
           placeholder="Enter or search counterparty"
           onFocus={() => setOpen(true)}
-          onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+          onClick={() => setOpen(true)}
           onChange={(event) => {
             onChange(event.target.value);
             setOpen(true);
@@ -1662,18 +1673,23 @@ function CounterpartyTitleField({
           className="h-[26px] w-full rounded border border-[#D3E1EC] bg-white px-2 font-montserrat text-[12px] font-medium leading-[18px] text-[#10233A] outline-none transition-colors placeholder:text-[#A1B6C6] focus:border-[#007EA7] focus:ring-2 focus:ring-[#007EA7]/10"
         />
         {open && matches.length > 0 && (
-          <div className="absolute left-0 right-0 top-[30px] z-50 max-h-[210px] overflow-y-auto rounded-lg border border-[#D3E1EC] bg-white p-1 shadow-[0_10px_24px_rgba(16,35,58,0.14)]">
+          <div id={optionsId} role="listbox" aria-label="Counterparty title options" className="absolute left-0 right-0 top-[30px] z-50 max-h-[210px] overflow-y-auto rounded-lg border border-[#D3E1EC] bg-white p-1 shadow-[0_10px_24px_rgba(16,35,58,0.14)]">
             {matches.map((counterparty) => (
               <button
                 key={counterparty.id}
                 type="button"
+                role="option"
+                aria-selected={value === counterparty.name}
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => {
                   onSelect(counterparty);
                   setOpen(false);
                 }}
-                className="flex min-h-9 w-full items-center rounded-md px-3 py-2 text-left font-montserrat text-[12px] font-semibold text-[#10233A] transition-colors hover:bg-[#F8FDFF]"
+                className={`flex min-h-9 w-full items-center gap-3 rounded-md px-3 py-2 text-left font-montserrat text-[12px] font-semibold text-[#10233A] transition-colors ${value === counterparty.name ? 'bg-[#E5EDF9]' : 'hover:bg-[#F8FDFF]'}`}
               >
+                <span aria-hidden="true" className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${value === counterparty.name ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>
+                  {value === counterparty.name && <Check size={12} strokeWidth={2.5} className="text-white" />}
+                </span>
                 <span className="truncate">{counterparty.name}</span>
               </button>
             ))}

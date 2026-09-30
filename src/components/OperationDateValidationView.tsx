@@ -1,6 +1,7 @@
 import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Pencil, Trash2, X } from "lucide-react";
+import { Check, Pencil, X } from "lucide-react";
+import { isInactiveRecord, isRecordLinked } from "../lib/recordLifecycle";
 import { supabase, type Company } from "../lib/supabase";
 import { PageActionButton, PageHeader } from "./PageHeader";
 import OcrSearchField from "./OcrSearchField";
@@ -9,7 +10,7 @@ import RefreshAllButton from "./RefreshAllButton";
 import HorizontalTableScrollbar from "./HorizontalTableScrollbar";
 import TablePagination from "./TablePagination";
 import ColumnSettingsPanel, { type ColConfig } from "./ColumnSettingsPanel";
-import { BulkDeleteButton } from "./DeleteButtons";
+import { BulkDeleteButton, RowDeleteButton } from "./DeleteButtons";
 import { ColumnSettingsButton } from "./ScopedActionButtons";
 import { usePersistentState } from "../hooks/usePersistentState";
 import ColumnSortButton, { useMultiColumnSort } from "./ColumnSortButton";
@@ -282,7 +283,7 @@ export default function OperationDateValidationView() {
         : Object.values(assignments).filter((id) => id === template.id).length,
   );
   const displayedTemplates = templateSorter.sortedRows;
-  const tableGridTemplate = `42px ${visibleColumns.map((column) => `${column.width}px`).join(" ")} 96px`;
+  const tableGridTemplate = `42px ${visibleColumns.map((column) => `${column.width}px`).join(" ")} minmax(96px, 1fr)`;
   const tableWidth = visibleColumns.reduce((total, column) => total + column.width, 0) + 138;
   const allVisibleSelected = visibleTemplates.length > 0 && visibleTemplates.every((template) => selectedTemplateIds.has(template.id));
   const someVisibleSelected = visibleTemplates.some((template) => selectedTemplateIds.has(template.id)) && !allVisibleSelected;
@@ -341,31 +342,29 @@ export default function OperationDateValidationView() {
     setDraft(null);
   };
 
-  const deleteTemplate = (templateId: string) => {
-    const nextTemplates = templates.filter((item) => item.id !== templateId);
-    const nextAssignments = Object.fromEntries(
-      Object.entries(assignments).filter(([, assignedTemplateId]) => assignedTemplateId !== templateId),
-    );
+  const templateIsLinked = (template: OperationDateTemplate) =>
+    Object.values(assignments).includes(template.id) || isRecordLinked(template, TEMPLATES_STORAGE_KEY);
+
+  const deleteTemplates = (ids: Set<string>) => {
+    const nextTemplates = templates.flatMap((template) => {
+      if (!ids.has(template.id) || isInactiveRecord(template)) return [template];
+      return templateIsLinked(template) ? [{ ...template, enabled: false }] : [];
+    });
     setTemplates(nextTemplates);
-    setAssignments(nextAssignments);
     setSelectedTemplateIds((current) => {
       const next = new Set(current);
-      next.delete(templateId);
+      ids.forEach((id) => next.delete(id));
       return next;
     });
-    saveConfiguration(nextTemplates, nextAssignments);
+    // Assigned templates are deactivated, never removed or detached from their organizations.
+    saveConfiguration(nextTemplates, assignments);
   };
+
+  const deleteTemplate = (templateId: string) => deleteTemplates(new Set([templateId]));
 
   const deleteSelectedTemplates = () => {
     if (selectedTemplateIds.size === 0) return;
-    const nextTemplates = templates.filter((template) => !selectedTemplateIds.has(template.id));
-    const nextAssignments = Object.fromEntries(
-      Object.entries(assignments).filter(([, templateId]) => !selectedTemplateIds.has(templateId)),
-    );
-    setTemplates(nextTemplates);
-    setAssignments(nextAssignments);
-    setSelectedTemplateIds(new Set());
-    saveConfiguration(nextTemplates, nextAssignments);
+    deleteTemplates(selectedTemplateIds);
   };
 
   const toggleOrganization = (organizationId: string) => {
@@ -381,12 +380,12 @@ export default function OperationDateValidationView() {
   return (
     <div className="flex h-screen min-w-0 flex-col gap-8 overflow-hidden bg-white px-4 py-14 sm:px-8 lg:px-[72px]">
       <PageHeader
-        title="Operation date validation"
+        title="Period locking"
         actions={templates.length > 0 ? <PageActionButton onClick={openCreate}>Create new</PageActionButton> : undefined}
       />
 
       <nav aria-label="Breadcrumb" className="flex items-center gap-2 font-montserrat text-[12px] font-medium text-[#7288A3]">
-        <span>Settings</span><span className="text-[#A1B6C6]">/</span><span>Organizations</span><span className="text-[#A1B6C6]">/</span><span className="text-[#A1B6C6]">Operation date validation</span>
+        <span>Settings</span><span className="text-[#A1B6C6]">/</span><span>Organizations</span><span className="text-[#A1B6C6]">/</span><span className="text-[#A1B6C6]">Period locking</span>
       </nav>
 
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -408,6 +407,7 @@ export default function OperationDateValidationView() {
           <BulkDeleteButton
             selectedCount={selectedTemplateIds.size}
             label="DELETE ALL selected operation date validation templates"
+            linked={templates.some((template) => selectedTemplateIds.has(template.id) && templateIsLinked(template))}
             onDelete={deleteSelectedTemplates}
           />
           <ColumnSettingsButton onClick={() => setShowColumns(true)} />
@@ -450,13 +450,13 @@ export default function OperationDateValidationView() {
                   </div>
                 );
               })}
-              <span />
+              <span className="system-table-row-actions" />
             </div>
             <div className="flex flex-col gap-0.5">
             {displayedTemplates.slice(0, fixedPage0 * TABLE_BATCH_SIZE).map((template) => {
               const assignedCount = Object.values(assignments).filter((id) => id === template.id).length;
               return (
-                <div key={template.id} style={{ gridTemplateColumns: tableGridTemplate }} className="grid h-10 items-center rounded-lg font-montserrat text-[12px] font-normal text-[#10233A] odd:bg-[#F8FDFF] hover:bg-[#E7F4F9]">
+                <div key={template.id} data-record-inactive={isInactiveRecord(template) || undefined} style={{ gridTemplateColumns: tableGridTemplate }} className="grid h-10 items-center rounded-lg font-montserrat text-[12px] font-normal text-[#10233A] odd:bg-[#F8FDFF] hover:bg-[#E7F4F9]">
                   <div className="flex px-3">
                     <SelectionCheckbox
                       checked={selectedTemplateIds.has(template.id)}
@@ -482,9 +482,9 @@ export default function OperationDateValidationView() {
                       </span>
                     </div>
                   ))}
-                  <div className="flex items-center justify-end gap-2 px-2">
+                  <div className="system-table-row-actions flex items-center justify-end gap-2 px-2">
                     <button type="button" aria-label={`EDIT ${template.name}`} onClick={() => openEdit(template)} className="flex h-7 w-7 items-center justify-center rounded-md border-2 border-[#D3E1EC] bg-white text-[#7288A3] hover:border-[#007EA7] hover:text-[#007EA7]"><Pencil size={14} /></button>
-                    <button type="button" aria-label={`DELETE ${template.name}`} onClick={() => deleteTemplate(template.id)} className="flex h-7 w-7 items-center justify-center rounded-md border-2 border-[#D3E1EC] bg-white text-[#7288A3] hover:border-[#FF6200] hover:text-[#FF6200]"><Trash2 size={14} /></button>
+                    <RowDeleteButton variant="outlined" label={`Delete ${template.name}`} linked={templateIsLinked(template)} inactive={isInactiveRecord(template)} onDelete={() => deleteTemplate(template.id)} />
                   </div>
                 </div>
               );

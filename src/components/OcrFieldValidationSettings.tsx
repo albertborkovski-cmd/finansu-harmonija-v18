@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, Pencil, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, Pencil, X } from "lucide-react";
+import { BulkDeleteButton, RowDeleteButton } from './DeleteButtons';
+import { isInactiveRecord } from '../lib/recordLifecycle';
 import OcrSearchField from "./OcrSearchField";
 import HorizontalTableScrollbar from "./HorizontalTableScrollbar";
 import TablePagination from "./TablePagination";
@@ -11,11 +13,14 @@ import { ColumnSettingsButton, ImportDataButton } from "./ScopedActionButtons";
 import RefreshAllButton from "./RefreshAllButton";
 import { importMenuRecords } from "../lib/menuImport";
 import { ResizeHandle, useColumnResize } from "./useColumnResize";
+import { useDropdownDismiss } from "./useDropdownDismiss";
 import {
   loadOcrFieldValidationRules,
   markOcrFieldValidationRulesDeleted,
+  isOcrFieldValidationRuleLinked,
+  removeOrDeactivateOcrFieldValidationRules,
   ocrConfidenceThreshold,
-  saveOcrFieldValidationRules,
+  saveOcrFieldValidationRules as persistRules,
   type OcrFieldValidationLevel,
   type OcrFieldValidationRule,
 } from "../lib/ocrFieldValidation";
@@ -45,6 +50,8 @@ const INITIAL_COLUMNS: ColConfig[] = [
   { key: "trafficLight", label: "Traffic light", width: 210, visible: true },
   { key: "confidence", label: "Confidence threshold", width: 190, visible: true },
   { key: "rule", label: "Processing rule", width: 390, visible: true },
+  { key: "enabled", label: "Enabled", width: 100, visible: true },
+  { key: "required", label: "Required", width: 100, visible: true },
 ];
 
 const SELECTION_COLUMN_WIDTH = 40;
@@ -55,15 +62,20 @@ type ValidationEditDraft = OcrFieldValidationRule & {
   confidenceThreshold: number;
 };
 
-export default function OcrFieldValidationSettings() {
+export default function OcrFieldValidationSettings({ documentType }: { documentType?: string } = {}) {
+  const saveOcrFieldValidationRules = (next: OcrFieldValidationRule[]) => persistRules(next, documentType);
   const tableScrollRef = useRef<HTMLDivElement>(null);
-  const [rules, setRules] = useState<OcrFieldValidationRule[]>(() => loadOcrFieldValidationRules());
+  const [rules, setRules] = useState<OcrFieldValidationRule[]>(() => loadOcrFieldValidationRules({ includeInactive: true, documentType }));
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [notice, setNotice] = useState("");
   const [openTrafficLight, setOpenTrafficLight] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<ValidationEditDraft | null>(null);
   const [editTrafficLightOpen, setEditTrafficLightOpen] = useState(false);
+  const trafficLightRef = useRef<HTMLDivElement>(null);
+  const editTrafficLightRef = useRef<HTMLDivElement>(null);
+  useDropdownDismiss(openTrafficLight !== null, trafficLightRef, () => setOpenTrafficLight(null));
+  useDropdownDismiss(editTrafficLightOpen, editTrafficLightRef, () => setEditTrafficLightOpen(false));
   const [activeFilterKeys, setActiveFilterKeys] = useState<string[]>([]);
   const [filterValues, setFilterValues] = useState<Record<string, string[]>>({});
   const [columns, setColumns] = useState<ColConfig[]>(INITIAL_COLUMNS);
@@ -125,6 +137,8 @@ export default function OcrFieldValidationSettings() {
     if (key === "trafficLight") return level.label;
     if (key === "confidence") return ocrConfidenceThreshold(rule);
     if (key === "rule") return descriptionFor(rule);
+    if (key === "enabled") return rule.enabled !== false ? 1 : 0;
+    if (key === "required") return rule.required === true ? 1 : 0;
     return "";
   });
 
@@ -177,7 +191,7 @@ export default function OcrFieldValidationSettings() {
   };
 
   const refreshRules = () => {
-    setRules(loadOcrFieldValidationRules());
+    setRules(loadOcrFieldValidationRules({ includeInactive: true, documentType }));
     setSelectedRuleKeys(new Set());
     setPage(1);
     setNotice("OCR validation settings refreshed.");
@@ -191,14 +205,14 @@ export default function OcrFieldValidationSettings() {
   const confirmDeleteRules = () => {
     if (deleteRuleKeys.length === 0) return;
     const deletedKeys = new Set(deleteRuleKeys);
-    const nextRules = rules.filter((rule) => !deletedKeys.has(rule.key));
+    const nextRules = removeOrDeactivateOcrFieldValidationRules(rules, deletedKeys);
     setRules(nextRules);
     saveOcrFieldValidationRules(nextRules);
-    markOcrFieldValidationRulesDeleted(deleteRuleKeys);
+    if (!documentType) markOcrFieldValidationRulesDeleted(deleteRuleKeys.filter(key => !nextRules.some(rule => rule.key === key)));
     setSelectedRuleKeys((current) => new Set([...current].filter((key) => !deletedKeys.has(key))));
     setDeleteRuleKeys([]);
     setPage(1);
-    setNotice(`${deletedKeys.size} OCR validation setting${deletedKeys.size === 1 ? "" : "s"} deleted.`);
+    setNotice("Unused validation settings deleted; linked settings deactivated and retained.");
   };
 
   const toggleRuleSelection = (key: string) => {
@@ -210,7 +224,7 @@ export default function OcrFieldValidationSettings() {
     });
   };
 
-  const visibleRuleKeys = displayedRules.map((rule) => rule.key);
+  const visibleRuleKeys = sortedRows.map((rule) => rule.key);
   const allVisibleSelected = visibleRuleKeys.length > 0 && visibleRuleKeys.every((key) => selectedRuleKeys.has(key));
 
   return (
@@ -224,20 +238,11 @@ export default function OcrFieldValidationSettings() {
             values={filterValues}
             onActiveKeysChange={(keys) => { setActiveFilterKeys(keys); setPage(1); }}
             onValuesChange={(values) => { setFilterValues(values); setPage(1); }}
-            persistenceKey="finansu-harmonija-v12-ocr-human-task-types-filters"
+            persistenceKey={`finansu-harmonija-v12-ocr-human-task-types-filters${documentType ? `:${documentType}` : ""}`}
           />
         </div>
         <div className="ml-auto flex h-7 items-center gap-4">
-          <button
-            type="button"
-            aria-label="DELETE ALL"
-            title="DELETE ALL"
-            disabled={selectedRuleKeys.size === 0}
-            onClick={() => setDeleteRuleKeys([...selectedRuleKeys])}
-            className="flex h-4 w-4 items-center justify-center text-[#7288A3] transition-colors hover:text-[#FF6200] disabled:cursor-not-allowed disabled:text-[#B4B6B8]"
-          >
-            <Trash2 size={16} />
-          </button>
+          <BulkDeleteButton linked={rules.some(rule => selectedRuleKeys.has(rule.key) && isOcrFieldValidationRuleLinked(rule))} selectedCount={selectedRuleKeys.size} onDelete={() => setDeleteRuleKeys([...selectedRuleKeys])} />
           <ColumnSettingsButton onClick={() => setShowColumns(true)} />
           <ImportDataButton onClick={importRules} disabled={rules.length === 0} />
           <RefreshAllButton onRefresh={refreshRules} />
@@ -290,7 +295,7 @@ export default function OcrFieldValidationSettings() {
               </div>
               );
             })}
-            <div aria-hidden="true" style={{ width: ACTION_COLUMN_WIDTH }} className="h-9 flex-shrink-0 bg-white" />
+            <div aria-hidden="true" style={{ width: ACTION_COLUMN_WIDTH }} className="system-table-row-actions h-9 flex-shrink-0 bg-white" />
           </div>
 
           <div className="flex flex-col gap-0.5">
@@ -298,7 +303,7 @@ export default function OcrFieldValidationSettings() {
               const level = levelByValue.get(rule.level) ?? LEVELS[0];
               const description = descriptionFor(rule);
               return (
-                <div key={rule.key} className={`group flex min-h-10 items-center rounded-lg font-montserrat text-[12px] font-normal text-[#10233A] ${index % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} hover:bg-[#E7F4F9]`}>
+                <div key={rule.key} data-record-inactive={isInactiveRecord(rule) || undefined} className={`group flex min-h-10 items-center rounded-lg font-montserrat text-[12px] font-normal text-[#10233A] ${index % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} hover:bg-[#E7F4F9]`}>
                   <div style={{ width: SELECTION_COLUMN_WIDTH }} className="flex flex-shrink-0 items-center justify-center">
                     <button
                       type="button"
@@ -311,7 +316,7 @@ export default function OcrFieldValidationSettings() {
                   </div>
                   {visibleColumns.some((column) => column.key === "field") && <div style={{ width: columnWidth("field") }} className="flex-shrink-0 overflow-hidden px-3"><span className="block truncate">{rule.label}</span></div>}
                   {visibleColumns.some((column) => column.key === "type") && <div style={{ width: columnWidth("type") }} className="flex-shrink-0 overflow-hidden px-3"><span className="block truncate">{rule.type}</span></div>}
-                  {visibleColumns.some((column) => column.key === "trafficLight") && <div style={{ width: columnWidth("trafficLight") }} className="relative flex-shrink-0 px-3 py-1">
+                  {visibleColumns.some((column) => column.key === "trafficLight") && <div ref={openTrafficLight === rule.key ? trafficLightRef : undefined} style={{ width: columnWidth("trafficLight") }} className="relative flex-shrink-0 px-3 py-1">
                     <button
                       type="button"
                       aria-label={`${rule.label} traffic light`}
@@ -340,7 +345,7 @@ export default function OcrFieldValidationSettings() {
                               onClick={() => { setLevel(rule.key, option.value); setOpenTrafficLight(null); }}
                               className={`flex min-h-9 w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors ${selected ? "bg-[#E5EDF9]" : "hover:bg-[#F2F7FC]"}`}
                             >
-                              <span className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[4px] border ${selected ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}>
+                              <span aria-hidden="true" className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[6px] border ${selected ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}>
                                 {selected && <Check size={12} strokeWidth={2.5} className="text-white" />}
                               </span>
                               <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ backgroundColor: option.dot }} />
@@ -355,6 +360,18 @@ export default function OcrFieldValidationSettings() {
                     <span>{ocrConfidenceThreshold(rule)}%</span>
                   </div>}
                   {visibleColumns.some((column) => column.key === "rule") && <div style={{ width: columnWidth("rule") }} className="flex-shrink-0 overflow-hidden px-3"><span className="block truncate" title={description}>{description}</span></div>}
+                  {(["enabled", "required"] as const).filter(key => visibleColumns.some(column => column.key === key)).map(key => {
+                    const checked = key === "enabled" ? rule.enabled !== false : rule.required === true;
+                    return <div key={key} style={{ width: columnWidth(key) }} className="flex-shrink-0 px-3">
+                      <button type="button" role="checkbox" aria-checked={checked} aria-label={`${rule.label} ${key}`} disabled={key === "required" && rule.enabled === false} onClick={() => {
+                        const next = rules.map(item => item.key === rule.key ? { ...item, [key]: !checked, ...(key === "enabled" && checked ? { required: false } : {}) } : item);
+                        setRules(next);
+                        saveOcrFieldValidationRules(next);
+                      }} className={`flex h-[18px] w-[18px] items-center justify-center rounded-[6px] border disabled:opacity-40 ${checked ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}>
+                        {checked && <Check size={12} strokeWidth={2.5} className="text-white" />}
+                      </button>
+                    </div>;
+                  })}
                   <div style={{ width: ACTION_COLUMN_WIDTH }} className={`system-table-row-actions flex min-h-10 flex-shrink-0 items-center justify-end gap-2 border-l border-[#E5EDF9] px-2 ${index % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} group-hover:bg-[#E7F4F9]`}>
                     <button
                       type="button"
@@ -365,15 +382,7 @@ export default function OcrFieldValidationSettings() {
                     >
                       <Pencil size={14} />
                     </button>
-                    <button
-                      type="button"
-                      title="DELETE"
-                      aria-label={`DELETE ${rule.label}`}
-                      onClick={() => setDeleteRuleKeys([rule.key])}
-                      className="flex h-7 w-7 items-center justify-center rounded-md border-2 border-[#D3E1EC] bg-white text-[#7288A3] transition-colors hover:border-[#FF6200] hover:text-[#FF6200]"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    <RowDeleteButton linked={isOcrFieldValidationRuleLinked(rule)} inactive={isInactiveRecord(rule)} label={`Delete ${rule.label}`} onDelete={() => setDeleteRuleKeys([rule.key])} />
                   </div>
                 </div>
               );
@@ -412,18 +421,18 @@ export default function OcrFieldValidationSettings() {
 
       {deleteRuleKeys.length > 0 && (
         <div className="fixed inset-0 z-[220] flex justify-end bg-[#10233A]/10" onMouseDown={() => setDeleteRuleKeys([])}>
-          <aside role="dialog" aria-modal="true" aria-label="Delete OCR validation settings" className="flex h-full w-[340px] max-w-full flex-col bg-white px-6 pb-8 pt-6 shadow-[-2px_0_0_#E5EDF9]" onMouseDown={(event) => event.stopPropagation()}>
+          <aside role="dialog" aria-modal="true" aria-label="Delete or deactivate OCR validation settings" className="flex h-full w-[340px] max-w-full flex-col bg-white px-6 pb-8 pt-6 shadow-[-2px_0_0_#E5EDF9]" onMouseDown={(event) => event.stopPropagation()}>
             <div className="flex items-start justify-between gap-4">
-              <h2 className="font-montserrat text-[22px] font-semibold leading-8 text-[#10233A]">Delete OCR validation setting{deleteRuleKeys.length === 1 ? "" : "s"}</h2>
+              <h2 className="font-montserrat text-[22px] font-semibold leading-8 text-[#10233A]">Delete or deactivate OCR validation setting{deleteRuleKeys.length === 1 ? "" : "s"}</h2>
               <button type="button" aria-label="Close delete OCR validation settings" onClick={() => setDeleteRuleKeys([])} className="flex h-8 w-8 flex-shrink-0 items-center justify-center text-[#7288A3] hover:text-[#007EA7]"><X size={22} /></button>
             </div>
             <p className="mt-6 font-montserrat text-[13px] font-medium leading-5 text-[#10233A]">
-              Are you sure you want to delete {deleteRuleKeys.length === 1 ? "this OCR validation setting" : `${deleteRuleKeys.length} selected OCR validation settings`}?
+              Apply this action to {deleteRuleKeys.length === 1 ? "this OCR validation setting" : `${deleteRuleKeys.length} selected OCR validation settings`}?
             </p>
-            <p className="mt-2 font-montserrat text-[11px] font-medium leading-4 text-[#7288A3]">Deleted validation settings will no longer be applied to OCR documents.</p>
+            <p className="mt-2 font-montserrat text-[11px] font-medium leading-4 text-[#7288A3]">Unused settings will be deleted. Settings linked to the OCR schema or other records will remain visible as inactive and will no longer be applied to OCR documents.</p>
             <div className="mt-auto flex gap-4 border-t border-[#E5EDF9] pt-5">
               <button type="button" onClick={() => setDeleteRuleKeys([])} className="flex h-[42px] flex-1 items-center justify-center rounded-lg border-2 border-[#D3E1EC] bg-white px-4 font-montserrat text-[14px] font-semibold text-[#7288A3] hover:border-[#A1B6C6]">Cancel</button>
-              <button type="button" onClick={confirmDeleteRules} className="flex h-[42px] flex-1 items-center justify-center rounded-lg bg-[#FF6200] px-4 font-montserrat text-[14px] font-semibold text-white hover:bg-[#E55700]">Delete</button>
+              <button type="button" onClick={confirmDeleteRules} className="flex h-[42px] flex-1 items-center justify-center rounded-lg bg-[#FF6200] px-4 font-montserrat text-[14px] font-semibold text-white hover:bg-[#E55700]">Apply</button>
             </div>
           </aside>
         </div>
@@ -458,7 +467,7 @@ export default function OcrFieldValidationSettings() {
                 <input value={editDraft.type} onChange={(event) => setEditDraft((current) => current ? { ...current, type: event.target.value } : current)} className="h-10 rounded-lg border border-[#D3E1EC] px-3 font-montserrat text-[13px] font-medium text-[#10233A] outline-none focus:border-[#007EA7]" />
               </label>
 
-              <div className="relative flex flex-col gap-2">
+              <div ref={editTrafficLightRef} className="relative flex flex-col gap-2">
                 <span className="font-montserrat text-[12px] font-semibold text-[#10233A]">Traffic light</span>
                 <button type="button" aria-haspopup="listbox" aria-expanded={editTrafficLightOpen} onClick={() => setEditTrafficLightOpen((current) => !current)} className="flex h-10 w-full items-center gap-3 rounded-lg border border-[#D3E1EC] bg-white px-3 text-left outline-none hover:border-[#007EA7]">
                   <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: levelByValue.get(editDraft.level)?.dot }} />
@@ -469,7 +478,7 @@ export default function OcrFieldValidationSettings() {
                   <div role="listbox" aria-label="Edit traffic light options" className="absolute left-0 right-0 top-[66px] z-10 rounded-lg border border-[#D3E1EC] bg-white p-1.5 shadow-[0_8px_24px_rgba(16,35,58,0.14)]">
                     {LEVELS.map((option) => (
                       <button key={option.value} type="button" role="option" aria-selected={editDraft.level === option.value} onClick={() => { setEditDraft((current) => current ? { ...current, level: option.value, description: option.description } : current); setEditTrafficLightOpen(false); }} className={`flex min-h-9 w-full items-center gap-3 rounded-md px-2 py-1.5 text-left ${editDraft.level === option.value ? "bg-[#E5EDF9]" : "hover:bg-[#F2F7FC]"}`}>
-                        <span className={`flex h-[18px] w-[18px] items-center justify-center rounded-[4px] border ${editDraft.level === option.value ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}>{editDraft.level === option.value && <Check size={12} className="text-white" />}</span>
+                        <span aria-hidden="true" className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${editDraft.level === option.value ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}>{editDraft.level === option.value && <Check size={12} strokeWidth={2.5} className="text-white" />}</span>
                         <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: option.dot }} />
                         <span className="font-montserrat text-[12px] font-medium text-[#10233A]">{option.label}</span>
                       </button>

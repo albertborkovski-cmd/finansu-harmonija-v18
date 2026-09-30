@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
+import { useDropdownDismiss } from './useDropdownDismiss';
 import {
   ArrowLeft,
   Check,
@@ -7,7 +8,6 @@ import {
   Paperclip,
   Plus,
   Landmark,
-  Trash2,
   Building2,
   Upload,
 } from "lucide-react";
@@ -16,6 +16,8 @@ import { PageActionButton, PageHeader } from "./PageHeader";
 import CompanyBreadcrumb from "./CompanyBreadcrumb";
 import { HeaderBackButton, SystemBreadcrumb } from './SystemNavigation';
 import DepartmentCodesEditor from "./DepartmentCodesEditor";
+import { RowDeleteButton } from './DeleteButtons';
+import { isInactiveRecord, isRecordLinked, removeOrDeactivateRecords } from '../lib/recordLifecycle';
 import OrganizationCounterpartiesSettings from "./OrganizationCounterpartiesSettings";
 import {
   addOrganizationReferenceValue,
@@ -57,6 +59,7 @@ interface FieldDefinition {
 }
 
 type OrganizationBankAccount = {
+  active?: boolean;
   id: string;
   iban: string;
   bank: string;
@@ -637,25 +640,7 @@ export function ClientField({
   const [addingOption, setAddingOption] = useState(false);
   const [newOption, setNewOption] = useState("");
   const fieldRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!isOpen) return;
-    const dismissOutside = (event: PointerEvent) => {
-      if (!fieldRef.current?.contains(event.target as Node)) {
-        setIsOpen(false);
-        setQuery('');
-        setAddingOption(false);
-      }
-    };
-    const dismissOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { setIsOpen(false); setQuery(''); setAddingOption(false); }
-    };
-    document.addEventListener('pointerdown', dismissOutside);
-    document.addEventListener('keydown', dismissOnEscape);
-    return () => {
-      document.removeEventListener('pointerdown', dismissOutside);
-      document.removeEventListener('keydown', dismissOnEscape);
-    };
-  }, [isOpen]);
+  useDropdownDismiss(isOpen, fieldRef, () => { setIsOpen(false); setQuery(''); setAddingOption(false); });
   const referenceSectionByField: Partial<
     Record<string, OrganizationReferenceSection>
   > = {
@@ -736,21 +721,23 @@ export function ClientField({
                       key={option}
                       type="button"
                       role="option"
+                      data-static-selection
                       aria-selected={selected}
                       onClick={() => {
                         onChange(option);
                         setIsOpen(false);
                         setQuery("");
                       }}
-                      className={`flex h-9 w-full items-center gap-2 rounded-md px-2 text-left transition-colors ${selected ? "bg-[#F0F7FA]" : "hover:bg-[#F7FBFC]"}`}
+                      className={`flex h-9 w-full items-center gap-3 rounded-md px-2 text-left transition-colors ${selected ? "bg-[#E5EDF9]" : "hover:bg-[#F7FBFC]"}`}
                     >
                       <span
-                        className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded border ${selected ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
+                        aria-hidden="true"
+                        className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[6px] border ${selected ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
                       >
                         {selected && (
                           <Check
-                            size={13}
-                            strokeWidth={3}
+                            size={12}
+                            strokeWidth={2.5}
                             className="text-white"
                           />
                         )}
@@ -1221,10 +1208,21 @@ export default function CompanyClientInformation({
         : ({ ...company, ...companyUpdate } as Company);
       if (organizationInformationDesign && !digitizationSettingsOnly) {
         const scopedSeriesType = `series::company::${savedCompany.id}`;
-        await supabase
+        const currentSeries = await supabase
           .from("lookup_values")
-          .delete()
+          .select("id,value")
           .eq("type", scopedSeriesType);
+        if (currentSeries.error) throw new Error(currentSeries.error.message);
+        const nextSeriesCodes = new Set(dimensionItems(values.documentSeries).map(item => item.code));
+        const removedSeriesIds = (currentSeries.data ?? [])
+          .filter(item => !nextSeriesCodes.has(String(item.value)))
+          .map(item => item.id);
+        // Kept series are updates, not delete/recreate operations: retain their
+        // identities and lifecycle flags when saving unrelated company settings.
+        if (removedSeriesIds.length) {
+          const removedSeries = await supabase.from("lookup_values").delete().in("id", removedSeriesIds);
+          if (removedSeries.error) throw new Error(removedSeries.error.message);
+        }
         const lookupRows = [
           ...dimensionItems(values.departmentCodes).map((item) => ({
             type: `department_code::company::${savedCompany.id}`,
@@ -1591,6 +1589,7 @@ export default function CompanyClientInformation({
                     organizationBankAccounts.map((account, index) => (
                       <div
                         key={account.id}
+                        data-record-inactive={isInactiveRecord(account) || undefined}
                         className="rounded-xl border border-[#DDE7F0] bg-[#FBFDFE] p-4"
                       >
                         <div className="mb-4 flex items-center justify-between">
@@ -1619,14 +1618,13 @@ export default function CompanyClientInformation({
                             >
                               {account.primary ? "Primary" : "Set primary"}
                             </button>
-                            <button
-                              type="button"
-                              aria-label={`Delete organization bank account ${index + 1}`}
-                              onClick={() =>
+                            <RowDeleteButton
+                              label={`Delete organization bank account ${index + 1}`}
+                              linked={isRecordLinked(account)}
+                              inactive={isInactiveRecord(account)}
+                              onDelete={() =>
                                 setOrganizationBankAccounts((current) => {
-                                  const next = current.filter(
-                                    (item) => item.id !== account.id,
-                                  );
+                                  const next = removeOrDeactivateRecords(current, new Set([account.id]));
                                   if (
                                     account.primary &&
                                     next.length &&
@@ -1637,10 +1635,7 @@ export default function CompanyClientInformation({
                                   return next;
                                 })
                               }
-                              className="flex h-8 w-8 items-center justify-center rounded-md text-[#7288A3] hover:bg-[#FCEEEE] hover:text-[#D64545]"
-                            >
-                              <Trash2 size={16} />
-                            </button>
+                            />
                           </div>
                         </div>
                         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">

@@ -39,6 +39,7 @@ export type ReconciliationProposal = {
   id: string;
   organizationId: string;
   fundingId: string;
+  /** Legacy field name: manual reconciliation can allocate to any opposite GL entry. */
   allocations: { invoiceId: string; amountMinor: number }[];
   confidence: 'High' | 'Review required';
   rule: string;
@@ -139,12 +140,31 @@ export function isClientReconciliationItem(item: ReconciliationItem): boolean {
   return getReconciliationRoute(item).kind === 'client';
 }
 
+/** The counterparty GL entry, not the opposite bank/cash posting of a payment. */
+export function getReconciliationEntrySide(item: Pick<ReconciliationItem, 'kind' | 'side'>): 'Debit' | 'Credit' {
+  return (item.side === 'Receivable') === (item.kind === 'Invoice') ? 'Debit' : 'Credit';
+}
+
+/** Counterparty is a removable UI filter; the accounting organization is never removable. */
+export function areReconciliationEntriesCompatible(left: ReconciliationItem, right: ReconciliationItem): boolean {
+  return left.id !== right.id
+    && left.organizationId === right.organizationId
+    && left.currency === right.currency
+    && getReconciliationEntrySide(left) !== getReconciliationEntrySide(right);
+}
+
 function itemError(item: ReconciliationItem): string | undefined {
   if (!item || !isText(item.id)) return 'Missing item ID.';
   if (!isText(item.organizationId)) return 'Missing organization ID.';
   if (!hasReconciliationClient(item) && !(item.kind === 'Payment' && item.counterpartyId === '' && item.counterpartyName === '')) return 'A client ID and name are required together, except for payments without a client.';
   if (Object.hasOwn(item, 'payeeName') && !isText(item.payeeName)) return 'Payee name must be a non-empty string when supplied.';
   if (Object.hasOwn(item, 'glAccountCode') && !isAccountCode(item.glAccountCode)) return 'GL account must be a non-empty account code without outer whitespace when supplied.';
+  if (Object.hasOwn(item, 'paymentPurpose') && typeof item.paymentPurpose !== 'string') return 'Payment purpose must be a string when supplied.';
+  if (Object.hasOwn(item, 'missingDocument') && typeof item.missingDocument !== 'boolean') return 'Missing document must be a boolean when supplied.';
+  if (Object.hasOwn(item, 'missingDocumentMarkedAt') && !isTimestamp(item.missingDocumentMarkedAt)) return 'Missing document timestamp must be a valid ISO timestamp.';
+  if (Object.hasOwn(item, 'missingDocumentMarkedBy') && !isText(item.missingDocumentMarkedBy)) return 'Missing document actor must be a non-empty string.';
+  if (Object.hasOwn(item, 'exchangeRate') && (typeof item.exchangeRate !== 'number' || !Number.isFinite(item.exchangeRate) || item.exchangeRate <= 0)) return 'Exchange rate must be a positive finite number.';
+  if (Object.hasOwn(item, 'exchangeRateCurrency') && (typeof item.exchangeRateCurrency !== 'string' || !/^[A-Z]{3}$/.test(item.exchangeRateCurrency))) return 'Exchange rate currency must be a three-letter currency code.';
   if (item.kind !== 'Invoice' && !FUNDING_KINDS.has(item.kind)) return 'Unsupported item kind.';
   if (item.side !== 'Receivable' && item.side !== 'Payable') return 'Unsupported receivable/payable side.';
   if (item.currency !== 'EUR' && item.currency !== 'USD') return 'Test mode supports EUR and USD only.';
@@ -315,8 +335,9 @@ function validateAllocation(byId: Map<string, ReconciliationItem>, fundingId: st
   const funding = byId.get(fundingId);
   const invoice = byId.get(invoiceId);
   if (!funding || !invoice || itemError(funding) || itemError(invoice)) throw new Error('Allocation references a missing or invalid item.');
-  if (!FUNDING_KINDS.has(funding.kind) || invoice.kind !== 'Invoice') throw new Error('Allocations must connect funding to an invoice.');
-  if (!sameScope(funding, invoice)) throw new Error('Allocation organization, counterparty, currency and side must match.');
+  if (!areReconciliationEntriesCompatible(funding, invoice)) {
+    throw new Error('Allocations require distinct records from the same organization and currency with opposite GL entry sides (Debit / Credit).');
+  }
   if (!isMinor(amountMinor) || amountMinor === 0) throw new Error('Allocation amounts must be positive safe integer cents.');
   return { funding, invoice };
 }
@@ -463,6 +484,14 @@ export function parseReconciliationState(raw: string, companyId: string): Reconc
       counterpartyName: row.kind === 'Payment' && row.counterpartyName === '' ? '' : requiredText(row.counterpartyName, `${label} counterparty name`),
       ...(Object.hasOwn(row, 'payeeName') ? { payeeName: requiredText(row.payeeName, `${label} payee name`) } : {}),
       ...(Object.hasOwn(row, 'glAccountCode') ? { glAccountCode: requiredText(row.glAccountCode, `${label} GL account`) } : {}),
+      // Preserve matching restrictions and bank purpose across reloads. They are
+      // validated by itemError below before reaching any reconciliation action.
+      ...(Object.hasOwn(row, 'paymentPurpose') ? { paymentPurpose: row.paymentPurpose as string } : {}),
+      ...(Object.hasOwn(row, 'missingDocument') ? { missingDocument: row.missingDocument as boolean } : {}),
+      ...(Object.hasOwn(row, 'missingDocumentMarkedAt') ? { missingDocumentMarkedAt: row.missingDocumentMarkedAt as string } : {}),
+      ...(Object.hasOwn(row, 'missingDocumentMarkedBy') ? { missingDocumentMarkedBy: row.missingDocumentMarkedBy as string } : {}),
+      ...(Object.hasOwn(row, 'exchangeRate') ? { exchangeRate: row.exchangeRate as number } : {}),
+      ...(Object.hasOwn(row, 'exchangeRateCurrency') ? { exchangeRateCurrency: row.exchangeRateCurrency as string } : {}),
       kind: requiredText(row.kind, `${label} kind`) as ReconciliationItem['kind'],
       side: requiredText(row.side, `${label} side`) as ReconciliationItem['side'],
       documentNumber: requiredText(row.documentNumber, `${label} document number`),

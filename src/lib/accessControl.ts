@@ -1,3 +1,4 @@
+import { isInactiveRecord } from './recordLifecycle';
 export type AppModuleId = 'companies' | 'chats' | 'notifications' | 'settings' | 'faq' | 'ocr';
 
 export type ModulePermission = {
@@ -8,6 +9,33 @@ export type ModulePermission = {
 export type AccessMap = Record<AppModuleId, ModulePermission>;
 
 export type MenuAccessMap = Record<string, ModulePermission>;
+export type MenuVisibilityMap = Record<string, boolean>;
+
+export const ROLE_MENU_ITEMS = [
+  { id: 'global-dashboard', label: 'Dashboard' },
+  { id: 'dashboard', label: 'Companies' },
+  { id: 'uploaded-documents', label: 'Uploaded documents' },
+  { id: 'documents', label: 'Documents' },
+  { id: 'invoices', label: 'Invoices' },
+  { id: 'reports', label: 'Debts' },
+  { id: 'bank', label: 'Bank' },
+  { id: 'reconciliation', label: 'Reconciliation' },
+  { id: 'reports-declarations', label: 'Reports & declarations' },
+  { id: 'notifications', label: 'Tasks' },
+  { id: 'messages', label: 'Chats' },
+  { id: 'settings-analytics', label: 'Analytics' },
+  { id: 'ocr', label: 'OCR' },
+  { id: 'settings', label: 'Settings' },
+];
+
+export function parseMenuVisibility(value: string | undefined, rights: MenuAccessMap): MenuVisibilityMap {
+  let stored: MenuVisibilityMap = {};
+  try { stored = value ? JSON.parse(value) : {}; } catch { /* Legacy role. */ }
+  return Object.fromEntries(ROLE_MENU_ITEMS.map(item => [item.id,
+    typeof stored[item.id] === 'boolean' ? stored[item.id] : Boolean(
+      (rights[item.id] ?? rights[`module:${item.id}`] ?? rights['module:companies'])?.view),
+  ]));
+}
 
 export type RoleAccessNode = {
   id: string;
@@ -22,6 +50,7 @@ export type AppSession = {
   roleNames: string[];
   access: AccessMap;
   menuAccess: MenuAccessMap;
+  menuVisibility?: MenuVisibilityMap;
 };
 
 export const APP_MODULES: Array<{ id: AppModuleId; label: string }> = [
@@ -39,10 +68,16 @@ export const ROLE_ACCESS_TREE: RoleAccessNode[] = [
       { id: 'global-dashboard', label: 'Dashboard', module: 'companies' },
       { id: 'uploaded-documents', label: 'Uploaded documents', module: 'companies' },
       { id: 'dashboard', label: 'Companies', module: 'companies' },
+      { id: 'documents', label: 'Documents', module: 'companies' },
+      { id: 'invoices', label: 'Invoices', module: 'companies' },
+      { id: 'reports', label: 'Debts', module: 'companies' },
+      { id: 'bank', label: 'Bank', module: 'companies' },
+      { id: 'reconciliation', label: 'Reconciliation', module: 'companies' },
+      { id: 'reports-declarations', label: 'Reports & declarations', module: 'companies' },
     ],
   },
   { id: 'messages', label: 'Chats', module: 'chats' },
-  { id: 'notifications', label: 'Notifications & Reminders', module: 'notifications' },
+  { id: 'notifications', label: 'Tasks', module: 'notifications' },
   {
     id: 'module:settings', label: 'Settings', module: 'settings', children: [
       {
@@ -58,15 +93,13 @@ export const ROLE_ACCESS_TREE: RoleAccessNode[] = [
         ],
       },
       {
-        id: 'settings-organizations', label: 'Organizations', module: 'settings', children: [
-          { id: 'settings-organizations-company-status', label: 'Company status', module: 'settings' },
+        id: 'settings-organizations', label: 'General settings', module: 'settings', children: [
           { id: 'settings-organizations-tax-country', label: 'Tax country', module: 'settings' },
           { id: 'settings-organizations-legal-form', label: 'Legal form', module: 'settings' },
           { id: 'settings-organizations-base-currency', label: 'Base currency', module: 'settings' },
-          { id: 'settings-organizations-document-type', label: 'Document type', module: 'settings' },
           { id: 'settings-organizations-document-status', label: 'Document Status', module: 'settings' },
           { id: 'settings-organizations-unit', label: 'Unit', module: 'settings' },
-          { id: 'settings-organizations-operation-date-validation', label: 'Operation date validation', module: 'settings' },
+          { id: 'settings-organizations-operation-date-validation', label: 'Period locking', module: 'settings' },
           { id: 'settings-organizations-email', label: 'Email templates', module: 'settings' },
           { id: 'settings-vat-classifications', label: 'VAT classifications', module: 'settings' },
         ],
@@ -96,6 +129,7 @@ export const ROLE_ACCESS_TREE: RoleAccessNode[] = [
       {
         id: 'ocr-admin', label: 'Administration', module: 'ocr', children: [
           { id: 'ocr-admin-human-task-types', label: 'OCR Validation Settings', module: 'ocr' },
+          { id: 'ocr-admin-document-type', label: 'Document type', module: 'ocr' },
           { id: 'ocr-admin-activity', label: 'Activity Log', module: 'ocr' },
         ],
       },
@@ -119,14 +153,20 @@ export function createFullMenuAccess(): MenuAccessMap {
 
 export function deriveModuleAccess(menuAccess: MenuAccessMap): AccessMap {
   const result = createEmptyAccess();
-  ROLE_ACCESS_TREE.forEach(node => {
+  flattenRoleAccessTree().forEach(node => {
     const permission = menuAccess[node.id] ?? { view: false, edit: false };
-    result[node.module] = { view: permission.view, edit: permission.edit };
+    result[node.module].view ||= permission.view;
+    result[node.module].edit ||= permission.edit;
   });
   return result;
 }
 
 export function canViewMenu(session: AppSession, menu: string): boolean {
+  if (session.roleNames.includes('Inactive')) return false;
+  if (menu === 'settings-administrator') return session.roleNames.some(isSystemAdministratorRole);
+  const visibilityKey = menu.startsWith('ocr-') ? 'ocr'
+    : menu.startsWith('settings-') && menu !== 'settings-analytics' ? 'settings' : menu;
+  if (session.menuVisibility?.[visibilityKey] !== undefined) return session.menuVisibility[visibilityKey];
   const exact = session.menuAccess?.[menu];
   const node = flattenRoleAccessTree().find(item => item.id === menu);
   if (node?.children?.length)
@@ -137,6 +177,8 @@ export function canViewMenu(session: AppSession, menu: string): boolean {
 }
 
 export function canEditMenu(session: AppSession, menu: string): boolean {
+  if (session.roleNames.includes('Inactive')) return false;
+  if (menu === 'settings-administrator') return session.roleNames.some(isSystemAdministratorRole);
   const exact = session.menuAccess?.[menu];
   if (exact) return exact.edit;
   const module = moduleForMenu(menu);
@@ -201,10 +243,19 @@ function parseAccess(value?: string): AccessMap | null {
   }
 }
 
+export function migrateDocumentTypeMenuKey<T>(values: Record<string, T>): Record<string, T> {
+  const legacy = 'settings-organizations-document-type';
+  if (!(legacy in values)) return values;
+  const next = { ...values };
+  if (!('ocr-admin-document-type' in next)) next['ocr-admin-document-type'] = next[legacy];
+  delete next[legacy];
+  return next;
+}
+
 function parseMenuAccess(value: string | undefined, fallback: AccessMap): MenuAccessMap {
   if (!value || value === '—') return createMenuAccessFromModules(fallback);
   try {
-    const parsed = JSON.parse(value) as MenuAccessMap;
+    const parsed = migrateDocumentTypeMenuKey(JSON.parse(value) as MenuAccessMap);
     const result = createMenuAccessFromModules(fallback);
     flattenRoleAccessTree().forEach(node => {
       if (!parsed[node.id]) return;
@@ -227,7 +278,7 @@ function resolveConfiguredUser(email: string): AppSession | null {
     if (!user || user.status === 'Disabled') continue;
 
     const assignedRoles = (user.roles ?? '').split(',').map(role => role.trim()).filter(role => role && role !== 'Unassigned');
-    const roles = readRows(`${prefix}:roles`).filter(role => assignedRoles.includes(role.name));
+    const roles = readRows(`${prefix}:roles`).filter(role => assignedRoles.includes(role.name) && !isInactiveRecord(role));
 
     // Administrator/Administration is a system-wide role. Its access is not
     // constrained by a stale saved permission snapshot: newly added modules,
@@ -244,10 +295,13 @@ function resolveConfiguredUser(email: string): AppSession | null {
 
     const access = createEmptyAccess();
     const menuAccess = createMenuAccessFromModules(access);
+    const menuVisibility = Object.fromEntries(ROLE_MENU_ITEMS.map(item => [item.id, false]));
     roles.forEach(role => {
       const roleAccess = parseAccess(role.moduleAccess);
       if (!roleAccess) return;
       const roleMenuAccess = parseMenuAccess(role.menuAccess, roleAccess);
+      const roleVisibility = parseMenuVisibility(role.menuVisibility, roleMenuAccess);
+      ROLE_MENU_ITEMS.forEach(item => { menuVisibility[item.id] ||= roleVisibility[item.id]; });
       APP_MODULES.forEach(module => {
         access[module.id].view ||= roleAccess[module.id].view;
         access[module.id].edit ||= roleAccess[module.id].edit;
@@ -276,8 +330,9 @@ function resolveConfiguredUser(email: string): AppSession | null {
       email,
       fullName: user.fullName || user.username || email,
       roleNames: assignedRoles.length ? assignedRoles : ['Unassigned'],
-      access: hasVisibleModule ? access : createFullViewAccess(),
-      menuAccess: hasVisibleModule ? menuAccess : createMenuAccessFromModules(createFullViewAccess()),
+      ...(assignedRoles.length ? { menuVisibility } : {}),
+      access: hasVisibleModule || assignedRoles.length ? access : createFullViewAccess(),
+      menuAccess: hasVisibleModule || assignedRoles.length ? menuAccess : createMenuAccessFromModules(createFullViewAccess()),
     };
   }
   return null;
@@ -285,6 +340,11 @@ function resolveConfiguredUser(email: string): AppSession | null {
 
 export function resolveSessionForEmail(rawEmail: string): AppSession {
   const email = rawEmail.trim().toLowerCase();
+  const inactiveUser = ['internal', 'external'].some(audience => readRows(`finansu-harmonija:v7:settings:${audience}:users`).some(user => user.email?.trim().toLowerCase() === email && isInactiveRecord(user)));
+  if (inactiveUser) {
+    const access = createEmptyAccess();
+    return { email, fullName: email, roleNames: ['Inactive'], access, menuAccess: createMenuAccessFromModules(access) };
+  }
   // Explicit public demo persona. No administrative, OCR or company-edit access.
   if (email === 'aurika.z@meso.lt') {
     const access = createEmptyAccess();

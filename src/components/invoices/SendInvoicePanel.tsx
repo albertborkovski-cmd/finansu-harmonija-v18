@@ -43,7 +43,7 @@ export default function SendInvoicePanel({
   reconciliationDate = new Date().toISOString().slice(0, 10),
   onClose,
 }: SendInvoicePanelProps) {
-  const templates = useMemo(() => loadOrganizationEmailTemplates().filter((template) => template.active), []);
+  const templates = useMemo(() => loadOrganizationEmailTemplates(organizationId).filter((template) => template.active), [organizationId]);
   const [selectedTemplateId, setSelectedTemplateId] = useState(templates[0]?.id ?? '');
   const [email, setEmail] = useState(recipientEmail);
   const [portalUrl] = useState(() => createDebtReconciliationPortalUrl(invoice.number || invoice.id));

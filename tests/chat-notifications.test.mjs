@@ -245,7 +245,7 @@ test('foreign users, sender of the source message and empty selections cannot ma
   assert.equal(state.writes.length, 1);
 });
 
-test('reading incoming signal clears only its unread badge and dashboard attention, preserving Tasks and ordinary actions', () => {
+test('reading incoming signal clears dashboard attention but does not resolve active notifications', () => {
   const state = setup();
   publishChatMessageNotification(context(), message(), state.storage);
   const incoming = state.rows()[0];
@@ -253,11 +253,11 @@ test('reading incoming signal clears only its unread badge and dashboard attenti
   const task = { id: 'task-1', name: 'Task', type: 'Review', message: 'Keep', status: 'Active', taskStatus: 'Open', daysTillRemind: '', requiresAction: false };
   let records = getAttentionNotifications([incoming, ordinary], [task], true);
   assert.equal(getDashboardAttentionNotifications(records, viewer()).length, 3);
-  assert.deepEqual(getNotificationTabCounts(records, viewer()), { notifications: 1, reminders: 1 });
+  assert.deepEqual(getNotificationTabCounts(records, viewer()), { notifications: 2, reminders: 1 });
   markChatNotificationsRead(context(), ['message-1'], viewer().email, state.storage);
   records = getAttentionNotifications([...state.rows(), ordinary], [task], true);
   assert.deepEqual(new Set(getDashboardAttentionNotifications(records, viewer()).map(row => row.id)), new Set(['ordinary-action', 'task-1']));
-  assert.deepEqual(getNotificationTabCounts(records, viewer()), { notifications: 0, reminders: 1 });
+  assert.deepEqual(getNotificationTabCounts(records, viewer()), { notifications: 2, reminders: 1 });
   assert.equal(state.rows().length, 1);
   assert.equal(isNotificationRead(incoming, viewer().email), false, 'Original immutable signal is unchanged');
 });

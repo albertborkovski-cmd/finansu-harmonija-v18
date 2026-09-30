@@ -389,7 +389,7 @@ export default function CompanyActionHistoryView({ company, administrativeOnly =
                 />
               </div>
             ))}
-            <div className="w-11 flex-shrink-0" aria-hidden="true" />
+            <div className="system-table-row-actions w-11 flex-shrink-0" aria-hidden="true" />
           </div>
 
           <div

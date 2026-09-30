@@ -39,6 +39,7 @@ import { importMenuRecords } from "../lib/menuImport";
 import { loadCompanyGeneralLedgerAccountOptions } from "./GeneralLedgerView";
 import GeneralLedgerAccountSelect from "./GeneralLedgerAccountSelect";
 import SearchableSelect from "./SearchableSelect";
+import { useDropdownDismiss } from "./useDropdownDismiss";
 import SendInvoicePanel from "./invoices/SendInvoicePanel";
 import { InvoicePaymentPreviewPanel } from "./invoices/CreateInvoicePanel";
 import type { InvoiceChatContext } from "./invoices/invoiceChat";
@@ -788,8 +789,10 @@ function SystemDocumentFilterDropdown({
   onChange: (value: string) => void;
   minWidth?: number;
 }) {
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  useDropdownDismiss(open, dropdownRef, () => onOpenChange(false));
   return (
-    <div className="relative flex-shrink-0">
+    <div ref={dropdownRef} className="relative flex-shrink-0">
       <button
         type="button"
         aria-label={`Filter by ${label}`}
@@ -827,14 +830,17 @@ function SystemDocumentFilterDropdown({
         >
           <button
             type="button"
+            aria-pressed={!value}
+            data-static-selection="true"
             onClick={() => {
               onChange("");
               onOpenChange(false);
             }}
-            className="flex h-9 w-full items-center gap-3 rounded-md px-2 text-left hover:bg-[#F2F7FC]"
+            className={`grid h-9 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-3 rounded-md px-2 text-left ${!value ? 'bg-[#E5EDF9]' : 'hover:bg-[#F2F7FC]'}`}
           >
             <span
-              className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[4px] border ${!value ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
+              aria-hidden="true"
+              className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${!value ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
             >
               {!value && (
                 <Check size={12} strokeWidth={2.5} className="text-white" />
@@ -851,14 +857,17 @@ function SystemDocumentFilterDropdown({
                 <button
                   key={option.value}
                   type="button"
+                  aria-pressed={checked}
+                  data-static-selection="true"
                   onClick={() => {
                     onChange(option.value);
                     onOpenChange(false);
                   }}
-                  className="flex min-h-9 w-full items-center gap-3 rounded-md px-2 py-1.5 text-left hover:bg-[#F2F7FC]"
+                  className={`grid h-9 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-3 rounded-md px-2 text-left ${checked ? 'bg-[#E5EDF9]' : 'hover:bg-[#F2F7FC]'}`}
                 >
                   <span
-                    className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[4px] border ${checked ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
+                    aria-hidden="true"
+                    className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${checked ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
                   >
                     {checked && (
                       <Check
@@ -868,7 +877,7 @@ function SystemDocumentFilterDropdown({
                       />
                     )}
                   </span>
-                  <span className="font-montserrat text-[13px] font-medium text-[#10233A]">
+                  <span className="truncate font-montserrat text-[13px] font-medium text-[#10233A]">
                     {option.label}
                   </span>
                 </button>
@@ -1019,19 +1028,10 @@ function LookupCellDropdown({
       });
   }, [companyId, generalLedgerName, lookupType, open, scopedLookupType]);
 
-  useEffect(() => {
-    if (!open) return;
-    function handler(e: MouseEvent) {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node) &&
-        !menuRef.current?.contains(e.target as Node)
-      )
-        setOpen(false);
-    }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
+  useDropdownDismiss(open, containerRef, () => {
+    setOpen(false);
+    setQuery("");
+  }, menuRef);
 
   const updateMenuPosition = useCallback(() => {
     const anchor = containerRef.current;
@@ -1180,14 +1180,15 @@ function LookupCellDropdown({
                 key={opt}
                 type="button"
                 disabled={saving}
+                aria-pressed={opt === value}
+                data-static-selection="true"
                 onClick={() => handleSelect(opt)}
-                className="flex items-center justify-between w-full px-3 py-1.5 text-left text-[12px] font-montserrat font-medium hover:bg-[#F0F8FC] transition-colors disabled:opacity-50"
-                style={{ color: opt === value ? "#007EA7" : "#10233A" }}
+                className={`grid h-9 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-3 rounded-md px-3 text-left font-montserrat text-[12px] font-medium text-[#10233A] disabled:opacity-50 ${opt === value ? 'bg-[#E5EDF9]' : 'hover:bg-[#F0F8FC]'}`}
               >
-                <span>{opt}</span>
-                {opt === value && (
-                  <Check size={11} className="text-[#007EA7] flex-shrink-0" />
-                )}
+                <span aria-hidden="true" className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${opt === value ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>
+                  {opt === value && <Check size={12} strokeWidth={2.5} className="text-white" />}
+                </span>
+                <span className="truncate">{opt}</span>
               </button>
             ))}
           </div>
@@ -1246,12 +1247,15 @@ function LookupCellDropdown({
                 key={opt}
                 type="button"
                 disabled={saving}
+                aria-pressed={opt === value}
+                data-static-selection="true"
                 onClick={() => handleSelect(opt)}
-                className="flex w-full items-center justify-between px-3 py-1.5 text-left font-montserrat text-[12px] font-medium transition-colors hover:bg-[#F0F8FC] disabled:opacity-50"
-                style={{ color: opt === value ? "#007EA7" : "#10233A" }}
+                className={`grid h-9 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-3 rounded-md px-3 text-left font-montserrat text-[12px] font-medium text-[#10233A] disabled:opacity-50 ${opt === value ? 'bg-[#E5EDF9]' : 'hover:bg-[#F0F8FC]'}`}
               >
-                <span>{opt}</span>
-                {opt === value && <Check size={11} className="flex-shrink-0 text-[#007EA7]" />}
+                <span aria-hidden="true" className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${opt === value ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>
+                  {opt === value && <Check size={12} strokeWidth={2.5} className="text-white" />}
+                </span>
+                <span className="truncate">{opt}</span>
               </button>
             ))}
           </div>
@@ -1438,6 +1442,10 @@ export default function Documents({
   const [statusDropdownDocId, setStatusDropdownDocId] = useState<string | null>(
     null,
   );
+  const statusDropdownRef = useRef<HTMLDivElement>(null);
+  useDropdownDismiss(statusDropdownDocId !== null, statusDropdownRef, () => setStatusDropdownDocId(null));
+  useDropdownDismiss(showAddFilterMenu, addFilterRef, () => setShowAddFilterMenu(false));
+  useDropdownDismiss(showRangeAmountMenu, rangeAmountRef, () => setShowRangeAmountMenu(false));
 
 
   useEffect(() => {
@@ -2517,6 +2525,9 @@ export default function Documents({
                     return (
                       <button
                         key={col.key}
+                        type="button"
+                        aria-pressed={checked}
+                        data-static-selection="true"
                         onClick={() => {
                           setPendingDynamicFilterKeys((current) =>
                             checked
@@ -2524,20 +2535,21 @@ export default function Documents({
                               : [...current, col.key],
                           );
                         }}
-                        className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-left font-montserrat font-medium text-[13px] text-[#10233A] hover:bg-[#F0F7FA] transition-colors"
+                        className={`grid h-9 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-3 rounded-md px-2 text-left font-montserrat font-medium text-[13px] text-[#10233A] ${checked ? 'bg-[#E5EDF9]' : 'hover:bg-[#F0F7FA]'}`}
                       >
                         <span
-                          className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[4px] border ${checked ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
+                          aria-hidden="true"
+                          className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${checked ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
                         >
                           {checked && (
                             <Check
-                              size={13}
+                              size={12}
                               strokeWidth={2.5}
                               className="text-white"
                             />
                           )}
                         </span>
-                        {col.label}
+                        <span className="truncate">{col.label}</span>
                       </button>
                     );
                   })}
@@ -2671,7 +2683,7 @@ export default function Documents({
               })}
               {!hideRowActions && (
                 <div
-                  className={`flex-shrink-0 ${editOnlyActions ? "w-[74px]" : "w-[160px]"}`}
+                  className={`system-table-row-actions flex-shrink-0 ${editOnlyActions ? "w-[74px]" : "w-[160px]"}`}
                 />
               )}
             </div>
@@ -2736,8 +2748,13 @@ export default function Documents({
                                   <span className="truncate">{doc.status}</span>
                                 </span>
                               ) : (
-                              <div className="relative">
+                              <div ref={statusDropdownDocId === doc.id ? statusDropdownRef : undefined} className="relative">
                                 <button
+                                  type="button"
+                                  aria-label={`Status for ${doc.number || doc.id}`}
+                                  aria-haspopup="listbox"
+                                  aria-expanded={statusDropdownDocId === doc.id}
+                                  data-static-selection="true"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     setStatusDropdownDocId((prev) =>
@@ -2758,25 +2775,28 @@ export default function Documents({
                                 </button>
                                 {statusDropdownDocId === doc.id && (
                                   <div
-                                    className="absolute top-full mt-1 left-0 bg-white border border-[#D3E1EC] rounded-lg shadow-lg z-30 overflow-hidden"
+                                    role="listbox"
+                                    aria-label="Document status options"
+                                    className="absolute top-full mt-1 left-0 bg-white border border-[#D3E1EC] rounded-lg shadow-lg z-30 overflow-hidden p-1.5"
                                     style={{ minWidth: 160 }}
                                     onClick={(e) => e.stopPropagation()}
                                   >
                                     {STATUSES.map((s) => (
                                       <button
                                         key={s}
+                                        type="button"
+                                        role="option"
+                                        aria-selected={doc.status === s}
+                                        data-static-selection="true"
                                         onClick={() =>
                                           handleStatusChange(doc, s)
                                         }
-                                        className={`w-full flex items-center gap-2 px-3 py-2 font-montserrat text-[12px] hover:bg-[#F0F7FA] transition-colors text-left ${doc.status === s ? "text-[#007EA7] font-semibold" : "text-[#10233A]"}`}
+                                        className={`grid h-9 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-3 rounded-md px-2 font-montserrat text-[12px] text-left text-[#10233A] ${doc.status === s ? "bg-[#E5EDF9]" : "hover:bg-[#F0F7FA]"}`}
                                       >
-                                        <div
-                                          className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                                          style={{
-                                            background: STATUS_COLORS[s],
-                                          }}
-                                        />
-                                        {s}
+                                        <span aria-hidden="true" className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${doc.status === s ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>
+                                          {doc.status === s && <Check size={12} strokeWidth={2.5} className="text-white" />}
+                                        </span>
+                                        <span className="flex min-w-0 items-center gap-2"><span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: STATUS_COLORS[s] }} /><span className="truncate">{s}</span></span>
                                       </button>
                                     ))}
                                   </div>
@@ -2836,7 +2856,7 @@ export default function Documents({
                         </div>
                       ))}
                       {hideRowActions ? null : editOnlyActions ? (
-                        <div className="ml-2 flex w-[74px] flex-shrink-0 items-center justify-end gap-1">
+                        <div className="system-table-row-actions flex w-[74px] flex-shrink-0 items-center justify-end gap-1">
                           <button
                             type="button"
                             title="EDIT"
@@ -2863,7 +2883,7 @@ export default function Documents({
                           </button>
                         </div>
                       ) : (
-                        <div className="ml-2 flex w-[160px] flex-shrink-0 flex-row items-center justify-end gap-1">
+                        <div className="system-table-row-actions flex w-[160px] flex-shrink-0 flex-row items-center justify-end gap-1">
                           <button
                             type="button"
                             title="EDIT"

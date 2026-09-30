@@ -2,7 +2,6 @@ import { toggleFilteredSelection } from '../../lib/tableSelection';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   RefreshCw,
-  Trash2,
   Users,
 } from 'lucide-react';
 import ColumnSettingsPanel, { type ColConfig } from '../ColumnSettingsPanel';
@@ -15,9 +14,12 @@ import { ColumnSettingsButton } from '../ScopedActionButtons';
 import ColumnSortButton, { useMultiColumnSort } from '../ColumnSortButton';
 import ImportButton from '../ImportButton';
 import { deleteAggregatedRuns, getAggregatedRuns, type RunStatus } from '../automationRunsStore';
+import { BulkDeleteButton, RowDeleteButton } from '../DeleteButtons';
+import { isInactiveRecord } from '../../lib/recordLifecycle';
 
 interface RunEntry {
   id: string;
+  inactive?: boolean;
   processId: string;
   processName: string;
   tasksCount: number;
@@ -50,6 +52,7 @@ const STATUS_COLOR: Record<RunStatus, string> = {
 function readRuns(): RunEntry[] {
   return getAggregatedRuns().map(run => ({
     id: run.id,
+    inactive: run.inactive,
     processId: run.processId,
     processName: run.processName,
     tasksCount: run.tasks,
@@ -96,14 +99,14 @@ export default function LogsTab({
   const { startResize } = useColumnResize(columns, setColumns);
 
   const visibleColumns = columns.filter(column => column.visible);
-  const gridTemplateColumns = `42px ${visibleColumns.map(column => `${column.width}px`).join(' ')} 68px`;
+  const gridTemplateColumns = `42px ${visibleColumns.map(column => `${column.width}px`).join(' ')} minmax(68px, 1fr)`;
   const tableMinWidth = visibleColumns.reduce((sum, column) => sum + column.width, 0) + 110;
   const filteredRuns = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     if (!normalizedQuery) return runs;
     return runs.filter(run => Object.values(run).some(value => String(value).toLowerCase().includes(normalizedQuery)));
   }, [query, runs]);
-  const { sortedRows, changeSort, directionFor } = useMultiColumnSort(filteredRuns, (run, key) => run[key as keyof RunEntry]);
+  const { sortedRows, changeSort, directionFor } = useMultiColumnSort(filteredRuns, (run, key) => key === 'tasksCount' ? run.tasksCount : String(run[key as keyof RunEntry] ?? ''));
 
   useEffect(() => {
     const syncRuns = () => setRuns(readRuns());
@@ -127,7 +130,7 @@ export default function LogsTab({
 
   const removeRun = (runToRemove: RunEntry) => {
     deleteAggregatedRuns([{ processId: runToRemove.processId, runId: runToRemove.id }]);
-    setRuns(previous => previous.filter(run => !(run.processId === runToRemove.processId && run.id === runToRemove.id)));
+    setRuns(readRuns());
     setSelectedRows(previous => {
       const next = new Set(previous);
       next.delete(runToRemove.id);
@@ -169,6 +172,11 @@ export default function LogsTab({
         <OcrSearchField ariaLabel="Search runs" value={query} onChange={setQuery} />
 
         <div className="flex flex-shrink-0 flex-row items-center gap-4 rounded bg-white p-[6px]">
+          <BulkDeleteButton linked selectedCount={selectedRows.size} label="Deactivate selected runs" onDelete={() => {
+            deleteAggregatedRuns(runs.filter(run => selectedRows.has(run.id)).map(run => ({ processId: run.processId, runId: run.id })));
+            setRuns(readRuns());
+            setSelectedRows(new Set());
+          }} />
           <ColumnSettingsButton onClick={() => setShowColumnSettings(true)} />
           <ImportButton scope="Machine learning runs" />
           <button type="button" title="REFRESH ALL" aria-label="Refresh all runs" onClick={() => setRuns(current => current.map(run => ({ ...run })))} className="text-[#7288A3] transition-colors hover:text-[#007EA7]">
@@ -197,7 +205,7 @@ export default function LogsTab({
 
           <div className="mt-3 flex flex-col">
             {sortedRows.slice(0, currentPage * TABLE_BATCH_SIZE).map((run, rowIndex) => (
-              <div key={run.id} className={`grid h-9 w-full items-center rounded-lg ${rowIndex % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} transition-colors hover:bg-[#E7F4F9]`} style={{ gridTemplateColumns }}>
+              <div key={run.id} data-record-inactive={isInactiveRecord(run) || undefined} className={`grid h-9 w-full items-center rounded-lg ${rowIndex % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} transition-colors hover:bg-[#E7F4F9]`} style={{ gridTemplateColumns }}>
                 <div className="flex h-9 items-center px-3">
                   <Checkbox checked={selectedRows.has(run.id)} onChange={() => toggleRow(run.id)} label={`Select run ${run.id}`} />
                 </div>
@@ -210,9 +218,7 @@ export default function LogsTab({
                   <button type="button" aria-label={`Open resources for ${run.id}`} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] transition-colors hover:border-[#007EA7]">
                     <Users size={16} />
                   </button>
-                  <button type="button" aria-label={`Delete ${run.id}`} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] transition-colors hover:border-[#007EA7]" onClick={() => removeRun(run)}>
-                    <Trash2 size={16} />
-                  </button>
+                  <RowDeleteButton linked inactive={isInactiveRecord(run)} label={`Deactivate ${run.id}`} onDelete={() => removeRun(run)} />
                 </div>
               </div>
             ))}

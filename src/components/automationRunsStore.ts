@@ -14,6 +14,7 @@ export type RunStatus = typeof RUN_STATUSES[number];
 
 export interface RunRecord {
   id: string;
+  inactive?: boolean;
   tasks: number;
   status: RunStatus;
   node: string;
@@ -201,6 +202,7 @@ export function deleteAggregatedRuns(keys: Array<{ processId: string; runId: str
     grouped.set(processId, ids);
   });
   grouped.forEach((ids, processId) => {
-    saveProcessRuns(processId, getProcessRuns(processId).filter(run => !ids.has(run.id)));
+    // Preserve the historical outcome and metrics of process-linked runs.
+    saveProcessRuns(processId, getProcessRuns(processId).map(run => ids.has(run.id) ? { ...run, inactive: true } : run));
   });
 }

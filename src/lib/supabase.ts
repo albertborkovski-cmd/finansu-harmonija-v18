@@ -1,4 +1,6 @@
 import { getCurrentUserName } from './currentUser';
+import { rememberLedgerTableUsage } from './generalLedgerUsage';
+import { removeOrDeactivateRecords } from './recordLifecycle';
 
 let administrativeWrite: Promise<void> = Promise.resolve();
 // Use the existing Action history store, not a separate audit system.
@@ -318,6 +320,8 @@ async function readTable(table: string): Promise<LocalRow[]> {
     if (response.ok) {
       const payload = (await response.json()) as { rows?: LocalRow[] };
       if (Array.isArray(payload.rows)) {
+        if (stored) rememberLedgerTableUsage(table, localRows);
+        rememberLedgerTableUsage(table, payload.rows);
         window.localStorage.setItem(key, JSON.stringify(payload.rows));
         return payload.rows;
       }
@@ -328,12 +332,16 @@ async function readTable(table: string): Promise<LocalRow[]> {
     window.clearTimeout(timeoutId);
   }
 
+  rememberLedgerTableUsage(table, localRows);
   window.localStorage.setItem(key, JSON.stringify(localRows));
   return localRows;
 }
 
 async function writeTable(table: string, rows: LocalRow[]) {
   if (storageAvailable()) {
+    const previous = window.localStorage.getItem(`${STORAGE_PREFIX}${table}`);
+    rememberLedgerTableUsage(table, previous ? JSON.parse(previous) : []);
+    rememberLedgerTableUsage(table, rows);
     window.localStorage.setItem(
       `${STORAGE_PREFIX}${table}`,
       JSON.stringify(rows),
@@ -506,11 +514,12 @@ class LocalQuery {
 
       if (this.operation === "delete") {
         const deleted = rows.filter((row) => this.matches(row));
+        const retained = removeOrDeactivateRecords(rows, new Set(deleted.map(row => String(row.id))), `${STORAGE_PREFIX}${this.table}`);
         await writeTable(
           this.table,
-          rows.filter((row) => !this.matches(row)),
+          retained,
         );
-        return { data: deleted, error: null };
+        return { data: deleted.map(row => retained.find(item => item.id === row.id) ?? row), error: null };
       }
 
       const incoming = (

@@ -12,6 +12,9 @@ import {
 } from 'lucide-react';
 import { PageActionButton, PageHeader } from './PageHeader';
 import OcrBreadcrumb from './OcrBreadcrumb';
+import SearchableSelect from './SearchableSelect';
+import { loadOrganizationReferenceRecords } from './OrganizationReferenceValuesView';
+import { isInactiveRecord } from '../lib/recordLifecycle';
 import { recordWorkspaceHumanCorrection } from './workspaceHumanMetricsStore';
 import { ProcessedDocumentsTable, type ReviewDocumentReference } from './OcrProcessedDocumentsView';
 import { usePersistentState } from '../hooks/usePersistentState';
@@ -73,6 +76,10 @@ export interface WorkspaceTask {
   documentType: string;
   sourceRunId: string;
   humanCorrected?: boolean;
+  trainingStatus?: 'Confirmed';
+  trainingConfirmedAt?: string;
+  teamLeadReview?: { status: 'Pending' | 'Approved'; requestedAt: string };
+  ocrRunRequest?: { id: string; requestedAt: string; status: 'Pending integration' };
   correctionCount?: number;
   lastCorrectedAt?: string;
   editStartedAt?: string;
@@ -457,7 +464,7 @@ function InvoicePreview({
   };
 
   return (
-    <div className="flex min-h-[760px] items-start justify-center overflow-auto rounded-b-lg bg-[#AEB3B7] p-6 xl:p-8">
+    <div tabIndex={0} aria-label="Scrollable document preview" className="flex min-h-0 flex-1 items-start justify-center overflow-auto rounded-b-lg bg-[#AEB3B7] p-6 xl:p-8">
       <article
         ref={articleRef}
         className={`relative min-h-[900px] w-[680px] origin-top bg-white px-14 py-12 text-[#222222] shadow-[0_12px_38px_rgba(16,35,58,0.24)] transition-transform selection:bg-[#BFDFFF] selection:text-[#10233A] ${trainingMode ? 'cursor-crosshair' : ''}`}
@@ -585,6 +592,13 @@ function WorkspaceTaskDetail({
   workElapsedSeconds?: number;
 }) {
   const [draft, setDraft] = useState<WorkspaceTask>(task);
+  const [, setTeamLeadQueue] = usePersistentState<Record<string, WorkspaceTask>>('finansu-harmonija:v18:ocr:team-lead-review', {});
+  const documentTypeOptions = loadOrganizationReferenceRecords('Document type')
+    .filter(record => record.parentCode && !isInactiveRecord(record))
+    .map(record => ({ value: record.fullName, label: record.fullName }));
+  if (draft.documentType && !documentTypeOptions.some(option => option.value === draft.documentType)) {
+    documentTypeOptions.unshift({ value: draft.documentType, label: draft.documentType });
+  }
   const originalDocumentRef = useRef({
     taskId: task.id,
     fields: { ...(task.originalFields ?? task.fields) },
@@ -700,8 +714,57 @@ function WorkspaceTaskDetail({
   };
 
   const saveAndOpenNextFile = () => {
-    if (!trainingMode || !onNextFile) return;
-    onNextFile(draft);
+    if (!trainingMode) return;
+    if (missingFields.length > 0 || missingProducts) {
+      setShowValidation(true);
+      setSavedMessage('Complete the missing required fields and document lines before confirming this document.');
+      return;
+    }
+    const confirmedAt = new Date().toISOString();
+    const confirmed: WorkspaceTask = {
+      ...draft,
+      status: 'Completed',
+      humanCorrected: true,
+      correctionCount: (draft.correctionCount ?? 0) + 1,
+      lastCorrectedAt: confirmedAt,
+      trainingStatus: 'Confirmed',
+      trainingConfirmedAt: confirmedAt,
+    };
+    if (onNextFile) onNextFile(confirmed);
+    else {
+      onUpdate(confirmed);
+      onBack();
+    }
+  };
+
+  const runDocumentOcr = () => {
+    const next: WorkspaceTask = {
+      ...draft,
+      status: 'In Progress',
+      trainingStatus: undefined,
+      trainingConfirmedAt: undefined,
+      ocrRunRequest: {
+        id: crypto.randomUUID(),
+        requestedAt: new Date().toISOString(),
+        status: 'Pending integration',
+      },
+    };
+    try {
+      onUpdate(next);
+      setDraft(next);
+      setSavedMessage('Corrections and OCR rerun request saved. OCR processing is not connected in this version; the document has not been rescanned.');
+    } catch {
+      setSavedMessage('Could not save the OCR rerun request. Your corrections remain in this form. Please try again.');
+    }
+  };
+
+  const sendToTeamLead = () => {
+    const next: WorkspaceTask = { ...draft, status: 'In Progress', trainingStatus: undefined, trainingConfirmedAt: undefined,
+      teamLeadReview: { status: 'Pending', requestedAt: new Date().toISOString() } };
+    onUpdate(next);
+    setDraft(next);
+    setTeamLeadQueue(current => ({ ...current, [next.id]: next }));
+    setSavedMessage('Sent to team lead review. Available in OCR / Review / Approve documents.');
   };
 
   const completeTask = () => {
@@ -877,8 +940,9 @@ function WorkspaceTaskDetail({
               <span aria-label="Remaining correction time" className={`min-w-[44px] text-right text-[13px] font-semibold tabular-nums ${remainingTime <= 300 ? 'text-[#D64545]' : 'text-[#10233A]'}`}>{formattedRemainingTime}</span>
             </div>}
             {!trainingMode && draft.status === 'Available' && <PageActionButton onClick={acceptTask}>Accept task</PageActionButton>}
-            {(trainingMode || draft.status === 'In Progress') && <PageActionButton onClick={saveHumanCorrection}>Save</PageActionButton>}
-            {trainingMode && <PageActionButton onClick={saveAndOpenNextFile} disabled={!onNextFile}>Next file</PageActionButton>}
+            {trainingMode ? <PageActionButton onClick={runDocumentOcr}>Run</PageActionButton> : draft.status === 'In Progress' && <PageActionButton onClick={saveHumanCorrection}>Save</PageActionButton>}
+            {trainingMode && <PageActionButton onClick={sendToTeamLead} disabled={draft.teamLeadReview?.status === 'Pending'}>{draft.teamLeadReview?.status === 'Pending' ? 'Awaiting team lead' : 'Send to team lead'}</PageActionButton>}
+            {trainingMode && <PageActionButton onClick={saveAndOpenNextFile}>{onNextFile ? 'Next file' : 'Confirm & finish'}</PageActionButton>}
             {!trainingMode && draft.status !== 'Completed' && <PageActionButton onClick={completeTask} disabled={!canComplete}>Complete task</PageActionButton>}
           </>
         }
@@ -896,8 +960,19 @@ function WorkspaceTaskDetail({
 
       {trainingMode && (
         <div className="rounded-lg border border-[#B8D7E5] bg-[#F0FAFD] px-4 py-3 font-montserrat">
-          <p className="text-[13px] font-semibold text-[#10233A]">Train document field location</p>
-          <p className="text-[12px] text-[#7288A3]">Select a field on the right, then double-click its text in the document or drag over the matching area. The selected value will be assigned to that field.</p>
+          <p className="text-[13px] font-semibold text-[#10233A]">Document validation & recommendations</p>
+          {missingFields.length > 0 && <div className="mt-2 text-[12px] leading-5">
+            <p className="text-[#B54708]"><span className="font-semibold">Issue:</span> Required information is missing: {missingFields.join(', ')}.</p>
+            <p className="text-[#7288A3]"><span className="font-semibold">Recommendation:</span> Check these values in the original document and complete the corresponding fields on the right. If the information is not present, request a corrected document from the sender.</p>
+          </div>}
+          {missingProducts && <div className="mt-2 text-[12px] leading-5">
+            <p className="text-[#B54708]"><span className="font-semibold">Issue:</span> One or more document lines are missing a product name or price.</p>
+            <p className="text-[#7288A3]"><span className="font-semibold">Recommendation:</span> Compare each document line with the original and fill in the missing product name or price before saving.</p>
+          </div>}
+          {missingFields.length === 0 && !missingProducts && <div className="mt-2 text-[12px] leading-5 text-[#7288A3]">
+            <p>No missing required fields detected. No specific OCR error details are available for this document.</p>
+            <p><span className="font-semibold">Recommendation:</span> Compare the extracted invoice number, dates, counterparty, amounts and document lines with the original. Correct any differences and save the document.</p>
+          </div>}
         </div>
       )}
 
@@ -924,9 +999,9 @@ function WorkspaceTaskDetail({
         </div>
       )}
 
-      <div className={`grid min-h-[760px] overflow-hidden rounded-xl border border-[#D3E1EC] bg-white ${fullScreen ? 'fixed inset-5 z-[70] grid-cols-[minmax(680px,2fr)_minmax(360px,0.78fr)] shadow-2xl' : 'grid-cols-1 xl:grid-cols-[minmax(680px,2fr)_minmax(360px,0.78fr)]'}`}>
-        <section className="flex min-h-0 flex-col border-r border-[#D3E1EC]">
-          <div className="flex h-14 items-center justify-between border-b border-[#D3E1EC] px-5">
+      <div className={`grid min-h-0 shrink-0 overflow-hidden rounded-xl border border-[#D3E1EC] bg-white ${fullScreen ? 'fixed inset-5 z-[70] grid-cols-[minmax(0,2fr)_minmax(320px,0.78fr)] grid-rows-[minmax(0,1fr)] shadow-2xl' : 'h-[120dvh] grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] xl:h-[max(420px,calc(100dvh-96px))] xl:grid-cols-[minmax(0,2fr)_minmax(360px,0.78fr)] xl:grid-rows-[minmax(0,1fr)]'}`}>
+        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-[#D3E1EC]">
+          <div className="flex h-14 shrink-0 items-center justify-between border-b border-[#D3E1EC] px-5">
             <div className="flex items-center gap-2">
               <FileText size={18} className="text-[#007EA7]" />
               <span className="font-montserrat text-[14px] font-semibold text-[#10233A]">Invoice document</span>
@@ -953,8 +1028,8 @@ function WorkspaceTaskDetail({
           />
         </section>
 
-        <section className="flex min-h-0 flex-col">
-          <div className="flex h-14 items-end gap-8 border-b border-[#D3E1EC] px-6">
+        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden">
+          <div className="flex h-14 shrink-0 items-end gap-8 border-b border-[#D3E1EC] px-6">
             <button
               type="button"
               onClick={() => setActiveTab('extracted')}
@@ -973,9 +1048,19 @@ function WorkspaceTaskDetail({
           </div>
 
           {activeTab === 'extracted' ? (
-            <div className="flex-1 overflow-y-auto p-4 xl:p-5">
+            <div tabIndex={0} aria-label="Document information extraction" className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 xl:p-5">
               <h2 className="mb-4 font-montserrat text-[15px] font-semibold leading-5 text-[#10233A]">IDP Sample Invoice Document Information Extraction</h2>
               <div className="grid grid-cols-1 gap-3">
+                <div className="rounded-lg border border-[#D3E1EC] bg-white p-3">
+                  <p className="mb-2 font-montserrat text-[12px] font-semibold text-[#10233A]">Document type <span className="text-[#D64545]">*</span></p>
+                  <SearchableSelect
+                    ariaLabel="Document type"
+                    value={draft.documentType}
+                    options={documentTypeOptions}
+                    onChange={documentType => setDraft(current => ({ ...current, documentType, trainingStatus: undefined, trainingConfirmedAt: undefined }))}
+                    className="h-10 rounded-lg border border-[#D3E1EC] bg-white px-3 pr-9 font-montserrat text-[12px] text-[#10233A]"
+                  />
+                </div>
                 <MappedFormField fieldKey="invoiceNumber" label="Invoice Number" required value={draft.fields.invoiceNumber} active={activeField === 'invoiceNumber'} onSelect={() => selectMappedField('invoiceNumber')} onChange={value => changeField('invoiceNumber', value)} />
                 <MappedFormField fieldKey="invoiceDate" label="Invoice Date" required type="date" value={draft.fields.invoiceDate} active={activeField === 'invoiceDate'} onSelect={() => selectMappedField('invoiceDate')} onChange={value => changeField('invoiceDate', value)} />
                 <MappedFormField fieldKey="dueDate" label="Due Date" required type="date" value={draft.fields.dueDate} active={activeField === 'dueDate'} onSelect={() => selectMappedField('dueDate')} onChange={value => changeField('dueDate', value)} />
@@ -1031,8 +1116,8 @@ function WorkspaceTaskDetail({
               </div>
             </div>
           ) : (
-            <div className="flex flex-1 flex-col p-6">
-              <div className="flex-1 space-y-3 overflow-y-auto">
+            <div className="flex min-h-0 flex-1 flex-col p-6">
+              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain">
                 {!draft.comments.length && (
                   <div className="flex h-full min-h-[260px] flex-col items-center justify-center gap-3 text-[#7288A3]">
                     <MessageSquare size={34} strokeWidth={1.5} />

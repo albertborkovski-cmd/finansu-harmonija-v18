@@ -9,7 +9,18 @@ function transpile(relativePath) {
   }).outputText;
 }
 const moduleUrl = source => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
-const { createNotificationColumns, formatNotificationDateTime, notificationMessage, isSystemNotification, getNotificationActionLabel, getNotificationSourceTaskId, getNotificationRelatedObjectLabel } = await import(moduleUrl(transpile('../src/lib/notificationPresentation.ts')));
+const { createNotificationColumns, formatNotificationAge, formatNotificationDateTime, notificationMessage, isSystemNotification, getNotificationActionLabel, getNotificationSourceTaskId, getNotificationRelatedObjectLabel } = await import(moduleUrl(transpile('../src/lib/notificationPresentation.ts')));
+
+test('relative registration age handles minutes, hours, days and missing dates without inventing timestamps', () => {
+  const now = Date.parse('2026-09-26T12:00:00Z');
+  for (const [minutes, expected] of [[0, 'Just now'], [10, '10 min ago'], [18, '18 min ago'], [25, '25 min ago'], [32, '32 min ago'], [60, '1 hour ago'], [120, '2 hours ago'], [1440, '1 day ago'], [2880, '2 days ago']]) {
+    assert.equal(formatNotificationAge({ id: 'example', createdAt: new Date(now - minutes * 60000).toISOString() }, now), expected);
+  }
+  assert.equal(formatNotificationAge({ id: `notification-${now - 600000}` }, now), '10 min ago');
+  assert.equal(formatNotificationAge({ id: 'legacy' }, now), '—');
+  assert.equal(formatNotificationAge({ id: 'invalid', createdAt: 'invalid' }, now), '—');
+  assert.equal(formatNotificationAge({ id: 'future', createdAt: new Date(now + 60000).toISOString() }, now), 'Just now');
+});
 const notificationsUrl = moduleUrl(transpile('../src/lib/notifications.ts'));
 const { SAMPLE_NOTIFICATIONS, isNotificationRead, setNotificationRead } = await import(notificationsUrl);
 const scheduleUrl = moduleUrl(transpile('../src/lib/taskSchedule.ts').replace(/(['"])\.\/notifications\1/g, JSON.stringify(notificationsUrl)));

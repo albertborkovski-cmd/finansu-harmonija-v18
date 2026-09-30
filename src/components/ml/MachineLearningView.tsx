@@ -26,6 +26,7 @@ import { BulkDeleteButton, RowDeleteButton } from '../DeleteButtons';
 import { matchesTextSearch } from '../../utils/textSearch';
 import { usePersistentState } from '../../hooks/usePersistentState';
 import { supabase } from '../../lib/supabase';
+import { isInactiveRecord, isRecordLinked, removeOrDeactivateRecords } from '../../lib/recordLifecycle';
 
 const SAMPLE_SETS: DocumentSet[] = [
   { id: '1', name: 'Invoice Processing', description: 'OCR extraction for invoices', platform: 'RPA platform', date: '10.04.2026 12:22' },
@@ -122,7 +123,7 @@ function GroupManagementView({ documentSet, onBack, onOpenDocumentSet }: { docum
         <div className="flex items-center justify-between gap-2">
           <OcrSearchField ariaLabel="Search group members" value={query} onChange={(value) => { setQuery(value); setGroupPage(1); }} />
           <div className="flex h-7 items-center gap-4 rounded bg-white p-1.5 text-[#7288A3]">
-            <BulkDeleteButton selectedCount={selectedMembers.size} onDelete={() => { setGroupMembers(current => current.filter(member => !selectedMembers.has(member.id))); setSelectedMembers(new Set()); }} label="Delete selected group members" />
+            <BulkDeleteButton linked selectedCount={selectedMembers.size} onDelete={() => { setGroupMembers(current => removeOrDeactivateRecords(current, selectedMembers, 'finansu-harmonija:v7:ml-group-members', undefined, () => true)); setSelectedMembers(new Set()); }} label="Deactivate selected group members" />
             <ColumnSettingsButton onClick={() => setShowGroupColumnSettings(true)} />
             <ImportButton scope="Machine learning group members" />
             <button type="button" title="REFRESH ALL" aria-label="Refresh all group members" onClick={() => setGroupMembers(current => current.map(member => ({ ...member })))} className="flex h-4 w-4 items-center justify-center hover:text-[#007EA7]"><RefreshCw size={16} /></button>
@@ -143,7 +144,7 @@ function GroupManagementView({ documentSet, onBack, onOpenDocumentSet }: { docum
             </div>
             <div className="mt-4 flex flex-col">
               {members.slice(0, groupPage * TABLE_BATCH_SIZE).map((member, index) => (
-                <div key={member.id} className={`flex h-9 items-center rounded-lg font-montserrat text-[12px] leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
+                <div key={member.id} data-record-inactive={isInactiveRecord(member) || undefined} className={`flex h-9 items-center rounded-lg font-montserrat text-[12px] leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'}`}>
                   {visibleGroupColumns.map((column) => (
                     <div key={column.key} className="flex flex-shrink-0 items-center gap-3 truncate px-3" style={{ width: column.width }}>
                       {column.key === 'name' && <Checkbox checked={selectedMembers.has(member.id)} onChange={() => toggleMember(member.id)} />}
@@ -154,7 +155,7 @@ function GroupManagementView({ documentSet, onBack, onOpenDocumentSet }: { docum
                       )}
                     </div>
                   ))}
-                  <span className="flex h-9 items-center p-1"><RowDeleteButton label={`Delete ${member.name} group member ${index + 1}`} onDelete={() => { setGroupMembers(current => current.filter(item => item.id !== member.id)); setSelectedMembers(current => { const next = new Set(current); next.delete(member.id); return next; }); }} /></span>
+                  <span className="flex h-9 items-center p-1"><RowDeleteButton linked inactive={isInactiveRecord(member)} label={`Deactivate ${member.name} group member ${index + 1}`} onDelete={() => { setGroupMembers(current => removeOrDeactivateRecords(current, new Set([member.id]), 'finansu-harmonija:v7:ml-group-members', undefined, () => true)); setSelectedMembers(current => { const next = new Set(current); next.delete(member.id); return next; }); }} /></span>
                 </div>
               ))}
             </div>
@@ -378,7 +379,7 @@ export default function MachineLearningView({
               <OcrSearchField ariaLabel="Search document sets" value={query} onChange={(value) => { setQuery(value); setCurrentPage(1); }} />
             </div>
             <div className="flex flex-row items-center p-[6px] gap-4 bg-white rounded flex-shrink-0">
-              <BulkDeleteButton selectedCount={selectedRows.size} onDelete={() => { setDocumentSets(current => current.filter(item => !selectedRows.has(item.id))); setSelectedRows(new Set()); }} />
+              <BulkDeleteButton linked={documentSets.some(row => selectedRows.has(row.id) && isRecordLinked(row, 'finansu-harmonija:v7:ml-document-sets'))} selectedCount={selectedRows.size} onDelete={() => { setDocumentSets(current => removeOrDeactivateRecords(current, selectedRows, 'finansu-harmonija:v7:ml-document-sets')); setSelectedRows(new Set()); }} />
               <ColumnSettingsButton onClick={() => setShowColumnSettings(true)} />
               <ImportButton scope="Document sets" />
               <button onClick={() => setDocumentSets(current => current.map(documentSet => ({ ...documentSet })))} className="w-4 h-4 flex items-center justify-center text-[#7288A3] hover:text-[#007EA7] transition-colors" title="REFRESH ALL">
@@ -421,6 +422,7 @@ export default function MachineLearningView({
                 {sortedSets.slice(0, currentPage * TABLE_BATCH_SIZE).map((set, i) => (
                   <div
                     key={set.id}
+                    data-record-inactive={isInactiveRecord(set) || undefined}
                     className={`group flex h-9 w-full flex-row items-center rounded-lg ${i % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} transition-colors hover:bg-[#E7F4F9]`}
                   >
                     {visibleColumns.map((column) => {
@@ -466,7 +468,7 @@ export default function MachineLearningView({
                       <button type="button" aria-label={`Open ${set.name} group management`} onClick={() => setManagedSet(set)} className="w-7 h-7 flex items-center justify-center bg-white border-2 border-[#D3E1EC] rounded hover:border-[#007EA7] transition-colors">
                         <Users size={16} className="text-[#7288A3]" />
                       </button>
-                      <RowDeleteButton label={`Delete ${set.name}`} onDelete={() => { setDocumentSets(current => current.filter(item => item.id !== set.id)); setSelectedRows(current => { const next = new Set(current); next.delete(set.id); return next; }); }} />
+                      <RowDeleteButton linked={isRecordLinked(set, 'finansu-harmonija:v7:ml-document-sets')} inactive={isInactiveRecord(set)} label={`Delete ${set.name}`} onDelete={() => { setDocumentSets(current => removeOrDeactivateRecords(current, new Set([set.id]), 'finansu-harmonija:v7:ml-document-sets')); setSelectedRows(current => { const next = new Set(current); next.delete(set.id); return next; }); }} />
                     </div>
                   </div>
                 ))}

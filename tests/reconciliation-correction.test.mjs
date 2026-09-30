@@ -64,3 +64,28 @@ test('cannot replace unrelated records through the selected document editor', ()
   const unrelated = manual.buildManualReconciliation(draft.state.items, 'p3', ['i1']).proposals;
   assert.throws(() => correction.replaceReconciliation(state, 'p1', unrelated, meta), /selected document/);
 });
+
+test('reconciled sales can unselect their bank payment and replace it with several purchase and bank records', () => {
+  const initial = fixture();
+  const state = { ...initial, items: [...initial.items,
+    { ...initial.items[0], id: 'purchase-a', documentNumber: 'PUR-A', side: 'Payable', counterpartyId: 'another-party-a', counterpartyName: 'Another party A', originalMinor: 6000, remainingMinor: 6000 },
+    { ...initial.items[0], id: 'purchase-b', documentNumber: 'PUR-B', side: 'Payable', counterpartyId: 'another-party-b', counterpartyName: 'Another party B', originalMinor: 6000, remainingMinor: 6000 },
+  ] };
+  const before = JSON.stringify(state);
+  const draft = correction.prepareReconciliationCorrection(state, 'i1', meta);
+  assert.deepEqual({ ...draft.amounts }, { p1: 10000 });
+  const selected = ['purchase-a', 'purchase-b', 'p3'];
+  const proposals = manual.buildManualReconciliation(draft.state.items, 'i1', selected, { 'purchase-a': 3000, 'purchase-b': 2000, p3: 5000 }).proposals;
+  const next = correction.replaceReconciliation(state, 'i1', proposals, meta);
+  assert.equal(balance(next, 'i1'), 0);
+  assert.equal(balance(next, 'p1'), 10000);
+  assert.equal(balance(next, 'purchase-a'), 3000);
+  assert.equal(balance(next, 'purchase-b'), 4000);
+  assert.equal(balance(next, 'p3'), 5000);
+  for (const id of ['i2', 'i3', 'p2']) assert.equal(balance(next, id), 0);
+  assert.equal(JSON.stringify(state), before);
+  assert.deepEqual(engine.parseReconciliationState(JSON.stringify(next), 'org'), next);
+  const again = correction.prepareReconciliationCorrection(next, 'i1', { ...meta, id: 'correction:2', at: '2026-09-17T10:00:00.000Z' });
+  assert.deepEqual({ ...again.amounts }, { 'purchase-a': 3000, 'purchase-b': 2000, p3: 5000 });
+  assert.equal(balance(again.state, 'i1'), 10000);
+});

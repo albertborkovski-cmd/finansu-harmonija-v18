@@ -12,6 +12,7 @@ import { TABLE_BATCH_SIZE } from '../lib/tablePaging';
 import SearchableSelect from './SearchableSelect';
 import { CancelButton, SaveButton } from './ScopedActionButtons';
 import { ResizeHandle, useColumnResize } from './useColumnResize';
+import { useDropdownDismiss } from './useDropdownDismiss';
 import { supabase, type Company, type DbDocument } from '../lib/supabase';
 import { loadOcrDocumentSource } from '../lib/ocrDocumentSource';
 import { getSearchSuggestions, matchesTextSearch } from '../utils/textSearch';
@@ -154,7 +155,12 @@ export default function UploadedDocumentsView({
   const { startResize } = useColumnResize(columns, setColumns);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const filterMenuRef = useRef<HTMLDivElement>(null);
+  const valueFilterRef = useRef<HTMLDivElement>(null);
+  const searchSuggestionsRef = useRef<HTMLDivElement>(null);
   const listScrollPositionRef = useRef(0);
+  useDropdownDismiss(showFilters, filterMenuRef, () => setShowFilters(false));
+  useDropdownDismiss(openFilter !== null, valueFilterRef, () => setOpenFilter(null));
+  useDropdownDismiss(searchSuggestionsOpen, searchSuggestionsRef, () => setSearchSuggestionsOpen(false));
 
   const loadData = useCallback(async () => {
     const ocrSource = await loadOcrDocumentSource();
@@ -192,30 +198,6 @@ export default function UploadedDocumentsView({
     setActiveGroup(initialGroup);
     setPage(1);
   }, [initialGroup]);
-
-  useEffect(() => {
-    if (!showFilters && openFilter === null && !searchSuggestionsOpen) return;
-    const closeOutside = (event: PointerEvent) => {
-      if (event.target instanceof Node && !filterMenuRef.current?.contains(event.target)) {
-        setShowFilters(false);
-        setOpenFilter(null);
-        setSearchSuggestionsOpen(false);
-      }
-    };
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setShowFilters(false);
-        setOpenFilter(null);
-        setSearchSuggestionsOpen(false);
-      }
-    };
-    document.addEventListener('pointerdown', closeOutside);
-    document.addEventListener('keydown', closeOnEscape);
-    return () => {
-      document.removeEventListener('pointerdown', closeOutside);
-      document.removeEventListener('keydown', closeOnEscape);
-    };
-  }, [openFilter, searchSuggestionsOpen, showFilters]);
 
   const organizationNames = useMemo(
     () => new Map(organizations.map((organization) => [organization.id, organization.name])),
@@ -642,8 +624,8 @@ export default function UploadedDocumentsView({
 
       <div className="flex min-h-0 flex-1 flex-col gap-6">
         <div className="system-table-toolbar relative h-7 min-h-7 flex-shrink-0">
-          <div ref={filterMenuRef} className="flex h-7 min-h-7 min-w-0 flex-row flex-nowrap items-center gap-1">
-            <div data-native-system-filters className="relative flex-shrink-0">
+          <div className="flex h-7 min-h-7 min-w-0 flex-row flex-nowrap items-center gap-1">
+            <div ref={searchSuggestionsRef} data-native-system-filters className="relative flex-shrink-0">
               <OcrSearchField
                 value={documentFilter}
                 onChange={(value) => {
@@ -691,15 +673,18 @@ export default function UploadedDocumentsView({
                       key={suggestion}
                       type="button"
                       role="option"
-                      aria-selected={highlightedSuggestion === index}
+                      aria-selected={documentFilter === suggestion}
                       onMouseEnter={() => setHighlightedSuggestion(index)}
                       onClick={() => {
                         setDocumentFilter(suggestion);
                         setSearchSuggestionsOpen(false);
                         setPage(1);
                       }}
-                      className={`flex min-h-9 w-full items-center rounded-md px-3 py-2 text-left font-montserrat text-[12px] font-medium leading-[18px] text-[#10233A] ${highlightedSuggestion === index ? 'bg-[#F2F7FC]' : 'hover:bg-[#F2F7FC]'}`}
+                      className={`flex min-h-9 w-full items-center gap-3 rounded-md px-3 py-2 text-left font-montserrat text-[12px] font-medium leading-[18px] text-[#10233A] ${documentFilter === suggestion ? 'bg-[#E5EDF9]' : highlightedSuggestion === index ? 'bg-[#F2F7FC]' : 'hover:bg-[#F2F7FC]'}`}
                     >
+                      <span aria-hidden="true" className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${documentFilter === suggestion ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>
+                        {documentFilter === suggestion && <Check size={12} strokeWidth={2.5} className="text-white" />}
+                      </span>
                       <span className="truncate">{suggestion}</span>
                     </button>
                   ))}
@@ -728,7 +713,7 @@ export default function UploadedDocumentsView({
             const displayValue = filterOptions[key].find((option) => option.value === value)?.label || 'All';
             const isOpen = openFilter === key;
             return (
-              <div key={key} className="relative flex-shrink-0">
+              <div key={key} ref={isOpen ? valueFilterRef : undefined} className="relative flex-shrink-0">
                 <button
                   type="button"
                   onClick={() => {
@@ -736,6 +721,7 @@ export default function UploadedDocumentsView({
                     setShowFilters(false);
                   }}
                   aria-expanded={isOpen}
+                  aria-haspopup="listbox"
                   aria-label={`Filter by ${filter.label}`}
                   className="flex h-7 max-w-[240px] items-center gap-1 rounded bg-[#E5EDF9] px-2 py-[5px] font-montserrat text-[12px] font-medium leading-[18px] text-[#7288A3] hover:bg-[#DCE7F6]"
                 >
@@ -757,7 +743,7 @@ export default function UploadedDocumentsView({
                   )}
                 </button>
                 {isOpen && (
-                  <div className="absolute left-0 top-[32px] z-40 min-w-[220px] overflow-hidden rounded-lg border border-[#D3E1EC] bg-white py-1 shadow-[0_8px_24px_rgba(16,35,58,0.14)]">
+                  <div role="listbox" aria-label={`${filter.label} options`} className="absolute left-0 top-[32px] z-40 min-w-[220px] overflow-hidden rounded-lg border border-[#D3E1EC] bg-white py-1 shadow-[0_8px_24px_rgba(16,35,58,0.14)]">
                     <div className="max-h-[240px] overflow-y-auto">
                       {filterOptions[key].map((option) => {
                         const checked = hasSelection && value === option.value;
@@ -765,14 +751,16 @@ export default function UploadedDocumentsView({
                           <button
                             key={`${key}-${option.value}`}
                             type="button"
+                            role="option"
+                            aria-selected={checked}
                             onClick={() => {
                               setCurrentFilterValue(key, option.value);
                               setOpenFilter(null);
                             }}
-                            className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-[#F2F7FC]"
+                            className={`flex w-full items-center gap-3 px-3 py-2 text-left ${checked ? 'bg-[#E5EDF9]' : 'hover:bg-[#F2F7FC]'}`}
                           >
-                            <span className={`flex h-[18px] w-[18px] items-center justify-center rounded-[4px] border ${checked ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>
-                              {checked && <Check size={13} strokeWidth={2.5} className="text-white" />}
+                            <span aria-hidden="true" className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${checked ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>
+                              {checked && <Check size={12} strokeWidth={2.5} className="text-white" />}
                             </span>
                             <span className="font-montserrat text-[13px] font-medium text-[#10233A]">{option.label}</span>
                           </button>
@@ -784,7 +772,7 @@ export default function UploadedDocumentsView({
               </div>
             );
           })}
-          <div className="relative flex-shrink-0">
+          <div ref={filterMenuRef} className="relative flex-shrink-0">
             <button
               type="button"
               onClick={() => {
@@ -793,6 +781,7 @@ export default function UploadedDocumentsView({
                 setOpenFilter(null);
               }}
               aria-expanded={showFilters}
+              aria-haspopup="listbox"
               className="flex h-7 items-center gap-1 rounded bg-[#E5EDF9] px-2 py-[5px] font-montserrat text-[12px] font-medium leading-[18px] text-[#7288A3] hover:bg-[#DCE7F6]"
             >
               <Plus size={15} />
@@ -808,20 +797,22 @@ export default function UploadedDocumentsView({
                   }
                 }}
               >
-                <div className="max-h-[300px] overflow-y-auto">
+                <div role="listbox" aria-label="Available uploaded document filters" aria-multiselectable="true" className="max-h-[300px] overflow-y-auto">
                   {UPLOADED_FILTERS.map((filter) => {
                     const checked = pendingFilterKeys.includes(filter.key);
                     return (
                       <button
                         key={filter.key}
                         type="button"
+                        role="option"
+                        aria-selected={checked}
                         onClick={() => setPendingFilterKeys((current) => checked
                           ? current.filter((key) => key !== filter.key)
                           : [...current, filter.key])}
-                        className="flex w-full items-center gap-3 rounded-md px-2 py-2 text-left hover:bg-[#F2F7FC]"
+                        className={`flex w-full items-center gap-3 rounded-md px-2 py-2 text-left ${checked ? 'bg-[#E5EDF9]' : 'hover:bg-[#F2F7FC]'}`}
                       >
-                        <span className={`flex h-[18px] w-[18px] items-center justify-center rounded-[4px] border ${checked ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>
-                          {checked && <Check size={13} strokeWidth={2.5} className="text-white" />}
+                        <span aria-hidden="true" className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${checked ? 'border-[#007EA7] bg-[#007EA7]' : 'border-[#A1B6C6] bg-white'}`}>
+                          {checked && <Check size={12} strokeWidth={2.5} className="text-white" />}
                         </span>
                         <span className="font-montserrat text-[13px] font-medium text-[#10233A]">{filter.label}</span>
                       </button>

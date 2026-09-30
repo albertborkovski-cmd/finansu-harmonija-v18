@@ -1,9 +1,11 @@
 import { toggleFilteredSelection } from '../lib/tableSelection';
+import { isInactiveRecord, isRecordLinked } from '../lib/recordLifecycle';
 import { NONPROFIT_LEDGER_TEMPLATE } from '../lib/nonprofitLedgerTemplate';
 import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
+  Copy,
   ChevronDown,
   ChevronRight,
   FileText,
@@ -25,7 +27,11 @@ import { ColumnSettingsButton } from "./ScopedActionButtons";
 import TablePagination from "./TablePagination";
 import { ResizeHandle, useColumnResize } from "./useColumnResize";
 import SystemAddFilters from "./SystemAddFilters";
+import SearchableSelect from './SearchableSelect';
+import { useDropdownDismiss } from './useDropdownDismiss';
+import { supabase } from '../lib/supabase';
 import { HeaderBackButton } from "./SystemNavigation";
+import { deleteUnusedLedgerAccount, protectedLedgerAccountIds } from '../lib/generalLedgerUsage';
 
 export interface LedgerAccount {
   id: string;
@@ -40,6 +46,8 @@ interface LedgerTemplate {
   id: string;
   name: string;
   description: string;
+  country?: string;
+  templateType?: string;
   updatedAt: string;
   active: boolean;
   accounts: LedgerAccount[];
@@ -95,11 +103,13 @@ function buildCompanyLedgerCustomization(
   };
 }
 
-type TemplateColumnKey = "name" | "description" | "accounts" | "updatedAt";
+type TemplateColumnKey = "name" | "country" | "templateType" | "description" | "accounts" | "updatedAt";
 type AccountColumnKey = "code" | "name" | "type" | "active";
 
 const TEMPLATE_COLUMNS: ColConfig[] = [
   { key: "name", label: "Name", visible: true, width: 290 },
+  { key: "country", label: "Country", visible: true, width: 160 },
+  { key: "templateType", label: "Template type", visible: true, width: 160 },
   { key: "description", label: "Description", visible: true, width: 430 },
   { key: "accounts", label: "Accounts", visible: true, width: 130 },
   { key: "updatedAt", label: "Last update", visible: true, width: 150 },
@@ -165,15 +175,22 @@ export function loadGeneralLedgerTemplateNames() {
   }
 }
 
+function normalizeTemplateMetadata(templates: LedgerTemplate[]): LedgerTemplate[] {
+  return templates.map(template => ({ ...template,
+    country: template.country ?? (template.id === 'ledger-lt-standard' || template.id === NONPROFIT_LEDGER_TEMPLATE.id ? 'Lithuania' : ''),
+    templateType: ['Standard', 'Non-profit', 'Custom'].includes(template.templateType ?? '') ? template.templateType : template.id === 'ledger-lt-standard' ? 'Standard' : template.id === NONPROFIT_LEDGER_TEMPLATE.id ? 'Non-profit' : 'Custom',
+  }));
+}
+
 export function loadGeneralLedgerTemplates(): LedgerTemplate[] {
-  if (typeof window === "undefined") return INITIAL_TEMPLATES;
+  if (typeof window === "undefined") return normalizeTemplateMetadata(INITIAL_TEMPLATES);
   try {
     const storedValue = window.localStorage.getItem(STORAGE_KEY);
-    return storedValue === null
+    return normalizeTemplateMetadata(storedValue === null
       ? INITIAL_TEMPLATES
-      : (JSON.parse(storedValue) as LedgerTemplate[]);
+      : (JSON.parse(storedValue) as LedgerTemplate[]));
   } catch {
-    return INITIAL_TEMPLATES;
+    return normalizeTemplateMetadata(INITIAL_TEMPLATES);
   }
 }
 
@@ -464,6 +481,7 @@ function LedgerDropdown({
   ariaLabel,
   open,
   onToggle,
+  onClose,
   onSelect,
 }: {
   value: string;
@@ -472,15 +490,18 @@ function LedgerDropdown({
   ariaLabel: string;
   open: boolean;
   onToggle: () => void;
+  onClose: () => void;
   onSelect: (value: string) => void;
 }) {
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
+  useDropdownDismiss(open, dropdownRef, () => { setQuery(""); onClose(); });
   const selectedLabel = options.find((option) => option.value === value)?.label;
   const filteredOptions = options.filter((option) =>
     `${option.label} ${option.value}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
   );
   return (
-    <div className="relative w-full">
+    <div ref={dropdownRef} className="relative min-w-0 w-full">
       <input
         role="combobox"
         aria-label={ariaLabel}
@@ -513,10 +534,11 @@ function LedgerDropdown({
                 type="button"
                 role="option"
                 aria-selected={selected}
+                data-static-selection="true"
                 onClick={() => { setQuery(""); onSelect(option.value); }}
-                className={`flex min-h-10 w-full items-center gap-3 rounded-md px-3 py-2 text-left font-montserrat text-[13px] font-semibold text-[#10233A] transition-colors ${selected ? "bg-[#E5EDF9]" : "hover:bg-[#F8FDFF]"}`}
+                className={`grid h-10 w-full grid-cols-[18px_minmax(0,1fr)] items-center gap-3 rounded-md px-3 text-left font-montserrat text-[13px] font-semibold text-[#10233A] ${selected ? "bg-[#E5EDF9]" : "hover:bg-[#F8FDFF]"}`}
               >
-                <span className={`flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-[5px] border ${selected ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}>
+                <span aria-hidden="true" className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[6px] border ${selected ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}>
                   {selected && <Check size={12} strokeWidth={2.5} className="text-white" />}
                 </span>
                 <span className="truncate">{option.label}</span>
@@ -544,6 +566,61 @@ export default function GeneralLedgerView({
   const [fixedPage0, setFixedPage0] = useState(1);
   // Company views may read shared templates, but must never persist them.
   const [templates, setTemplates] = useState<LedgerTemplate[]>(loadGeneralLedgerTemplates);
+  const [usedTemplateNames, setUsedTemplateNames] = useState<Set<string> | null>(null);
+  const [protectedTemplates, setProtectedTemplates] = useState<{ templates: LedgerTemplate[]; ids: Set<string> } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void supabase.from('companies').select('*').then(({ data, error }) => {
+      if (!cancelled && !error && data) setUsedTemplateNames(new Set(data.map(company => String(company.general_ledger || templates.find(template => template.active)?.name || ''))));
+    });
+    return () => { cancelled = true; };
+  }, [templates]);
+  useEffect(() => {
+    const refresh = () => {
+      try {
+        const ids = new Set(templates.filter(template =>
+          protectedLedgerAccountIds({ templateId: template.id, templateName: template.name }, template.accounts).size > 0,
+        ).map(template => template.id));
+        setProtectedTemplates({ templates, ids });
+      } catch {
+        setProtectedTemplates(null);
+      }
+    };
+    refresh();
+    window.addEventListener('finansu-harmonija:data-changed', refresh);
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.removeEventListener('finansu-harmonija:data-changed', refresh);
+      window.removeEventListener('storage', refresh);
+    };
+  }, [templates]);
+  const templateIsUsed = (template: LedgerTemplate) => {
+    if (!usedTemplateNames || usedTemplateNames.has(template.name)) return true;
+    for (let index = 0; index < localStorage.length; index++) {
+      const key = localStorage.key(index);
+      if (!key?.startsWith('finansu-harmonija:v12:company-general-ledger:') || key.endsWith(':settings-unused')) continue;
+      try { if (JSON.parse(localStorage.getItem(key) || '{}')[template.id]) return true; } catch { return true; }
+    }
+    return false;
+  };
+  const templateIsLinked = (template: LedgerTemplate) =>
+    templateIsUsed(template) || isRecordLinked(template, STORAGE_KEY) ||
+    protectedTemplates?.templates !== templates || protectedTemplates.ids.has(template.id);
+  const deleteTemplates = (ids: Set<string>) => {
+    const linkedIds = new Set<string>();
+    templates.filter(template => ids.has(template.id)).forEach(template => {
+      try {
+        if (templateIsLinked(template) || protectedLedgerAccountIds({ templateId: template.id, templateName: template.name }, template.accounts).size > 0) linkedIds.add(template.id);
+      } catch {
+        linkedIds.add(template.id); // Unverifiable accounting history permits deactivation only.
+      }
+    });
+    setTemplates(current => current.flatMap(template => {
+      if (!ids.has(template.id) || isInactiveRecord(template)) return [template];
+      return linkedIds.has(template.id) ? [{ ...template, active: false, updatedAt: today() }] : [];
+    }));
+    setSelectedIds(new Set());
+  };
   useEffect(() => {
     if (companyId) return;
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(templates));
@@ -675,6 +752,33 @@ export default function GeneralLedgerView({
       ),
     };
   }, [baseSelectedTemplate, companyId, companyLedgerCustomizations]);
+
+  const [protectedAccountIds, setProtectedAccountIds] = useState<Set<string> | null>(null);
+  const [accountActionBusy, setAccountActionBusy] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    setProtectedAccountIds(null);
+    if (!selectedTemplate) return;
+    const refreshUsage = async () => {
+      try {
+        const results = await Promise.all([supabase.from('companies').select('*'), supabase.from('documents').select('*'), supabase.from('document_history').select('*')]);
+        if (results.some(result => result.error)) throw new Error('GL account usage could not be verified.');
+        const ids = protectedLedgerAccountIds({ companyId, templateId: selectedTemplate.id, templateName: selectedTemplate.name }, selectedTemplate.accounts);
+        if (!cancelled) setProtectedAccountIds(ids);
+      } catch {
+        if (!cancelled) setProtectedAccountIds(null); // Fail closed: only deactivation is safe.
+      }
+    };
+    void refreshUsage();
+    const refresh = () => { void refreshUsage(); };
+    window.addEventListener('finansu-harmonija:data-changed', refresh);
+    window.addEventListener('storage', refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('finansu-harmonija:data-changed', refresh);
+      window.removeEventListener('storage', refresh);
+    };
+  }, [companyId, selectedTemplate]);
 
   useEffect(() => {
     if (assignedTemplateName === undefined) return;
@@ -856,7 +960,7 @@ export default function GeneralLedgerView({
 
   const saveTemplate = (draft: LedgerTemplate) => {
     if (companyId) return;
-    const next = { ...draft, name: draft.name.trim(), updatedAt: today() };
+    const next = { ...draft, country: draft.country?.trim() ?? '', templateType: draft.templateType ?? 'Custom', name: draft.name.trim(), updatedAt: today() };
     if (!next.name) return;
     setTemplates((current) =>
       current.some((item) => item.id === next.id)
@@ -868,6 +972,9 @@ export default function GeneralLedgerView({
 
   const saveAccount = (draft: LedgerAccount) => {
     if (!selectedTemplate || !draft.code.trim() || !draft.name.trim()) return;
+    // Bind observed use to the stable account ID before a code can be renamed.
+    try { protectedLedgerAccountIds({ companyId, templateId: selectedTemplate.id, templateName: selectedTemplate.name }, selectedTemplate.accounts); }
+    catch { setImportMessage({ type: 'error', text: 'GL account usage could not be verified. Try again before changing this account.' }); return; }
     if (
       selectedTemplate.accounts.some(
         (account) =>
@@ -895,6 +1002,36 @@ export default function GeneralLedgerView({
       );
     }
     setAccountDraft(null);
+  };
+
+  const accountIsLinked = (account: LedgerAccount) =>
+    protectedAccountIds === null || protectedAccountIds.has(account.id) ||
+    isRecordLinked(account, companyId ? `finansu-harmonija:v12:company-general-ledger:${companyId}` : STORAGE_KEY);
+
+  const deleteAccount = async (id: string) => {
+    if (!selectedTemplate || accountActionBusy) return;
+    const account = selectedTemplate.accounts.find(item => item.id === id);
+    if (!account || isInactiveRecord(account)) return;
+    const deactivate = () => updateSelectedAccounts(items => items.map(item => item.id === id ? { ...item, active: false } : item));
+    if (accountIsLinked(account)) {
+      deactivate();
+      return;
+    }
+    setAccountActionBusy(true);
+    try {
+      const results = await Promise.all([supabase.from('companies').select('*'), supabase.from('documents').select('*'), supabase.from('document_history').select('*')]);
+      if (results.some(result => result.error)) throw new Error('GL account usage could not be verified. Deletion is blocked.');
+      const scope = { companyId, templateId: selectedTemplate.id, templateName: selectedTemplate.name };
+      if (protectedLedgerAccountIds(scope, selectedTemplate.accounts).has(id) || accountIsLinked(account)) {
+        deactivate();
+        return;
+      }
+      const remaining = deleteUnusedLedgerAccount(scope, selectedTemplate.accounts, id);
+      updateSelectedAccounts(items => items.filter(item => item.id !== id || remaining.some(account => account.id === item.id)));
+    } catch (error) {
+      setProtectedAccountIds(null);
+      setImportMessage({ type: 'error', text: error instanceof Error ? error.message : 'Account deletion is blocked.' });
+    } finally { setAccountActionBusy(false); }
   };
 
   const importAccounts = async (file?: File) => {
@@ -1036,7 +1173,7 @@ export default function GeneralLedgerView({
             <>
               <span>Settings</span>
               <span className="text-[#A1B6C6]">/</span>
-              <span>Organizations settings</span>
+              <span>General settings</span>
               <span className="text-[#A1B6C6]">/</span>
               <span>General ledger</span>
               <span className="text-[#A1B6C6]">/</span>
@@ -1124,12 +1261,13 @@ export default function GeneralLedgerView({
                   />
                 </div>
               ))}
-              <span className="w-[108px] flex-shrink-0" aria-hidden="true" />
+              <span className="system-table-row-actions w-[108px] flex-shrink-0" aria-hidden="true" />
             </div>
             <div className="flex flex-col gap-0.5">
               {treeAccounts.slice(0, fixedPage0 * TABLE_BATCH_SIZE).map((account, index) => (
                 <div
                   key={account.id}
+                  data-record-inactive={isInactiveRecord(account) || undefined}
                   className={`flex h-10 items-center rounded-lg font-montserrat text-[12px] text-[#10233A] transition-colors ${index % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} hover:bg-[#E7F4F9]`}
                 >
                   {visibleAccountColumns.map((column) => (
@@ -1186,7 +1324,7 @@ export default function GeneralLedgerView({
                       )}
                     </div>
                   ))}
-                  <span className="flex w-[108px] flex-shrink-0 items-center justify-end gap-1.5 px-2">
+                  <span className="system-table-row-actions flex w-[108px] flex-shrink-0 items-center justify-end gap-1.5 px-2">
                     <button
                       type="button"
                       aria-label={`Add child to ${account.code}`}
@@ -1216,11 +1354,10 @@ export default function GeneralLedgerView({
                     <RowDeleteButton
                       variant="outlined"
                       label={`Delete ${account.code} ${account.name}`}
-                      onDelete={() =>
-                        updateSelectedAccounts((items) =>
-                          items.filter((item) => item.id !== account.id),
-                        )
-                      }
+                      linked={accountIsLinked(account)}
+                      inactive={isInactiveRecord(account)}
+                      disabled={accountActionBusy}
+                      onDelete={() => void deleteAccount(account.id)}
                     />
                   </span>
                 </div>
@@ -1338,7 +1475,7 @@ export default function GeneralLedgerView({
       <div className="flex items-center gap-2 font-montserrat text-[12px] font-medium text-[#7288A3]">
         <span>Settings</span>
         <span className="text-[#A1B6C6]">/</span>
-        <span>Organizations settings</span>
+        <span>General settings</span>
         <span className="text-[#A1B6C6]">/</span>
         <span className="text-[#A1B6C6]">General ledger</span>
       </div>
@@ -1377,12 +1514,8 @@ export default function GeneralLedgerView({
         <div className="flex items-center gap-4">
           <BulkDeleteButton
             selectedCount={selectedIds.size}
-            onDelete={() => {
-              setTemplates((current) =>
-                current.filter((item) => !selectedIds.has(item.id)),
-              );
-              setSelectedIds(new Set());
-            }}
+            linked={templates.some(template => selectedIds.has(template.id) && templateIsLinked(template))}
+            onDelete={() => deleteTemplates(selectedIds)}
           />
           <ColumnSettingsButton onClick={() => setShowTemplateColumns(true)} />
           <RefreshAllButton
@@ -1400,7 +1533,7 @@ export default function GeneralLedgerView({
               visibleTemplateColumns.reduce(
                 (sum, column) => sum + column.width,
                 0,
-              ) + 114,
+              ) + 150,
           }}
         >
           <div className="mb-3 flex h-6 items-center">
@@ -1445,19 +1578,20 @@ export default function GeneralLedgerView({
                 </div>
               );
             })}
-            <div className="w-[72px] flex-shrink-0" />
+            <div className="system-table-row-actions w-[108px] flex-shrink-0" />
           </div>
           <div className="flex flex-col gap-0.5">
             {sortedTemplates.slice(0, fixedPage1 * TABLE_BATCH_SIZE).map((template, index) => (
               <div
                 key={template.id}
+                data-record-inactive={isInactiveRecord(template) || undefined}
                 role="button"
                 tabIndex={0}
                 onClick={() => {
                   setSelectedTemplateId(template.id);
                   setQuery("");
                 }}
-                className={`flex h-10 cursor-pointer items-center rounded-lg font-montserrat text-[12px] ${index % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} hover:bg-[#E7F4F9]`}
+                className={`group flex h-10 w-full cursor-pointer items-center rounded-lg font-montserrat text-[12px] ${index % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} hover:bg-[#E7F4F9]`}
               >
                 <div className="flex w-[42px] flex-shrink-0 px-3">
                   <SelectionBox
@@ -1490,7 +1624,17 @@ export default function GeneralLedgerView({
                     </span>
                   </div>
                 ))}
-                <span className="flex w-[72px] flex-shrink-0 justify-end gap-1">
+                <span className="system-table-row-actions flex w-[108px] flex-shrink-0 justify-end gap-1">
+                  <button type="button" title="Duplicate template" aria-label={`Duplicate ${template.name}`} onClick={event => {
+                    event.stopPropagation();
+                    const id = `ledger-${crypto.randomUUID()}`;
+                    setTemplates(current => {
+                      let name = `${template.name} (copy)`;
+                      let suffix = 2;
+                      while (current.some(item => item.name === name)) name = `${template.name} (copy ${suffix++})`;
+                      return [...current, { ...template, id, name, templateType: 'Custom', updatedAt: today(), accounts: template.accounts.map((account, index) => ({ ...account, id: `${id}-account-${index}` })) }];
+                    });
+                  }} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] hover:border-[#007EA7] hover:text-[#007EA7]"><Copy size={15} /></button>
                   <button
                     type="button"
                     aria-label={`Edit ${template.name}`}
@@ -1503,12 +1647,10 @@ export default function GeneralLedgerView({
                     <Pencil size={15} />
                   </button>
                   <RowDeleteButton
-                    variant="plain"
-                    onDelete={() =>
-                      setTemplates((current) =>
-                        current.filter((item) => item.id !== template.id),
-                      )
-                    }
+                    label={`Delete ${template.name}`}
+                    linked={templateIsLinked(template)}
+                    inactive={isInactiveRecord(template)}
+                    onDelete={() => deleteTemplates(new Set([template.id]))}
                   />
                 </span>
               </div>
@@ -1620,6 +1762,11 @@ function TemplateEditor({
             value={value.name}
             onChange={(name) => setValue((current) => ({ ...current, name }))}
           />
+          <Field label="Country" value={value.country ?? ''} onChange={country => setValue(current => ({ ...current, country }))} />
+          <div className="flex flex-col gap-2 font-montserrat text-[14px] font-semibold text-[#10233A]">
+            <span>Template type</span>
+            <SearchableSelect ariaLabel="Template type" value={value.templateType ?? 'Custom'} options={['Standard', 'Non-profit', 'Custom']} onChange={templateType => setValue(current => ({ ...current, templateType }))} />
+          </div>
           <label className="flex flex-col gap-2 font-montserrat text-[14px] font-semibold text-[#10233A]">
             Description
             <textarea
@@ -1775,12 +1922,13 @@ function AccountEditor({
             Account type
             <LedgerDropdown
               value={value.type}
-              options={["Asset", "Liability", "Equity", "Income", "Expense"].map(
+              options={["Asset", "Liability", "Equity", "Income", "Expense", "Receivable", "Payable", "Bank & Cash"].map(
                 (type) => ({ value: type, label: type }),
               )}
               placeholder="Select account type"
               ariaLabel="Account type"
               open={typeOpen}
+              onClose={() => setTypeOpen(false)}
               onToggle={() => {
                 setTypeOpen((current) => !current);
                 setParentOpen(false);
@@ -1795,13 +1943,14 @@ function AccountEditor({
             />
           </label>
           <label className="flex flex-col gap-2 font-montserrat text-[14px] font-semibold text-[#10233A]">
-            Parent DK class
+            Parent DK account
             <LedgerDropdown
               value={value.parentCode ?? ""}
               options={parentOptions}
               placeholder="No parent class"
-              ariaLabel="Parent DK class"
+              ariaLabel="Parent DK account"
               open={parentOpen}
+              onClose={() => setParentOpen(false)}
               onToggle={() => {
                 setParentOpen((current) => !current);
                 setTypeOpen(false);

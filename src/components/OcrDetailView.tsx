@@ -1,8 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import {
   ArrowLeft,
-  X,
-  ChevronDown,
   RefreshCw,
 } from "lucide-react";
 import ColumnSettingsPanel, { type ColConfig } from "./ColumnSettingsPanel";
@@ -17,6 +15,8 @@ import { ResizeHandle, useColumnResize } from "./useColumnResize";
 import ColumnSortButton, { useMultiColumnSort } from "./ColumnSortButton";
 import { usePersistentState } from "../hooks/usePersistentState";
 import SystemAddFilters from "./SystemAddFilters";
+import MultiSelectField from "./MultiSelectField";
+import { isInactiveRecord, isRecordLinked, removeOrDeactivateRecords } from "../lib/recordLifecycle";
 
 const CONFIG_COLUMNS: ColConfig[] = [
   { key: "name", label: "Key", width: 286, visible: true },
@@ -172,10 +172,11 @@ function ConfigParamsTab() {
         {/* Icon actions */}
         <div className="flex flex-row items-center px-[6px] py-[6px] gap-4 bg-white rounded-[4px]">
           <BulkDeleteButton
+            linked={parameters.some(row => selectedIds.has(row.id) && isRecordLinked(row, "finansu-harmonija:v7:ocr-configuration-parameters"))}
             selectedCount={selectedIds.size}
             onDelete={() => {
               setParameters((current) =>
-                current.filter((row) => !selectedIds.has(row.id)),
+                removeOrDeactivateRecords(current, selectedIds, "finansu-harmonija:v7:ocr-configuration-parameters"),
               );
               setSelectedIds(new Set());
             }}
@@ -240,6 +241,7 @@ function ConfigParamsTab() {
           {sortedRows.slice(0, page * TABLE_BATCH_SIZE).map((row, i) => (
             <div
               key={row.id}
+              data-record-inactive={isInactiveRecord(row) || undefined}
               className={`group flex flex-row items-center w-full h-9 rounded-lg transition-colors ${i % 2 === 0 ? "bg-[#F8FDFF]" : "bg-white"} hover:bg-[#E7F4F9]`}
             >
               {visibleColumns.map((column, index) => (
@@ -265,11 +267,13 @@ function ConfigParamsTab() {
               {/* Delete button */}
               <div className="table-row-actions flex flex-shrink-0 items-center p-1">
                 <RowDeleteButton
+                  linked={isRecordLinked(row, "finansu-harmonija:v7:ocr-configuration-parameters")}
+                  inactive={isInactiveRecord(row)}
                   label={`Delete ${row.name}`}
                   className="opacity-0 group-hover:opacity-100"
                   onDelete={() => {
                     setParameters((current) =>
-                      current.filter((item) => item.id !== row.id),
+                      removeOrDeactivateRecords(current, new Set([row.id]), "finansu-harmonija:v7:ocr-configuration-parameters"),
                     );
                     setSelectedIds((current) => {
                       const next = new Set(current);
@@ -349,139 +353,6 @@ function InputField({
   );
 }
 
-function MultiSelectField({
-  label,
-  required,
-  options,
-  value,
-  onChange,
-  placeholder,
-}: {
-  label: string;
-  required?: boolean;
-  options?: string[];
-  value?: string[];
-  onChange?: (v: string[]) => void;
-  placeholder?: string;
-}) {
-  const selected = value ?? [];
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-        setQuery("");
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  const toggleOption = (option: string) => {
-    onChange?.(
-      selected.includes(option)
-        ? selected.filter((item) => item !== option)
-        : [...selected, option],
-    );
-  };
-  const filteredOptions = (options ?? []).filter((option) =>
-    option.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
-  );
-
-  return (
-    <div className="flex flex-col gap-2 w-full" ref={ref}>
-      <span className="font-montserrat font-semibold text-[14px] leading-[140%] text-[#10233A]">
-        {label}
-        {required && <span className="text-[#D64545] ml-0.5">*</span>}
-      </span>
-      <div
-        className={`w-full rounded-lg transition-shadow ${open ? "ring-[3px] ring-[#007EA7]/20" : ""}`}
-      >
-        <div
-          aria-expanded={open}
-          className={`box-border flex min-h-[42px] w-full items-start justify-between gap-2 rounded-lg bg-white p-[9px] text-left transition-colors ${open ? "border border-[#007EA7]" : "border border-[#D3E1EC]"}`}
-        >
-          {selected.length > 0 ? (
-            <span className="flex flex-1 flex-row flex-wrap items-center gap-1">
-              {selected.map((item) => (
-                <span
-                  key={item}
-                  className="flex h-6 items-center gap-0.5 rounded border border-[#E5EDF9] bg-white px-2 py-1"
-                >
-                  <span className="whitespace-nowrap font-montserrat text-[10px] font-medium leading-4 text-[#10233A]">
-                    {item}
-                  </span>
-                  <span
-                    role="button"
-                    aria-label={`Remove ${item}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onChange?.(selected.filter((value) => value !== item));
-                    }}
-                    className="ml-0.5 flex h-4 w-4 items-center justify-center text-[#7288A3] hover:text-[#10233A]"
-                  >
-                    <X size={10} />
-                  </span>
-                </span>
-              ))}
-            </span>
-          ) : null}
-          <input role="combobox" aria-label={`Search ${label.toLowerCase()}`} aria-expanded={open} value={query} placeholder={selected.length ? "" : placeholder ?? "Choose"} onFocus={() => setOpen(true)} onClick={() => setOpen(true)} onChange={(event) => { setQuery(event.target.value); setOpen(true); }} className="min-w-[70px] flex-1 bg-transparent font-montserrat text-[14px] font-medium leading-5 text-[#10233A] outline-none placeholder:text-[#A1B6C6]" />
-          <button type="button" tabIndex={-1} aria-label={`Open ${label.toLowerCase()} options`} onMouseDown={(event) => event.preventDefault()} onClick={() => { setQuery(""); setOpen((current) => !current); }}><ChevronDown
-            size={16}
-            className={`mt-[3px] flex-shrink-0 text-[#7288A3] transition-transform ${open ? "rotate-180" : ""}`}
-          /></button>
-        </div>
-
-        {open && (
-          <div className="mt-1 max-h-[308px] overflow-y-auto rounded-lg border border-[#E5EDF9] bg-white px-3 py-3 shadow-[0_8px_20px_rgba(161,182,198,0.35)]">
-            {filteredOptions.map((option) => {
-              const checked = selected.includes(option);
-              return (
-                <button
-                  key={option}
-                  type="button"
-                  role="checkbox"
-                  aria-checked={checked}
-                  onClick={() => toggleOption(option)}
-                  className="flex h-8 w-full items-center gap-2 rounded px-0 text-left hover:bg-[#F8FDFE]"
-                >
-                  <span
-                    className={`flex h-[20px] w-[20px] flex-shrink-0 items-center justify-center rounded-[6px] border ${checked ? "border-[#007EA7] bg-[#007EA7]" : "border-[#A1B6C6] bg-white"}`}
-                  >
-                    {checked && (
-                      <svg
-                        width="11"
-                        height="9"
-                        viewBox="0 0 11 9"
-                        fill="none"
-                        aria-hidden="true"
-                      >
-                        <path
-                          d="M1 4.5L4 7.5L10 1"
-                          stroke="white"
-                          strokeWidth="1.6"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    )}
-                  </span>
-                  <span className="font-montserrat text-[14px] font-medium leading-5 text-[#7288A3]">
-                    {option}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 function Toggle({
   label,

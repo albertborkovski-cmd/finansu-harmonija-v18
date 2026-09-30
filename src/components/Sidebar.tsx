@@ -5,7 +5,7 @@ import {
   LogOut,
   Home,
   MessageSquare,
-  Bell,
+  ListTodo,
   Settings,
   FolderOpen,
   ChevronDown,
@@ -43,7 +43,7 @@ const mainMenuItems = [
   { id: "uploaded-documents", label: "Uploaded documents", icon: FileUp },
   { id: "dashboard", label: "Companies", icon: Home },
   { id: "messages", label: "Chats", icon: MessageSquare },
-  { id: "notifications", label: "Tasks", icon: Bell },
+  { id: "notifications", label: "Tasks", icon: ListTodo },
   { id: "settings", label: "Settings", icon: Settings, hasDropdown: true },
   { id: "settings-analytics", label: "Analytics", icon: BarChart3 },
   { id: "info", label: "FAQ", icon: FolderOpen },
@@ -71,22 +71,19 @@ const settingsGroups = [
 ];
 
 const settingsCatalogItems: SubMenuItem[] = [
-  { id: "settings-organizations", label: "Organizations settings" },
-  { id: "settings-counterparties", label: "Counterparties" },
+  { id: "settings-organizations", label: "General settings" },
 ];
 
 const organizationReferenceItems: SubMenuItem[] = [
   { id: "settings-general-ledger", label: "General ledger" },
-  { id: "settings-organizations-company-status", label: "Company status" },
   { id: "settings-organizations-tax-country", label: "Tax country" },
   { id: "settings-organizations-legal-form", label: "Legal form" },
   { id: "settings-organizations-base-currency", label: "Base currency" },
-  { id: "settings-organizations-document-type", label: "Document type" },
   { id: "settings-organizations-document-status", label: "Document Status" },
   { id: "settings-organizations-unit", label: "Unit" },
-  { id: "settings-organizations-operation-date-validation", label: "Operation date validation" },
-  { id: "settings-organizations-email", label: "Email templates" },
+  { id: "settings-organizations-operation-date-validation", label: "Period locking" },
   { id: "settings-vat-classifications", label: "VAT classifications" },
+  { id: "settings-administrator", label: "Administrator settings" },
 ];
 
 const ocrSubMenuItems = [
@@ -118,6 +115,7 @@ const allDocumentsSubItems: SubMenuItem[] = [
 
 const adminSubItems: SubMenuItem[] = [
   { id: "ocr-admin-human-task-types", label: "OCR Validation Settings" },
+  { id: "ocr-admin-document-type", label: "Document type" },
   { id: "ocr-admin-activity", label: "Activity Log" },
 ];
 
@@ -147,7 +145,7 @@ function isAdminActive(activeMenu: string) {
 function isSettingsActive(activeMenu: string) {
   return (
     activeMenu === "settings" ||
-    (activeMenu.startsWith("settings-") && activeMenu !== "settings-analytics")
+    (activeMenu.startsWith("settings-") && activeMenu !== "settings-analytics" && activeMenu !== "settings-counterparties")
   );
 }
 
@@ -225,7 +223,7 @@ export default function Sidebar({
   const menuItems = isOcrSection(activeMenu)
     ? ocrSubMenuItems.filter((item) => canViewMenu(item.id))
     : mainMenuItems.filter((item) =>
-        item.id === "settings-analytics"
+        item.id === "settings-analytics" || item.id === "settings-counterparties"
           ? visibleMainMenuIds.includes("settings") && canViewMenu(item.id)
           : visibleMainMenuIds.includes(
               item.id === "global-dashboard" || item.id === "uploaded-documents" ? "dashboard" : item.id,
@@ -239,7 +237,7 @@ export default function Sidebar({
       const target = [
           "settings-internal-roles", "settings-internal-users",
           "settings-external-roles", "settings-external-users",
-          "settings-organizations", "settings-counterparties",
+          "settings-organizations",
           "settings-general-ledger",
         ].find(canViewMenu);
         if (target) {

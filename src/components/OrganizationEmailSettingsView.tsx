@@ -2,6 +2,7 @@ import { TABLE_BATCH_SIZE } from "../lib/tablePaging";
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Pencil, X } from 'lucide-react';
 import ColumnSettingsPanel, { type ColConfig } from './ColumnSettingsPanel';
+import CompanyBreadcrumb from './CompanyBreadcrumb';
 import ColumnSortButton, { useMultiColumnSort } from './ColumnSortButton';
 import { BulkDeleteButton, RowDeleteButton } from './DeleteButtons';
 import HorizontalTableScrollbar from './HorizontalTableScrollbar';
@@ -12,7 +13,9 @@ import { ColumnSettingsButton } from './ScopedActionButtons';
 import SystemAddFilters, { type SystemFilterColumn } from './SystemAddFilters';
 import TablePagination from './TablePagination';
 import { ResizeHandle, useColumnResize } from './useColumnResize';
+import { isInactiveRecord, isRecordLinked, removeOrDeactivateRecords } from '../lib/recordLifecycle';
 import {
+  loadOrganizationEmailHistory,
   loadOrganizationEmailTemplates,
   saveOrganizationEmailTemplates,
   type OrganizationEmailTemplate,
@@ -39,8 +42,9 @@ function templateValue(template: OrganizationEmailTemplate, key: TemplateColumnK
   return template[key];
 }
 
-export default function OrganizationEmailSettingsView() {
-  const [templates, setTemplates] = useState(loadOrganizationEmailTemplates);
+export default function OrganizationEmailSettingsView({ companyName, companyId }: { companyName?: string; companyId?: string } = {}) {
+  const templateStorageKey = `finansu-harmonija:v12:organization-email-templates${companyId ? `:company:${companyId}` : ''}`;
+  const [templates, setTemplates] = useState(() => loadOrganizationEmailTemplates(companyId));
   const [editing, setEditing] = useState<OrganizationEmailTemplate | null>(null);
   const [columns, setColumns] = useState<ColConfig[]>(() => DEFAULT_COLUMNS.map((column) => ({ ...column })));
   const [showColumns, setShowColumns] = useState(false);
@@ -85,18 +89,27 @@ export default function OrganizationEmailSettingsView() {
   }, [currentPage, totalPages]);
 
   const saveTemplate = (template: OrganizationEmailTemplate) => {
+    const savedTemplate = { ...template, inactive: !template.active };
     const next = templates.some((item) => item.id === template.id)
-      ? templates.map((item) => item.id === template.id ? template : item)
-      : [...templates, { ...template, id: crypto.randomUUID() }];
+      ? templates.map((item) => item.id === template.id ? savedTemplate : item)
+      : [...templates, { ...savedTemplate, id: crypto.randomUUID() }];
     setTemplates(next);
-    saveOrganizationEmailTemplates(next);
+    saveOrganizationEmailTemplates(next, companyId);
     setEditing(null);
   };
 
+  const hasTemplateHistory = (template: OrganizationEmailTemplate) => loadOrganizationEmailHistory().some((entry) =>
+    entry.templateName.trim().toLocaleLowerCase() === template.name.trim().toLocaleLowerCase()
+      && entry.language.trim().toLocaleLowerCase() === template.language.trim().toLocaleLowerCase()
+      && (!companyId || entry.organizationId === companyId || (!entry.organizationId
+        && (!companyName || entry.sender.trim().toLocaleLowerCase() === companyName.trim().toLocaleLowerCase()))),
+  );
+  const templateIsLinked = (template: OrganizationEmailTemplate) => hasTemplateHistory(template) || isRecordLinked(template, templateStorageKey);
+
   const deleteTemplate = (id: string) => {
-    const next = templates.filter((template) => template.id !== id);
+    const next = removeOrDeactivateRecords(loadOrganizationEmailTemplates(companyId), new Set([id]), templateStorageKey, undefined, hasTemplateHistory);
     setTemplates(next);
-    saveOrganizationEmailTemplates(next);
+    saveOrganizationEmailTemplates(next, companyId);
     setSelectedIds((current) => {
       const updated = new Set(current);
       updated.delete(id);
@@ -105,16 +118,16 @@ export default function OrganizationEmailSettingsView() {
   };
 
   const deleteSelected = () => {
-    const next = templates.filter((template) => !selectedIds.has(template.id));
+    const next = removeOrDeactivateRecords(loadOrganizationEmailTemplates(companyId), selectedIds, templateStorageKey, undefined, hasTemplateHistory);
     setTemplates(next);
-    saveOrganizationEmailTemplates(next);
+    saveOrganizationEmailTemplates(next, companyId);
     setSelectedIds(new Set());
   };
 
   return (
     <main className="flex h-screen min-w-0 flex-col gap-8 overflow-hidden bg-white py-14" style={{ paddingLeft: 'clamp(24px, 5vw, 72px)', paddingRight: 'clamp(24px, 5vw, 72px)' }}>
       <PageHeader title="Email templates" actions={templates.length > 0 ? <PageActionButton onClick={() => setEditing({ ...EMPTY_TEMPLATE })}>Create new</PageActionButton> : undefined} />
-      <div className="flex items-center gap-2 font-montserrat text-[12px] font-medium text-[#7288A3]"><span>Settings</span><span>/</span><span>Organizations</span><span>/</span><span className="text-[#A1B6C6]">Email templates</span></div>
+      {companyName ? <CompanyBreadcrumb companyName={companyName} items={['Settings', 'Email templates']} /> : <div className="flex items-center gap-2 font-montserrat text-[12px] font-medium text-[#7288A3]"><span>Settings</span><span>/</span><span>General settings</span><span>/</span><span className="text-[#A1B6C6]">Email templates</span></div>}
 
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1" data-native-system-filters="true">
@@ -122,9 +135,9 @@ export default function OrganizationEmailSettingsView() {
           <SystemAddFilters persistenceKey="finansu-harmonija:v12:filters:organization-email-templates" columns={filterColumns} activeKeys={activeFilterKeys} values={filterValues} onActiveKeysChange={(keys) => { setActiveFilterKeys(keys); setCurrentPage(1); }} onValuesChange={(values) => { setFilterValues(values); setCurrentPage(1); }} />
         </div>
         <div className="flex items-center gap-4">
-          <BulkDeleteButton selectedCount={selectedIds.size} onDelete={deleteSelected} />
+          <BulkDeleteButton selectedCount={selectedIds.size} linked={templates.some((template) => selectedIds.has(template.id) && (isInactiveRecord(template) || templateIsLinked(template)))} inactive={selectedIds.size > 0 && templates.filter((template) => selectedIds.has(template.id)).every(isInactiveRecord)} onDelete={deleteSelected} />
           <ColumnSettingsButton onClick={() => setShowColumns(true)} />
-          <RefreshAllButton onRefresh={() => setTemplates(loadOrganizationEmailTemplates())} />
+          <RefreshAllButton onRefresh={() => setTemplates(loadOrganizationEmailTemplates(companyId))} />
         </div>
       </div>
 
@@ -142,14 +155,14 @@ export default function OrganizationEmailSettingsView() {
               const realIndex = columns.findIndex((item) => item.key === column.key);
               return <div key={column.key} style={{ width: column.width }} className="relative flex h-9 flex-shrink-0 items-start gap-1 border-l border-[#D3E1EC] px-3 font-montserrat text-[12px] font-medium leading-[18px] text-[#10233A]"><span className="min-w-0 whitespace-normal">{column.label}</span><ColumnSortButton columnLabel={column.label} direction={directionFor(column.key as TemplateColumnKey)} onDirectionChange={(direction) => changeSort(column.key as TemplateColumnKey, direction)} /><ResizeHandle onMouseDown={(event) => startResize(realIndex, event)} /></div>;
             })}
-            <div className="h-9 flex-shrink-0" style={{ width: ACTION_COLUMN_WIDTH }} />
+            <div className="system-table-row-actions h-9 flex-shrink-0" style={{ width: ACTION_COLUMN_WIDTH }} />
           </div>
 
           <div className="flex flex-col gap-0.5">
-            {displayedTemplates.map((template, index) => <div key={template.id} className={`group flex h-10 items-center rounded-lg font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} hover:bg-[#E7F4F9]`}>
+            {displayedTemplates.map((template, index) => <div key={template.id} data-record-inactive={isInactiveRecord(template)} className={`group flex h-10 items-center rounded-lg font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A] ${index % 2 === 0 ? 'bg-[#F8FDFF]' : 'bg-white'} hover:bg-[#E7F4F9]`}>
               <div className="flex w-[42px] flex-shrink-0 justify-center px-3"><TableCheckbox checked={selectedIds.has(template.id)} label={`Select ${template.name}`} onChange={() => setSelectedIds((current) => { const next = new Set(current); if (next.has(template.id)) next.delete(template.id); else next.add(template.id); return next; })} /></div>
               {visibleColumns.map((column) => <div key={column.key} style={{ width: column.width }} className="flex-shrink-0 overflow-hidden px-3"><span className={`block truncate ${column.key === 'status' && template.active ? 'text-[#0A9F79]' : ''}`} title={String(templateValue(template, column.key as TemplateColumnKey))}>{templateValue(template, column.key as TemplateColumnKey)}</span></div>)}
-              <div className="flex h-full flex-shrink-0 items-center justify-end gap-2 px-2" style={{ width: ACTION_COLUMN_WIDTH }}><button type="button" title="EDIT" aria-label={`EDIT ${template.name}`} onClick={() => setEditing({ ...template })} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] transition-colors hover:border-[#007EA7] hover:text-[#007EA7]"><Pencil size={14} /></button><RowDeleteButton label={`DELETE ${template.name}`} onDelete={() => deleteTemplate(template.id)} /></div>
+              <div className="system-table-row-actions flex h-full flex-shrink-0 items-center justify-end gap-2 px-2" style={{ width: ACTION_COLUMN_WIDTH }}><button type="button" title="EDIT" aria-label={`EDIT ${template.name}`} onClick={() => setEditing({ ...template })} className="flex h-7 w-7 items-center justify-center rounded border-2 border-[#D3E1EC] bg-white text-[#7288A3] transition-colors hover:border-[#007EA7] hover:text-[#007EA7]"><Pencil size={14} /></button><RowDeleteButton label={`DELETE ${template.name}`} linked={templateIsLinked(template)} inactive={isInactiveRecord(template)} onDelete={() => deleteTemplate(template.id)} /></div>
             </div>)}
             {displayedTemplates.length === 0 && <div className="flex min-h-[180px] flex-col items-center justify-center gap-4 text-center"><span className="font-montserrat text-[13px] font-medium text-[#7288A3]">No email templates</span>{templates.length === 0 && <PageActionButton onClick={() => setEditing({ ...EMPTY_TEMPLATE })}>Create new</PageActionButton>}</div>}
           </div>
