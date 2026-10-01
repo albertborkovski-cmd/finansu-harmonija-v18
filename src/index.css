@@ -622,6 +622,14 @@ button.h-4.w-4 :where(svg) {
   color: #10233a;
 }
 
+/* Reconciliation distributes spare space proportionally across its columns.
+ * Intrinsic row widths would distribute different space for every record. */
+.reconciliation-table-layout > [role="row"] {
+  width: 100% !important;
+  min-width: 100% !important;
+  box-sizing: border-box;
+}
+
 /* One typeface across every screen and every native control. Components that
  * previously requested a browser default, sans or monospace face now inherit
  * the same system typography without changing their size, weight or layout. */

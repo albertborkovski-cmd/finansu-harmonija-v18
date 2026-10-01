@@ -124,7 +124,7 @@ export default function ReconciliationTable({ scope, rows, defaultColumns, selec
       </div>
     </div>
     <div ref={scrollRef} style={{ maxHeight: tableHeight, minHeight: Math.min(120, tableHeight) }} className="overflow-auto scrollbar-hide" role="region" aria-label="Reconciliation records" tabIndex={0}>
-      <div role="table" aria-label="Reconciliation records" style={{ minWidth: rowWidth }} className="w-full font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A]">
+      <div role="table" aria-label="Reconciliation records" style={{ minWidth: rowWidth }} className="reconciliation-table-layout w-full font-montserrat text-[12px] font-normal leading-[18px] text-[#10233A]">
         <div role="row" className="system-table-header-row sticky top-0 z-10 mb-1 flex h-9 w-full items-start border-b border-[#E5EDF9] bg-white">
           <div role="columnheader" data-table-header-select="true" className="system-table-select-cell flex h-9 w-[30px] shrink-0 items-start">
             {selectable && <input type="checkbox" aria-label="Select all filtered reconciliation records" checked={allSelected} disabled={!selectableRows.length} onChange={() => setSelected(current => toggleFilteredSelection(current, selectableRows.map(row => row.id)))} className="h-[18px] w-[18px] cursor-pointer rounded border border-[#A1B6C6] accent-[#007EA7]" />}
